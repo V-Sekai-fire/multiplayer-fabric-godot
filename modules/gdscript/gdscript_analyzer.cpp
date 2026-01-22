@@ -2256,7 +2256,7 @@ void GDScriptAnalyzer::resolve_for(GDScriptParser::ForNode *p_for) {
 	GDScriptParser::DataType list_type;
 
 	if (p_for->list) {
-		resolve_node(p_for->list, false);
+		reduce_expression(p_for->list);
 
 		bool is_range = false;
 		if (p_for->list->type == GDScriptParser::Node::CALL) {
@@ -2373,8 +2373,7 @@ void GDScriptAnalyzer::resolve_for(GDScriptParser::ForNode *p_for) {
 }
 
 void GDScriptAnalyzer::resolve_while(GDScriptParser::WhileNode *p_while) {
-	resolve_node(p_while->condition, false);
-
+	reduce_expression(p_while->condition);
 	resolve_suite(p_while->loop);
 	p_while->set_datatype(p_while->loop->get_datatype());
 }
