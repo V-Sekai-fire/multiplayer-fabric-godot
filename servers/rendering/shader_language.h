@@ -1275,6 +1275,7 @@ public:
 
 	String get_error_text();
 	Vector<FilePosition> get_include_positions();
+	CompletionType get_completion_type() const { return completion_type; }
 	int get_error_line();
 
 	ShaderNode *get_shader();
