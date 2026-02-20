@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  post_effects.h                                                        */
+/*  rasterizer_util_gles3.cpp                                             */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,42 +28,25 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#include "rasterizer_util_gles3.h"
 
-#ifdef GLES3_ENABLED
+#include "platform_gl.h"
 
-#include "drivers/gles3/effects/glow.h"
-#include "drivers/gles3/shaders/effects/post.glsl.gen.h"
+bool RasterizerUtilGLES3::gles_over_gl = true;
 
-namespace GLES3 {
+void RasterizerUtilGLES3::clear_depth(float p_depth) {
+#ifdef GL_API_ENABLED
+	if (RasterizerUtilGLES3::is_gles_over_gl()) {
+		glClearDepth(p_depth);
+	}
+#endif // GL_API_ENABLED
+#ifdef GLES_API_ENABLED
+	if (!RasterizerUtilGLES3::is_gles_over_gl()) {
+		glClearDepthf(p_depth);
+	}
+#endif // GLES_API_ENABLED
+}
 
-class PostEffects {
-private:
-	struct Post {
-		PostShaderGLES3 shader;
-		RID shader_version;
-	} post;
-
-	static PostEffects *singleton;
-
-	// Use for full-screen effects. Slightly more efficient than screen_quad as this eliminates pixel overdraw along the diagonal.
-	GLuint screen_triangle = 0;
-	GLuint screen_triangle_array = 0;
-
-	void _draw_screen_triangle();
-
-public:
-	static PostEffects *get_singleton();
-
-	PostEffects();
-	~PostEffects();
-
-	void post_copy(GLuint p_dest_framebuffer, Size2i p_dest_size, GLuint p_source_color,
-			GLuint p_source_depth, bool p_ssao_enabled, int p_ssao_quality_level, float p_ssao_strength, float p_ssao_radius,
-			Size2i p_source_size, float p_luminance_multiplier, const Glow::GLOWLEVEL *p_glow_buffers, float p_glow_intensity,
-			float p_srgb_white, uint32_t p_view = 0, bool p_use_multiview = false, uint64_t p_spec_constants = 0);
-};
-
-} //namespace GLES3
-
-#endif // GLES3_ENABLED
+void RasterizerUtilGLES3::clear_stencil(int32_t p_stencil) {
+	glClearStencil(p_stencil);
+}
