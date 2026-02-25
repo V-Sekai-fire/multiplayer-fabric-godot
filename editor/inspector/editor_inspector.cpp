@@ -32,6 +32,7 @@
 #include "editor_inspector.compat.inc"
 
 #include "core/input/input.h"
+#include "core/object/class_db.h"
 #include "core/os/keyboard.h"
 #include "editor/debugger/editor_debugger_inspector.h"
 #include "editor/doc/doc_tools.h"
