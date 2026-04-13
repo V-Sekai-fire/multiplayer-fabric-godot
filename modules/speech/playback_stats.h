@@ -30,6 +30,10 @@
 
 #pragma once
 
+#include "core/object/class_db.h"
+#include "core/object/ref_counted.h"
+#include "core/variant/dictionary.h"
+
 class PlaybackStats : public RefCounted {
 	GDCLASS(PlaybackStats, RefCounted);
 

@@ -30,7 +30,9 @@
 
 #pragma once
 
+#include "core/object/class_db.h"
 #include "core/object/ref_counted.h"
+#include "core/variant/typed_array.h"
 
 #include "modules/speech/thirdparty/opus/opus/opus.h"
 

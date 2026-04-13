@@ -17,7 +17,7 @@ if env["platform"] in ["macos", "ios", "visionos"]:
     env.Append(LINKFLAGS=["-framework", "Security", "-framework", "CoreFoundation"])
 elif env["platform"] == "windows":
     thirdparty_sources.append("#thirdparty/keychain/src/keychain_win.cpp")
-    env.Append(LINKFLAGS=["advapi32" + env["LIBSUFFIX"]])
+    env.Append(LIBS=["advapi32"])
 elif env["platform"] == "linuxbsd":
     thirdparty_sources.append("#thirdparty/keychain/src/keychain_linux.cpp")
     env_keychain.ParseConfig("pkg-config libsecret-1 --cflags --libs")
