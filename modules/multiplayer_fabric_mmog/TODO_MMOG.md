@@ -3,6 +3,47 @@
 Items are sequenced by risk: each step retires one uncertainty before
 the next begins.
 
+## Next session punch list (execution order)
+
+Use this as the immediate implementation queue before touching lower-risk
+items. Each step is done only when its pass condition is met.
+
+1. Observer HUD anchor fix
+  Move `StatusHUD` under `SpectatorRig/SpringArm3D/Camera3D` and set
+  offsets so text is readable at default camera distance.
+  Pass: launching observer scene shows HUD text pinned to camera and
+  readable while orbiting.
+
+2. Observer position marker
+  Add a simple pulsing mesh marker at observer world position and ensure
+  it updates every frame from authoritative zone position.
+  Pass: marker remains visible during camera motion and crosses zone
+  boundaries without lagging behind the observer.
+
+3. Zone curtain readability pass
+  Raise curtain alpha and add either camera-facing labels or duplicated
+  vertical labels so zone names are readable from top-down and orbit.
+  Pass: all three zone labels are readable from default spawn view and
+  boundary surfaces remain visible at far zoom.
+
+4. Top-down debug camera default
+  Add orthographic top-down mode as startup default, keep orbit mode as
+  a toggle path, and preserve current controls.
+  Pass: boot opens in top-down mode; toggle switches cleanly between
+  top-down and orbit with no control lockups.
+
+5. Burst migration smoke run
+  Run the 3-zone observer smoke test and capture one screenshot in both
+  top-down and orbit modes during the 144-entity crossing burst.
+  Pass: no mass rollback, no duplicate flood, and screenshots clearly
+  show entities crossing zone boundaries.
+
+6. Minimal regression guard
+  Add a short runbook block in this file documenting exact scene,
+  command, and expected visual checks for repeating the smoke run.
+  Pass: another contributor can execute the runbook without guessing
+  hidden setup steps.
+
 ## Fix observer overlays so you can tell what is happening
 
 Previous test session: zone boundaries were hard to read, the observer

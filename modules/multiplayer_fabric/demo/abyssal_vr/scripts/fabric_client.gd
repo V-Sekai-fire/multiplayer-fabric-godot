@@ -25,6 +25,10 @@ const V_SCALE               := 32767.0 / (V_MAX_PHYSICAL * 1.0e-6)  # int16 → 
 const A_SCALE               := 32767.0 / (2.0 * V_MAX_PHYSICAL * 1.0e-6)  # int16 → m/tick²
 const ENTITY_TIMEOUT_FRAMES := 60   # despawn after missed interest updates
 const STROKE_ENTITY_BASE    := 1000000
+const MARKER_OKHSL_H        := 0.095  # orange hue in OKHSL space
+const MARKER_OKHSL_S        := 0.85
+const MARKER_OKHSL_L_BASE   := 0.62
+const MARKER_OKHSL_L_SWING  := 0.10
 
 @export var zone_host: String = "127.0.0.1"
 @export var zone_port: int = 17500
@@ -51,6 +55,8 @@ var _pass_logged: bool = false
 
 @onready var _root: Node3D = get_node(entities_root)
 @onready var _hud: Label3D = get_node_or_null("../StatusHUD") as Label3D
+@onready var _observer_marker: MeshInstance3D = get_node_or_null("../ObserverMarker") as MeshInstance3D
+var _marker_pulse_time: float = 0.0
 
 const JellyfishVisual = preload("res://scripts/jellyfish_visual.gd")
 const WhaleVisual     = preload("res://scripts/whale_visual.gd")
@@ -68,7 +74,7 @@ func _ready() -> void:
 	print("FabricClient: connecting to %s:%d" % [zone_host, zone_port])
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if not _peer:
 		return
 	_peer.poll()  # drive ENet event loop (not set as multiplayer.multiplayer_peer)
@@ -77,6 +83,7 @@ func _process(_delta: float) -> void:
 		if _frame_count % 64 == 1:
 			print("FabricClient: status=%d frame=%d" % [status, _frame_count])
 		_update_hud(status)
+		_update_observer_marker(delta, status)
 		_frame_count += 1
 		return
 
@@ -84,6 +91,7 @@ func _process(_delta: float) -> void:
 	_drain_interest()
 	_cull_stale_entities()
 	_update_hud(status)
+	_update_observer_marker(delta, status)
 
 
 func _update_hud(status: int) -> void:
@@ -95,6 +103,31 @@ func _update_hud(status: int) -> void:
 		status_str, zone_host, zone_port,
 		_entity_nodes.size(), _xing_seen.size(), XING_TOTAL, _snap_count,
 		_frame_count]
+
+
+func _update_observer_marker(delta: float, status: int) -> void:
+	if _observer_marker == null:
+		return
+	if status != MultiplayerPeer.CONNECTION_CONNECTED or not _entity_nodes.has(player_id):
+		_observer_marker.visible = false
+		return
+
+	var observer_node := _entity_nodes[player_id] as Node3D
+	if observer_node == null:
+		_observer_marker.visible = false
+		return
+
+	_marker_pulse_time += delta
+	var pulse := 1.0 + 0.2 * sin(_marker_pulse_time * 5.0)
+	var pulse_l := MARKER_OKHSL_L_BASE + MARKER_OKHSL_L_SWING * sin(_marker_pulse_time * 4.0)
+	var pulse_color := Color.from_ok_hsl(MARKER_OKHSL_H, MARKER_OKHSL_S, pulse_l, 0.95)
+	var marker_mat := _observer_marker.material_override as StandardMaterial3D
+	if marker_mat != null:
+		marker_mat.albedo_color = pulse_color
+		marker_mat.emission = pulse_color
+	_observer_marker.visible = true
+	_observer_marker.global_position = observer_node.global_position + Vector3(0.5, 0.8, 0.0)
+	_observer_marker.scale = Vector3.ONE * pulse
 
 
 func _physics_process(_delta: float) -> void:

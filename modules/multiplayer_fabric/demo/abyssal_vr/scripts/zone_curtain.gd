@@ -15,9 +15,9 @@ const SHROUD_THICKNESS := 0.05   # meters — slab depth (non-zero → manifold)
 @export var zone_count: int = 3
 
 const ZONE_COLORS: Array[Color] = [
-	Color(0.9, 0.3, 0.3, 0.18),   # zone 0 — warm red
-	Color(0.3, 0.9, 0.5, 0.18),   # zone 1 — aqua green
-	Color(0.3, 0.5, 1.0, 0.18),   # zone 2 — deep blue
+	Color(0.9, 0.3, 0.3, 0.34),   # zone 0 — warm red
+	Color(0.3, 0.9, 0.5, 0.34),   # zone 1 — aqua green
+	Color(0.3, 0.5, 1.0, 0.34),   # zone 2 — deep blue
 ]
 
 var _mesh_instances: Array[MeshInstance3D] = []
@@ -42,17 +42,16 @@ func _spawn_zone_labels() -> void:
 		centroid.y = 0.5
 		var label := Label3D.new()
 		label.text = "ZONE %d" % zi
-		label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		label.no_depth_test = true
-		label.fixed_size = false
-		label.pixel_size = 0.03
+		label.fixed_size = true
+		label.pixel_size = 0.006
 		label.font_size = 64
 		label.outline_size = 16
 		label.modulate = ZONE_COLORS[zi % ZONE_COLORS.size()]
 		label.modulate.a = 1.0
 		label.outline_modulate = Color.BLACK
 		label.position = centroid
-		label.rotation_degrees = Vector3(-90, 0, 0)
 		add_child(label)
 
 
