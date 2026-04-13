@@ -4,7 +4,7 @@
 		Headless zone server with entity stepping, ghost-based interest culling, and STAGING migration.
 	</brief_description>
 	<description>
-		Headless [SceneTree] main loop that manages a fixed-size pool of entities partitioned across zones by 30-bit Hilbert code (Skilling 2004). Each zone iterates exactly [code]ZONE_CAPACITY[/code] slots per physics frame regardless of occupancy (constant-work design). Entities that cross zone boundaries migrate via the STAGING protocol: [code]OWNED(A) -> STAGING(A,B) -> OWNED(B)[/code].
+		Headless [SceneTree] main loop that manages a fixed-size pool of entities partitioned across zones by 30-bit Hilbert code (Skilling 2004). Each zone iterates exactly [code]ZONE_CAPACITY[/code] slots per physics frame regardless of occupancy (constant-work design). Entities that cross zone boundaries migrate via the STAGING protocol: [code]OWNED(A) -&gt; STAGING(A,B) -&gt; OWNED(B)[/code].
 		The core broadphase and ghost-expansion algorithms are formally verified in Lean 4 and code-generated into [code]predictive_bvh.h[/code] (R128 64.64 fixed-point, micrometers). All spatial computations go through the R128 bridge at micrometer precision, while entity state uses [code]real_t[/code].
 		Every entity shares a 100-byte snapshot on CH_INTEREST and CH_PLAYER:
 		[codeblock]
@@ -14,7 +14,7 @@
 		Bytes 40--43  hybrid logical clock (24-bit frame | 8-bit sub-counter)
 		Bytes 44--99  payload (14 x u32)
 		[/codeblock]
-		Payload word 0 layout: class tag (bits 24--31), owner/player ID (bits 0--15), state flags (bits 16--23). Class tags: 0 NPC, 1 player, 2 prop, 3 effect, 4 humanoid. Player entities use [code]global_id = PLAYER_ENTITY_BASE + player_id[/code] (2,000,000+) and expire after three seconds without a CH_PLAYER update. Pen-stroke knots use [code]global_id >= STROKE_ENTITY_BASE[/code] (1,000,000+) and pack RGBA8888 color and anchor positions into payload words 4--13. Class-4 humanoid entities extend the same payload region with 55 muscle-triplet bone rotations (swing-twist Vector3 in [code][-1, 1][/code]).
+		Payload word 0 layout: class tag (bits 24--31), owner/player ID (bits 0--15), state flags (bits 16--23). Class tags: 0 NPC, 1 player, 2 prop, 3 effect, 4 humanoid. Player entities use [code]global_id = PLAYER_ENTITY_BASE + player_id[/code] (2,000,000+) and expire after three seconds without a CH_PLAYER update. Pen-stroke knots use [code]global_id &gt;= STROKE_ENTITY_BASE[/code] (1,000,000+) and pack RGBA8888 color and anchor positions into payload words 4--13. Class-4 humanoid entities extend the same payload region with 55 muscle-triplet bone rotations (swing-twist Vector3 in [code][-1, 1][/code]).
 		[b]Zone server mode[/b] (default):
 		[codeblock]
 		godot --headless --main-loop FabricZone -- --zone-id 0 --zone-count 3 --scenario jellyfish_bloom

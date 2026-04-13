@@ -26,11 +26,14 @@
 		</method>
 	</methods>
 	<members>
-		<member name="version" type="int" setter="set_version" getter="get_version" default="1">
-			Format version. Currently [code]1[/code]. Loaders reject snapshots whose version they do not recognize.
+		<member name="accelerations" type="PackedFloat64Array" setter="set_accelerations" getter="get_accelerations" default="PackedFloat64Array()">
+			Interleaved [code]ax, ay, az[/code] per entity. Length equals entity count times 3.
 		</member>
 		<member name="global_ids" type="PackedInt32Array" setter="set_global_ids" getter="get_global_ids" default="PackedInt32Array()">
 			Per-entity global IDs. Length equals the entity count.
+		</member>
+		<member name="payloads" type="PackedInt32Array" setter="set_payloads" getter="get_payloads" default="PackedInt32Array()">
+			14 payload words per entity, interleaved. Length equals entity count times 14. See [FabricZone] for the payload word layout.
 		</member>
 		<member name="positions" type="PackedFloat64Array" setter="set_positions" getter="get_positions" default="PackedFloat64Array()">
 			Interleaved [code]cx, cy, cz[/code] per entity (meters). Length equals entity count times 3.
@@ -38,11 +41,8 @@
 		<member name="velocities" type="PackedFloat64Array" setter="set_velocities" getter="get_velocities" default="PackedFloat64Array()">
 			Interleaved [code]vx, vy, vz[/code] per entity. Length equals entity count times 3.
 		</member>
-		<member name="accelerations" type="PackedFloat64Array" setter="set_accelerations" getter="get_accelerations" default="PackedFloat64Array()">
-			Interleaved [code]ax, ay, az[/code] per entity. Length equals entity count times 3.
-		</member>
-		<member name="payloads" type="PackedInt32Array" setter="set_payloads" getter="get_payloads" default="PackedInt32Array()">
-			14 payload words per entity, interleaved. Length equals entity count times 14. See [FabricZone] for the payload word layout.
+		<member name="version" type="int" setter="set_version" getter="get_version" default="1">
+			Format version. Currently [code]1[/code]. Loaders reject snapshots whose version they do not recognize.
 		</member>
 	</members>
 </class>
