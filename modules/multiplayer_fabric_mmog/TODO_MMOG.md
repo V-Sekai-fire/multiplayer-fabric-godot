@@ -59,6 +59,20 @@ visible, entities populate all three zones, 144-entity burst migrates
 without mass rollback. Then put on the headset and confirm VR
 rendering, head tracking, and hand tracking update in CH_INTEREST.
 
+Three populations stress-test different failure modes:
+
+| Population | IDs | What it tests |
+|---|---|---|
+| `jellyfish_bloom_concert` | 0--255 | Dense crowd at the origin. Players appear alongside NPCs in CH_INTEREST — the concert scenario where everyone sees everyone. |
+| `jellyfish_zone_crossing` | 256--399 | 144 entities burst across a zone boundary simultaneously. This is the worst-case migration spike. |
+| `whale_with_sharks` | 400--511 | 8 pods of 14 at cruising speed. Tests sustained cross-zone movement, not just a spike. |
+
+Pass condition: an observer in Zone B receives all 144 burst entities
+from Zone A without snap, duplicate, or loss. The Predictive BVH
+projects ghost AABBs forward using per-segment velocity so the
+receiving zone pre-allocates slots before the burst finishes arriving.
+`MIGRATION_HEADROOM` (defined in `fabric_zone.h`) absorbs the spike.
+
 **Risk retired:** the demo boots and renders after all recent code
 changes (RTT timeout, static extraction, CSG fix).
 
@@ -121,6 +135,18 @@ CH_PLAYER and CH_INTEREST.
 
 **Risk retired:** the wire format carries player commands faithfully
 across zones.
+
+## Wire pen tool to CH_PLAYER cmd=3
+
+`fabric_client.gd` should emit a CH_PLAYER cmd=3 packet for each
+stroke knot written by the pen tool. The server-side handler route
+mirrors the trident cmd=1 path. Wire the XR controller input event
+to the send call and verify knots appear in the observer's
+CH_INTEREST stream. Bibliography:
+`thirdparty/predictive_bvh/OptimalPartitionBook.md`.
+
+**Risk retired:** the full client-to-zone-to-observer path through
+CH_PLAYER and CH_INTEREST is exercised by both weapon and pen input.
 
 ## Measure CH_INTEREST fan-out at 100 peers
 
