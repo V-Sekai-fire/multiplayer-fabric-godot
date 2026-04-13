@@ -148,67 +148,117 @@ CH_INTEREST stream. Bibliography:
 **Risk retired:** the full client-to-zone-to-observer path through
 CH_PLAYER and CH_INTEREST is exercised by both weapon and pen input.
 
-## Measure CH_INTEREST fan-out at 100 peers
+## Build 100-peer load-test harness
 
-Measure `CH_INTEREST` fan-out latency at 100 simultaneous connected
-peers per zone. First load test; validates that the Hilbert AOI band
-and `local_broadcast_raw` one-copy-per-link relay scale to the concert
-scenario.
+Write a headless driver that spawns 100 `FabricPeer` connections to a
+single zone server and subscribes each to `CH_INTEREST`. The driver
+records the timestamp of every broadcast packet received. No analysis
+yet — just get 100 peers connected and logging.
+
+**Risk retired:** the test infrastructure exists and can be run
+repeatably without VR hardware.
+
+## Measure CH_INTEREST fan-out latency at 100 peers
+
+Run the harness built in the previous step. Record p50/p99 fan-out
+latency for `local_broadcast_raw` at 100 simultaneous subscribers per
+zone. Validates that the Hilbert AOI band and one-copy-per-link relay
+scale to the concert scenario before adding more zones.
 
 **Risk retired:** per-zone fan-out is bounded and measurable before
 scaling to multiple zones.
 
-## Upgrade Uro for asset streaming
+## Add content-addressed chunk store to Uro
 
-Uro is V-Sekai's web backend. Upgrade it to serve content-addressed
-desync chunks so the client can stream world assets on demand instead
-of bundling everything in the export. This is the delivery side of the
-"data sovereignty" claim: operators host their own Uro instance,
-assets are content-addressed and deduplicated, and ReBAC permissions
-control who can fetch what. Without this, the demo ships with baked-in
-assets and the pitch about portable, operator-owned worlds is
-aspirational.
+Add a `/chunks/:hash` endpoint to Uro that accepts PUT (upload) and
+GET (fetch) for binary blobs. Store blobs keyed by their BLAKE3 hash.
+No permissions yet — accept all authenticated requests. This is the
+storage primitive that the next three steps build on.
+
+**Risk retired:** Uro can store and return arbitrary content-addressed
+chunks; the hash round-trip is verified.
+
+## Enforce ReBAC permissions on Uro chunk fetch
+
+Add a ReBAC policy check to the `GET /chunks/:hash` handler: the
+requesting principal must hold a `can_read` relation on the chunk's
+namespace. Reject with 403 otherwise. Operators assign namespaces at
+upload time.
+
+**Risk retired:** operators control who can fetch which assets; the
+data-sovereignty claim is enforced, not aspirational.
+
+## Implement client-side chunk streaming by hash
+
+In the Godot client, replace the baked-in asset bundle load with
+a runtime fetch: given a chunk hash, issue an authenticated GET to
+the Uro `/chunks/:hash` endpoint and deserialize the result. Cache
+fetched chunks on disk by hash to avoid redundant downloads.
+
+**Risk retired:** the client can load world assets at runtime without
+a bundled export.
+
+## End-to-end asset streaming integration test
+
+Upload a test chunk from the demo scene to a local Uro instance, then
+boot the client cold (empty cache) and confirm it fetches and renders
+the chunk by hash. Test both the happy path and a 403 rejection with
+an unauthorized principal.
 
 **Risk retired:** asset streaming works end-to-end through Uro; the
 client fetches chunks by hash at runtime.
 
-## Prove MIGRATION_HEADROOM absorbs the 144-entity burst
+## Audit existing Lean proofs and sketch headroom theorem
 
-CONCEPT_MMOG claims the headroom reserve absorbs the worst-case
-migration spike. Individual ghost containment is proved
-(`ghost_containment_implies_no_exit`) and no-duplication is proved
-(`staging_resolves_to_single_owner`), but there is no theorem proving
-the reserve constant in `fabric_zone.h` is sized to accept 144
-simultaneous arrivals. Add a Lean theorem that the headroom value ≥
-the burst population size.
+Read `ghost_containment_implies_no_exit` and
+`staging_resolves_to_single_owner` in
+`PredictiveBVH/Spatial/HilbertRoundtrip.lean`. Identify the exact
+lemmas the new theorem will depend on. Write the statement:
+`MIGRATION_HEADROOM ≥ MAX_BURST_SIZE` and confirm the constant
+values in `fabric_zone.h` are visible to the Lean build.
+
+**Risk retired:** the theorem is stated correctly and its dependencies
+are known before any proof attempt.
+
+## Write and verify the headroom ≥ burst size Lean theorem
+
+Implement the theorem sketched in the previous step. The proof should
+reduce to a `decide` or `norm_num` call once the constants are in
+scope. Run `lake build` and confirm no sorry placeholders remain.
 
 **Risk retired:** the burst absorption claim in the concept doc is
 formally verified, not just tested.
 
-## Validate Hilbert RDO with AV1-style partition search
+## Verify entity-tight parentBounds RDO quality
 
-The Predictive BVH now uses entity-tight bounds for RDO cost and an
-AV1-style partition search in the E-graph saturator. Three pieces
-need validation:
+`lbvhAux` now sets `parentBounds` to the entity-tight union instead
+of the old Morton octree cell. `evalNodeCost?` uses
+`surfaceArea(parentBounds)` for RDO cost, so this change affects every
+split decision. Run the BVH builder on all three Abyssal VR Grid
+populations and confirm total SAH cost is ≤ the Morton baseline.
 
-- **Entity-tight parentBounds.** `lbvhAux` sets `parentBounds` to
-  the entity-tight union instead of the old (wrong) Morton octree
-  cell. `evalNodeCost?` uses `surfaceArea(parentBounds)` for RDO
-  cost, so this change affects every split decision. Verify that
-  the resulting BVH quality is at least as good as before on the
-  Abyssal VR Grid populations.
-- **Centroid axis selection.** The initial axis is picked by max
-  child centroid separation. This replaces the Morton `depth % 3`
-  convention. Compare axis distributions on the jellyfish and whale
-  populations to confirm the heuristic picks sensible axes.
-- **Saturator axis rewrite.** `saturateAxes` tries `.horz`, `.vert`,
-  and `.depth` variants for each 2-way node and keeps the cheapest.
-  Confirm the saturator converges in ≤ 3 passes on the demo
-  populations and that it finds cheaper partitions than the initial
-  LBVH on at least some subtrees.
+**Risk retired:** entity-tight bounds do not regress BVH quality.
+
+## Validate centroid axis selection heuristic
+
+The initial split axis is now picked by max child centroid separation
+instead of `depth % 3`. Instrument `lbvhAux` to log the chosen axis
+for each node. Run on `jellyfish_bloom_concert` and `whale_with_sharks`
+and confirm the heuristic distributes axes sensibly (not always `.horz`
+or degenerate on flat populations).
+
+**Risk retired:** the centroid axis heuristic picks useful splits on
+real entity distributions.
+
+## Confirm saturator convergence on demo populations
+
+`saturateAxes` tries `.horz`, `.vert`, and `.depth` for each 2-way
+node and keeps the cheapest. Run it on all three populations and
+verify: (a) it converges in ≤ 3 passes, and (b) it finds a cheaper
+partition than the initial LBVH on at least some subtrees.
 
 **Risk retired:** the Hilbert-sorted BVH produces correct and
-competitive RDO cost with the new entity-tight + AV1 partition model.
+competitive RDO cost with the full entity-tight + AV1 partition model.
 
 ## ~~Add UDS zone-to-zone transport~~ DEFERRED
 
@@ -236,11 +286,22 @@ Multiple Instances" covers the multi-process case. Adding editor
 integration is maintenance surface area that breaks across Godot
 versions and solves no current risk.
 
-## Reach 1,000 concurrent players across one fabric
+## Provision 5-machine fabric (32 zones)
 
+Sizing: 1,000 players × 56 entities = 56,000 entities; at 1,800 per
+zone → 32 zones; 7 zones per 8-core machine → 5 machines, 63,000
+capacity, 1,125 players at 12.5% headroom. Provision the machines,
+deploy zone binaries, confirm all 32 zones register with each other
+and show healthy in the observer.
 
-Sizing: 1,000 players x 56 entities = 56,000; at 1,800 per zone,
-32 zones; 7 zones per 8-core machine, 5 machines, 63,000 capacity,
-1,125 players with 12.5% headroom.
+**Risk retired:** the full fabric topology is live and observable
+before load is applied.
+
+## Run 1,000-player load test and record headroom
+
+Drive 1,000 simulated clients against the 32-zone fabric. Record peak
+entity count per zone, p99 migration latency, and headroom margin.
+Pass condition: no zone exceeds 1,800 entities and headroom stays
+above 12.5% throughout the run.
 
 **Risk retired:** the full stack holds under production-scale load.
