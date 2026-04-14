@@ -365,6 +365,53 @@ static inline uint64_t pbvh_accel_floor_um_per_tick2(uint32_t hz) {
 #define PBVH_CURRENT_FUNNEL_PEAK_V_UM_TICK_DEFAULT 3000000LL /* μm/tick */
 
 /* ══════════════════════════════════════════════════════════════════════════
+   EML ADVERSARIAL GAP BOUNDS (C1..C7, R128, e-graph optimized)
+   Source: PredictiveBVH/Spatial/EMLAdversarialHeuristic.lean
+   Constants are baked at PBVH_SIM_TICK_HZ; regenerate after any
+   change to simTickHz in Primitives/Types.lean.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+static inline R128 pbvh_eml_c1_velocity_injection_gap(R128 v_true, R128 delta) {
+    R128 t0 = r128_add(v_true, r128_neg(r128_from_int(500000LL)));
+    R128 t1 = r128_mul(t0, delta);
+    return t1;
+}
+
+static inline R128 pbvh_eml_c2_acceleration_underreport_gap(R128 delta) {
+    R128 t0 = r128_mul(delta, delta);
+    R128 t1 = r128_mul(r128_from_int(1750LL), t0);
+    return t1;
+}
+
+static inline R128 pbvh_eml_c3_portal_discontinuity_gap(R128 jump_um, R128 ghost_bound_um) {
+    R128 t0 = r128_mul(ghost_bound_um, r128_neg(R128_ONE));
+    R128 t1 = r128_add(jump_um, t0);
+    return t1;
+}
+
+static inline R128 pbvh_eml_c4_lifecycle_gap_bound(R128 v) {
+    R128 t0 = r128_mul(v, r128_from_int(2LL));
+    return t0;
+}
+
+static inline R128 pbvh_eml_c5_satellite_rtt_gap(R128 v, R128 local_delta) {
+    R128 t0 = r128_mul(local_delta, r128_neg(R128_ONE));
+    R128 t1 = r128_add(r128_from_int(40LL), t0);
+    R128 t2 = r128_mul(v, t1);
+    return t2;
+}
+
+static inline R128 pbvh_eml_c6_coord_frame_offset_gap() {
+
+    return r128_from_int(1000000000LL);
+}
+
+static inline R128 pbvh_eml_c7_segment_boundary_gap(R128 delta) {
+    R128 t0 = r128_mul(r128_from_int(2500000LL), delta);
+    return t0;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    AMOLEAN E-GRAPH OPTIMIZED KERNELS (R128)
    ══════════════════════════════════════════════════════════════════════════ */
 

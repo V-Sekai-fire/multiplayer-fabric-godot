@@ -6,6 +6,7 @@ import AmoLean.EGraph.Saturate
 import PredictiveBVH.Formulas.Formula
 import PredictiveBVH.Codegen.QuinticHermite
 import PredictiveBVH.Spatial.ScaleContradictions
+import PredictiveBVH.Spatial.EMLAdversarialHeuristic
 import PredictiveBVH.Formulas.Resources
 import AmoLean.Backends.Rust
 
@@ -1178,6 +1179,29 @@ private def constantsC : String :=
   "#define PBVH_ACCEL_FLOOR_DEFAULT " ++ toString aHalfMinForearm ++ "ULL /* μm/tick² */\n" ++
   "#define PBVH_CURRENT_FUNNEL_PEAK_V_UM_TICK_DEFAULT " ++ toString currentFunnelPeakVUmTick ++ "LL /* μm/tick */"
 
+-- ── C: EML adversarial bounds (Lean-proved, e-graph extracted) ──────────────
+-- Each helper returns the formally derived gap bound for an adversarial
+-- scenario (C1..C7). Constants baked into the body come from
+-- PBVH_SIM_TICK_HZ evaluation at codegen time; regenerate this header after
+-- changing simTickHz in Primitives/Types.lean. Source formulas:
+--   PredictiveBVH/Spatial/EMLAdversarialHeuristic.lean
+
+open PredictiveBVH.EML in
+private def emlC : String :=
+  "/* ══════════════════════════════════════════════════════════════════════════\n" ++
+  "   EML ADVERSARIAL GAP BOUNDS (C1..C7, R128, e-graph optimized)\n" ++
+  "   Source: PredictiveBVH/Spatial/EMLAdversarialHeuristic.lean\n" ++
+  "   Constants are baked at PBVH_SIM_TICK_HZ; regenerate after any\n" ++
+  "   change to simTickHz in Primitives/Types.lean.\n" ++
+  "   ══════════════════════════════════════════════════════════════════════════ */\n\n" ++
+  genC "pbvh_eml_c1_velocity_injection_gap"       ["v_true", "delta"]             c1GapFormula ++ "\n\n" ++
+  genC "pbvh_eml_c2_acceleration_underreport_gap" ["delta"]                       c2GapFormula ++ "\n\n" ++
+  genC "pbvh_eml_c3_portal_discontinuity_gap"     ["jump_um", "ghost_bound_um"]   c3GapFormula ++ "\n\n" ++
+  genC "pbvh_eml_c4_lifecycle_gap_bound"          ["v"]                           c4GapFormula ++ "\n\n" ++
+  genC "pbvh_eml_c5_satellite_rtt_gap"            ["v", "local_delta"]            c5GapFormula ++ "\n\n" ++
+  genC "pbvh_eml_c6_coord_frame_offset_gap"       []                              c6GapFormula ++ "\n\n" ++
+  genC "pbvh_eml_c7_segment_boundary_gap"         ["delta"]                       c7GapFormula
+
 -- ── C: Assemble complete header file ────────────────────────────────────────
 
 private def cFile : String :=
@@ -1192,6 +1216,7 @@ private def cFile : String :=
   utilC ++ "\n\n" ++
   hilbertC ++ "\n\n" ++
   constantsC ++ "\n\n" ++
+  emlC ++ "\n\n" ++
   "/* ══════════════════════════════════════════════════════════════════════════\n" ++
   "   AMOLEAN E-GRAPH OPTIMIZED KERNELS (R128)\n" ++
   "   ══════════════════════════════════════════════════════════════════════════ */\n\n" ++

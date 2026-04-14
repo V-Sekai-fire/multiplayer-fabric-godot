@@ -936,6 +936,20 @@ void FabricZone::_send_to_peer_raw(int p_peer_id, int p_channel, const uint8_t *
 void FabricZone::initialize() {
 	SceneTree::initialize();
 
+	// ── EML proof-linkage check (C4 lifecycle gap) ──────────────────────
+	// pbvh_eml_c4_lifecycle_gap_bound(v) is Lean-derived (EMLAdversarialHeuristic.lean)
+	// and equals v * (simTickHz / 10) baked at PBVH_SIM_TICK_HZ. Verify it matches
+	// the ticks*v composition Godot uses for the migration in-flight window. If
+	// simTickHz in Primitives/Types.lean drifts from PBVH_SIM_TICK_HZ at
+	// initialization, this fires in dev builds and the header must be regenerated.
+	{
+		const R128 v_default = r128_from_int(pbvh_v_max_physical_um_per_tick(PBVH_SIM_TICK_HZ));
+		const R128 c4_bound = pbvh_eml_c4_lifecycle_gap_bound(v_default);
+		const R128 latency_r128 = r128_from_int((int64_t)pbvh_latency_ticks(PBVH_SIM_TICK_HZ));
+		const R128 expected = r128_mul(v_default, latency_r128);
+		DEV_ASSERT(r128_eq(c4_bound, expected));
+	}
+
 	// ── Parse optional overrides from command line ──────────────────────
 	// get_cmdline_args()      = args before "--" (engine args, may include zone flags if no "--" separator)
 	// get_cmdline_user_args() = args after  "--" (user args, the conventional way to pass zone flags)
