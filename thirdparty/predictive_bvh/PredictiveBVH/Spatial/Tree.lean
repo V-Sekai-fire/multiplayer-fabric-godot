@@ -422,4 +422,56 @@ theorem enumeratePairs_strictly_ordered (t : PbvhTree) :
         · simpa [hl, halive] using hacc)
   simpa [enumeratePairs] using H
 
+-- ── Tier 1 (structural) ──────────────────────────────────────────────────────
+
+/-- `buildSubtree` always returns, as its second component, the `internals.size`
+    it was called with. That value is captured as `myIdx` before any array
+    mutation, so it's stable across both the base and recursive cases. -/
+theorem buildSubtree_root (leaves : Array PbvhLeaf) (sorted : Array LeafId)
+    (internals : Array PbvhInternal) (lo hi : Nat) :
+    (buildSubtree leaves sorted internals lo hi).2 = internals.size := by
+  unfold buildSubtree
+  split
+  · rfl
+  · -- `dsimp only` zeta-reduces the `have` chain so the returned pair
+    -- literal `(_, internals.size)` is visible; destructuring the `computeMid`
+    -- Subtype match then exposes `.snd = internals.size`.
+    dsimp only
+    obtain ⟨mid, _, _⟩ := computeMid leaves sorted lo hi (by omega)
+    rfl
+
+/-- After `buildSubtree`, the internals array size only grows. Proved by strong
+    induction on the termination measure `hi - lo`. -/
+theorem buildSubtree_size_ge (leaves : Array PbvhLeaf) (sorted : Array LeafId) :
+    ∀ (n : Nat) (internals : Array PbvhInternal) (lo hi : Nat), hi - lo = n →
+      internals.size ≤ (buildSubtree leaves sorted internals lo hi).1.size := by
+  intro n
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+    intro internals lo hi hn
+    unfold buildSubtree
+    split
+    · simp [Array.size_push]
+    · dsimp only
+      obtain ⟨mid, hmlo, hmhi⟩ := computeMid leaves sorted lo hi (by omega)
+      let ph : PbvhInternal :=
+        { bounds := windowBounds leaves sorted lo hi, offset := lo,
+          span := hi - lo, skip := internals.size + 1,
+          left := none, right := none }
+      let state0 := internals.push ph
+      have hstate0 : internals.size ≤ state0.size := by
+        show internals.size ≤ (internals.push ph).size
+        simp [Array.size_push]
+      have hleft_lt : mid - lo < n := by omega
+      have hleft := ih (mid - lo) hleft_lt state0 lo mid rfl
+      have hright_lt : hi - mid < n := by omega
+      have hright := ih (hi - mid) hright_lt
+        (buildSubtree leaves sorted state0 lo mid).1 mid hi rfl
+      show internals.size ≤
+        ((buildSubtree leaves sorted
+            (buildSubtree leaves sorted state0 lo mid).1 mid hi).1.set!
+          internals.size _).size
+      simp
+      omega
+
 end PbvhTree
