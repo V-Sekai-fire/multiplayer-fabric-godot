@@ -201,6 +201,12 @@ public:
 			uint64_t &r_xing_started, uint64_t &r_migrations,
 			LocalVector<Vector<uint8_t>> &r_outbox);
 
+	// Count active-entity pairs (i<j) whose ghost AABBs overlap. Replaces
+	// the formula-based `bvh_pairs` diagnostic with a real broadphase count
+	// backed by pbvh_tree_t. Reports what actually happens this tick, not
+	// a log-based estimate.
+	static int _count_ghost_overlapping_pairs_s(const EntitySlot *p_slots, int p_capacity);
+
 	// ── Scenario enum ───────────────────────────────────────────────────
 	enum Scenario {
 		SCENARIO_DEFAULT,

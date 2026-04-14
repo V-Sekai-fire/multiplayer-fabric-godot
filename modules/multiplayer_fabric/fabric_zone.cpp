@@ -32,6 +32,8 @@
 
 #include "fabric_snapshot.h"
 
+#include <thirdparty/predictive_bvh/predictive_bvh_tree.h>
+
 #include "core/config/engine.h"
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
@@ -2100,16 +2102,11 @@ bool FabricZone::physics_process(double p_time) {
 		uint64_t avg_sync = total_sync_us / tick;
 		int ent_count = entity_count;
 		uint64_t ns_per_ent = ent_count > 0 ? (avg_compute * 1000) / ent_count : 0;
-		// Broadphase pair counts: naive O(N^2) vs BVH O(N*log(N)/(2*delta))
+		// Broadphase pair counts: naive O(N^2) upper bound vs measured ghost
+		// overlaps via pbvh_tree_t. bvh_pairs is the real count this tick,
+		// not a formula estimate.
 		uint64_t naive_pairs = (uint64_t)ent_count * ((uint64_t)ent_count - 1) / 2;
-		uint32_t log2n = 0;
-		{
-			uint32_t tmp = (uint32_t)ent_count + 1;
-			while (tmp >>= 1) {
-				log2n++;
-			}
-		}
-		uint64_t bvh_pairs = (uint64_t)ent_count * log2n / 40; // /2*delta, delta~20
+		uint64_t bvh_pairs = (uint64_t)_count_ghost_overlapping_pairs_s(slots, _zone_capacity);
 		// mspf: measured compute time in ms per physics tick.
 		double mspf = (double)avg_compute * 0.001;
 		print_line(vformat("[zone %d %s] tick %d cap=%d ents=%d mig=%d resnaps=%d mspf=%.2f compute=%d us/tick sync=%d us/tick (%d ns/ent) naive_pairs=%d bvh_pairs=%d xing_start=%d xing_done=%d xing_in=%d",
@@ -2186,6 +2183,59 @@ bool FabricZone::physics_process(double p_time) {
 	}
 
 	return false; // Don't quit.
+}
+
+// ── Broadphase diagnostic ───────────────────────────────────────────────────
+
+namespace {
+struct GhostPairCB {
+	pbvh_eclass_id_t self_id = 0;
+	int matches = 0;
+};
+
+int _ghost_pair_cb(pbvh_eclass_id_t other, void *ud) {
+	GhostPairCB *cb = (GhostPairCB *)ud;
+	if (other > cb->self_id) { // (i<j) convention — each unordered pair counted once
+		cb->matches++;
+	}
+	return 0;
+}
+} // namespace
+
+int FabricZone::_count_ghost_overlapping_pairs_s(const EntitySlot *p_slots, int p_capacity) {
+	if (p_capacity <= 0) {
+		return 0;
+	}
+	Vector<pbvh_node_t> storage;
+	storage.resize(p_capacity);
+	pbvh_tree_t tree = {};
+	tree.nodes = storage.ptrw();
+	tree.capacity = (uint32_t)storage.size();
+	tree.root = PBVH_NULL_NODE;
+	tree.free_head = PBVH_NULL_NODE;
+
+	// Pass 1: insert every active slot's ghost AABB, keyed by slot index.
+	for (int i = 0; i < p_capacity; i++) {
+		if (!p_slots[i].active) {
+			continue;
+		}
+		Aabb g = _ghost_aabb_from_snap(p_slots[i].snap);
+		pbvh_tree_insert(&tree, (pbvh_eclass_id_t)i, g);
+	}
+
+	// Pass 2: query each active slot's ghost AABB, count (i<j) overlaps.
+	int pairs = 0;
+	for (int i = 0; i < p_capacity; i++) {
+		if (!p_slots[i].active) {
+			continue;
+		}
+		Aabb g = _ghost_aabb_from_snap(p_slots[i].snap);
+		GhostPairCB cb;
+		cb.self_id = (pbvh_eclass_id_t)i;
+		pbvh_tree_aabb_query(&tree, &g, _ghost_pair_cb, &cb);
+		pairs += cb.matches;
+	}
+	return pairs;
 }
 
 // ── Migration sub-routines (public static for testability) ──────────────────

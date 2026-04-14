@@ -521,6 +521,41 @@ TEST_CASE("[FabricZone][Migration] outbound budget queues excess entities across
 	CHECK_MESSAGE(total_sent == 120, vformat("Total sent should be 120, got %d", total_sent));
 }
 
+TEST_CASE("[FabricZone][Broadphase] ghost-overlapping-pairs count matches brute force") {
+	ZoneState za;
+	za.alloc();
+
+	// 8 active entities, all stacked at the origin with identical ghost
+	// snaps. Every ghost AABB is identical → every (i<j) pair overlaps →
+	// 8*7/2 = 28 pairs. Velocities + ticks_since_snap make each AABB non-
+	// degenerate so the interest-publish degeneracy filter (max==min) at
+	// fabric_zone.cpp:2137 doesn't apply; the broadphase sees real boxes.
+	constexpr int N = 8;
+	for (int i = 0; i < N; i++) {
+		za.slots[i].active = true;
+		za.slots[i].entity.global_id = i;
+		za.slots[i].entity.cx = 0.0;
+		za.slots[i].entity.cy = 0.0;
+		za.slots[i].entity.cz = 0.0;
+		za.slots[i].snap.cx = 0.0;
+		za.slots[i].snap.cy = 0.0;
+		za.slots[i].snap.cz = 0.0;
+		za.slots[i].snap.vx = 1.0;
+		za.slots[i].snap.vy = 1.0;
+		za.slots[i].snap.vz = 1.0;
+		za.slots[i].snap.max_ahx = 0.1;
+		za.slots[i].snap.max_ahy = 0.1;
+		za.slots[i].snap.max_ahz = 0.1;
+		za.slots[i].snap.ticks_since_snap = 2;
+		za.entity_count++;
+	}
+
+	const int pairs = FabricZone::_count_ghost_overlapping_pairs_s(za.slots, za.capacity);
+	const int expected = N * (N - 1) / 2;
+	CHECK_MESSAGE(pairs == expected,
+			vformat("Expected %d overlapping ghost pairs (all %d entities co-located), got %d", expected, N, pairs));
+}
+
 } // namespace TestFabricZone
 
 #endif // MODULE_MULTIPLAYER_FABRIC_ENABLED
