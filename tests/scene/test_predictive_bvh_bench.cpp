@@ -351,6 +351,48 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_aabb_query_h matches linear scan, p
 					(int)total_visits_linear, (int)total_visits_h));
 }
 
+TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_remove hides leaf from query_h without rebuild") {
+	constexpr uint32_t N = 32;
+	Vector<FloatLeaf> floats;
+	Vector<R128Leaf> r128s;
+	generate_dataset(N, 0xBADF00Dull, floats, r128s);
+
+	Vector<pbvh_node_t> storage;
+	storage.resize(N + 8);
+	Vector<pbvh_node_id_t> sorted;
+	sorted.resize(N + 8);
+	pbvh_tree_t tree = {};
+	tree.nodes = storage.ptrw();
+	tree.capacity = storage.size();
+	tree.root = PBVH_NULL_NODE;
+	tree.free_head = PBVH_NULL_NODE;
+	tree.sorted = sorted.ptrw();
+
+	LocalVector<pbvh_node_id_t> ids;
+	ids.resize(N);
+	for (uint32_t i = 0; i < N; i++) {
+		ids[i] = pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i, r128s[i].box, r128s[i].hilbert);
+	}
+	pbvh_tree_build(&tree);
+
+	// Remove leaf 0 WITHOUT rebuilding. A correct h-query must not surface
+	// the dead eclass even though its slot still occupies sorted[].
+	pbvh_tree_remove(&tree, ids[0]);
+
+	Vector<uint32_t> hits;
+	struct C {
+		Vector<uint32_t> *out = nullptr;
+	} c;
+	c.out = &hits;
+	pbvh_tree_aabb_query_h(&tree, &r128s[0].box, r128s[0].hilbert, 6,
+			[](pbvh_eclass_id_t id, void *ud) {
+				((C *)ud)->out->push_back((uint32_t)id);
+				return 0;
+			}, &c);
+	CHECK_MESSAGE(!hits.has(0u),
+			vformat("h-query returned the removed eclass id 0 (stale sorted[] entry); hits=%d", hits.size()));
+}
+
 } // namespace TestPredictiveBVHBench
 
 #endif // MODULE_MULTIPLAYER_FABRIC_ENABLED

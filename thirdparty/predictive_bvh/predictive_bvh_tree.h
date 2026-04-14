@@ -173,6 +173,9 @@ static inline void pbvh_tree_aabb_query_h(pbvh_tree_t *t, const Aabb *query,
 	uint32_t visits = 0u;
 	for (uint32_t i = lo; i < hi; i++) {
 		const pbvh_node_t *node = &t->nodes[t->sorted[i]];
+		if (!node->is_leaf) {
+			continue; // dead leaf — caller mutated without rebuilding
+		}
 		visits++;
 		if (aabb_overlaps(&node->bounds, query)) {
 			if (cb(node->eclass, ud) != 0) {
