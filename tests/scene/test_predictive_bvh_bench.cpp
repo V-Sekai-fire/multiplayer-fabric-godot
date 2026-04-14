@@ -512,6 +512,112 @@ TEST_CASE("[PredictiveBVH][NestedSet] pbvh_tree_aabb_query_n matches linear scan
 					(int)total_visits_linear, (int)total_visits_n));
 }
 
+TEST_CASE("[PredictiveBVH][Refit] pbvh_tree_refit agrees with full rebuild for in-cell perturbation") {
+	constexpr uint32_t N = 1024;
+	Vector<FloatLeaf> floats;
+	Vector<R128Leaf> r128s;
+	generate_dataset(N, 0xCAFEBABEull, floats, r128s);
+
+	Vector<pbvh_node_t> storage;
+	storage.resize(N + 8);
+	Vector<pbvh_node_id_t> sorted;
+	sorted.resize(N + 8);
+	Vector<pbvh_internal_t> internals;
+	internals.resize(2 * (N + 8));
+
+	pbvh_tree_t tree = {};
+	tree.nodes = storage.ptrw();
+	tree.capacity = storage.size();
+	tree.root = PBVH_NULL_NODE;
+	tree.free_head = PBVH_NULL_NODE;
+	tree.sorted = sorted.ptrw();
+	tree.internals = internals.ptrw();
+	tree.internal_capacity = internals.size();
+	tree.internal_root = PBVH_NULL_NODE;
+
+	for (uint32_t i = 0; i < N; i++) {
+		pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i, r128s[i].box, r128s[i].hilbert);
+	}
+	pbvh_tree_build(&tree);
+
+	// Perturb bounds by less than one Hilbert cell so hilbert codes stay stable.
+	// Bucket-cell size at HILBERT_PREFIX_BITS=6 is (2*BENCH_BOUND)/2^2 = 7.5 m;
+	// BENCH_EXTENT is 10 cm, so a 1 cm jitter keeps every leaf in-cell.
+	XorShift rng(0x1234ull);
+	for (uint32_t i = 0; i < N; i++) {
+		const float dx = rng.uniform(-0.01f, 0.01f);
+		const float dy = rng.uniform(-0.01f, 0.01f);
+		const float dz = rng.uniform(-0.01f, 0.01f);
+		AABB moved = floats[i].box;
+		moved.position += Vector3(dx, dy, dz);
+		floats.write[i].box = moved;
+		Aabb rb = aabb_from_floats(
+				moved.position.x, moved.position.x + moved.size.x,
+				moved.position.y, moved.position.y + moved.size.y,
+				moved.position.z, moved.position.z + moved.size.z);
+		r128s.write[i].box = rb;
+		pbvh_tree_update(&tree, (pbvh_node_id_t)i, rb);
+	}
+
+	const uint64_t t_refit0 = OS::get_singleton()->get_ticks_usec();
+	pbvh_tree_refit(&tree);
+	const uint64_t t_refit = OS::get_singleton()->get_ticks_usec() - t_refit0;
+
+	// Gold tree: full rebuild over the same perturbed dataset.
+	Vector<pbvh_node_t> gold_storage;
+	gold_storage.resize(N + 8);
+	Vector<pbvh_node_id_t> gold_sorted;
+	gold_sorted.resize(N + 8);
+	Vector<pbvh_internal_t> gold_internals;
+	gold_internals.resize(2 * (N + 8));
+	pbvh_tree_t gold = {};
+	gold.nodes = gold_storage.ptrw();
+	gold.capacity = gold_storage.size();
+	gold.root = PBVH_NULL_NODE;
+	gold.free_head = PBVH_NULL_NODE;
+	gold.sorted = gold_sorted.ptrw();
+	gold.internals = gold_internals.ptrw();
+	gold.internal_capacity = gold_internals.size();
+	gold.internal_root = PBVH_NULL_NODE;
+	for (uint32_t i = 0; i < N; i++) {
+		pbvh_tree_insert_h(&gold, (pbvh_eclass_id_t)i, r128s[i].box, r128s[i].hilbert);
+	}
+	const uint64_t t_build0 = OS::get_singleton()->get_ticks_usec();
+	pbvh_tree_build(&gold);
+	const uint64_t t_build = OS::get_singleton()->get_ticks_usec() - t_build0;
+
+	// Query correctness: refit tree answers must match the full-rebuild tree.
+	for (uint32_t i = 0; i < N; i++) {
+		Vector<uint32_t> refit_hits, gold_hits;
+		struct C {
+			Vector<uint32_t> *out = nullptr;
+		} rc, gc;
+		rc.out = &refit_hits;
+		gc.out = &gold_hits;
+		pbvh_tree_aabb_query_n(&tree, &r128s[i].box,
+				[](pbvh_eclass_id_t id, void *ud) {
+					((C *)ud)->out->push_back((uint32_t)id);
+					return 0;
+				}, &rc);
+		pbvh_tree_aabb_query_n(&gold, &r128s[i].box,
+				[](pbvh_eclass_id_t id, void *ud) {
+					((C *)ud)->out->push_back((uint32_t)id);
+					return 0;
+				}, &gc);
+		refit_hits.sort();
+		gold_hits.sort();
+		CHECK_MESSAGE(refit_hits == gold_hits,
+				vformat("refit vs full-rebuild hit mismatch at i=%d: refit=%d gold=%d",
+						i, refit_hits.size(), gold_hits.size()));
+	}
+
+	print_line(vformat("[refit N=%d] refit=%d us  full build=%d us  ratio=%.2fx",
+			N, (int)t_refit, (int)t_build,
+			t_build > 0 ? (double)t_build / (double)t_refit : 0.0));
+	CHECK_MESSAGE(t_refit <= t_build,
+			vformat("refit must be no slower than full build: refit=%d us build=%d us", (int)t_refit, (int)t_build));
+}
+
 } // namespace TestPredictiveBVHBench
 
 #endif // MODULE_MULTIPLAYER_FABRIC_ENABLED

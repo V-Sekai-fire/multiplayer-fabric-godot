@@ -192,6 +192,46 @@ static inline void pbvh_build_bucket_dir_(pbvh_tree_t *t) {
 \t * codes) land past the last bucket — those queries must fall back to _n. */
 }
 
+/* Phase 2c refit-only fast path. Caller guarantees that no dirty leaf has
+ * changed bucket (hilbert prefix at bucket_bits stable), so sorted[] order
+ * and internals[] topology stay valid — only bounds need re-unioning.
+ *
+ * Walks internals[] bottom-up in reverse DFS order: leaf-range nodes
+ * refit from sorted[offset..offset+span), inner nodes union their two
+ * children's already-refit bounds. Runs in O(internal_count), but every
+ * pass is sequential memory reads over a contiguous array — cache-friendly
+ * and free of sort/rebuild churn. When the dirty set is sparse relative
+ * to N, this is the frame-budget win vs pbvh_tree_build. */
+static inline void pbvh_tree_refit(pbvh_tree_t *t) {
+\tif (t->internal_count == 0u) {
+\t\treturn;
+\t}
+\tuint32_t idx = t->internal_count;
+\twhile (idx > 0u) {
+\t\tidx--;
+\t\tpbvh_internal_t *n = &t->internals[idx];
+\t\tif (n->left == PBVH_NULL_NODE && n->right == PBVH_NULL_NODE) {
+\t\t\tconst uint32_t o = n->offset;
+\t\t\tconst uint32_t s = n->span;
+\t\t\tif (s == 0u) {
+\t\t\t\tcontinue;
+\t\t\t}
+\t\t\tAabb acc = t->nodes[t->sorted[o]].bounds;
+\t\t\tfor (uint32_t j = o + 1u; j < o + s; j++) {
+\t\t\t\tacc = aabb_union(&acc, &t->nodes[t->sorted[j]].bounds);
+\t\t\t}
+\t\t\tn->bounds = acc;
+\t\t} else if (n->left != PBVH_NULL_NODE && n->right != PBVH_NULL_NODE) {
+\t\t\tn->bounds = aabb_union(&t->internals[n->left].bounds,
+\t\t\t\t\t&t->internals[n->right].bounds);
+\t\t} else {
+\t\t\tconst pbvh_internal_id_t only =
+\t\t\t\t\t(n->left != PBVH_NULL_NODE) ? n->left : n->right;
+\t\t\tn->bounds = t->internals[only].bounds;
+\t\t}
+\t}
+}
+
 /* Insertion sort sorted[] by hilbert, then build the internal tree and
  * (if provided) the bucket directory. O(N) on near-sorted input. */
 static inline void pbvh_tree_build(pbvh_tree_t *t) {
