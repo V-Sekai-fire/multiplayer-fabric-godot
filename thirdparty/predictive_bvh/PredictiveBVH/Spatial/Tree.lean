@@ -136,43 +136,67 @@ private def windowBounds
       let lb := (leaves[sorted[lo + j + 1]!]?.map (·.bounds)).getD acc
       unionBounds acc lb) init
 
+/-- Compute the split point `mid` with `lo < mid < hi`. Prefers the Hilbert
+    prefix split; falls back to the window midpoint when the prefix fails to
+    partition. The returned subtype carries the `lo < mid ∧ mid < hi` proof
+    that `buildSubtree` needs for its termination measure to strictly decrease
+    in both recursive calls. -/
+private def computeMid
+    (leaves : Array PbvhLeaf) (sorted : Array LeafId) (lo hi : Nat)
+    (h : lo + 2 ≤ hi) : { m : Nat // lo < m ∧ m < hi } :=
+  -- Median fallback: `lo + (hi - lo) / 2`. When `hi - lo ≥ 2`, the midpoint
+  -- strictly separates the window — used both as the default and whenever
+  -- the Hilbert-prefix split degenerates.
+  let median : Nat := lo + (hi - lo) / 2
+  have hmed_lo : lo < median := by
+    have hdiff : 2 ≤ hi - lo := by omega
+    have hhalf : 1 ≤ (hi - lo) / 2 := Nat.le_div_iff_mul_le (by decide) |>.mpr (by omega)
+    omega
+  have hmed_hi : median < hi := by
+    have hdiff : 0 < hi - lo := by omega
+    have hhalf : (hi - lo) / 2 < hi - lo := Nat.div_lt_self hdiff (by decide)
+    omega
+  let hlo := (leaves[sorted[lo]!]?.map (·.hilbert)).getD 0
+  let hhi := (leaves[sorted[hi - 1]!]?.map (·.hilbert)).getD 0
+  if hlo == hhi then
+    ⟨median, hmed_lo, hmed_hi⟩
+  else
+    let xor := hlo ^^^ hhi
+    let depth := clz30 xor
+    let mask : Nat := 1 <<< (29 - depth)
+    -- First index in (lo, hi) whose hilbert has the split bit set; default hi.
+    let m := (List.range (hi - lo - 1)).foldl (fun acc j =>
+      let k := lo + 1 + j
+      let hk := (leaves[sorted[k]!]?.map (·.hilbert)).getD 0
+      if hk &&& mask != 0 && acc == hi then k else acc) hi
+    if h1 : lo < m ∧ m < hi then ⟨m, h1⟩
+    else ⟨median, hmed_lo, hmed_hi⟩
+
 /-- Recursive builder: returns the updated internals array plus the root
     index for this subtree. Splits on Hilbert prefix when possible, else
-    falls back to median. Fuel bounds recursion depth. -/
-private partial def buildSubtree
+    falls back to median. Termination: `hi - lo` strictly decreases in both
+    recursive calls because `computeMid` returns `lo < mid < hi`. -/
+private def buildSubtree
     (leaves : Array PbvhLeaf) (sorted : Array LeafId)
     (internals : Array PbvhInternal)
     (lo hi : Nat) : Array PbvhInternal × InternalId :=
   let bounds := windowBounds leaves sorted lo hi
-  if hi - lo ≤ 1 then
+  if hle : hi - lo ≤ 1 then
     let leaf : PbvhInternal :=
       { bounds, offset := lo, span := hi - lo, skip := internals.size + 1,
         left := none, right := none }
     (internals.push leaf, internals.size)
   else
-    -- Hilbert prefix split on the highest bit that differs between window ends.
+    have hgt : lo + 2 ≤ hi := by omega
     let myIdx := internals.size
     -- Placeholder; fixed up after children built.
     let placeholder : PbvhInternal :=
       { bounds, offset := lo, span := hi - lo, skip := myIdx + 1,
         left := none, right := none }
     let internals := internals.push placeholder
-    let hlo := (leaves[sorted[lo]!]?.map (·.hilbert)).getD 0
-    let hhi := (leaves[sorted[hi - 1]!]?.map (·.hilbert)).getD 0
-    let mid :=
-      if hlo == hhi then
-        lo + (hi - lo) / 2
-      else
-        let xor := hlo ^^^ hhi
-        let depth := clz30 xor
-        let mask : Nat := 1 <<< (29 - depth)
-        -- First index in (lo, hi) whose hilbert has the split bit set.
-        -- Fold over the window, taking the minimum such index; default to hi.
-        let m := (List.range (hi - lo - 1)).foldl (fun acc j =>
-          let k := lo + 1 + j
-          let hk := (leaves[sorted[k]!]?.map (·.hilbert)).getD 0
-          if hk &&& mask != 0 && acc == hi then k else acc) hi
-        if m ≤ lo || m ≥ hi then lo + (hi - lo) / 2 else m
+    let ⟨mid, hmid_lo, hmid_hi⟩ := computeMid leaves sorted lo hi hgt
+    have hleft : mid - lo < hi - lo := by omega
+    have hright : hi - mid < hi - lo := by omega
     let (internals, leftIdx) := buildSubtree leaves sorted internals lo mid
     let (internals, rightIdx) := buildSubtree leaves sorted internals mid hi
     -- Patch our node with children and correct skip pointer.
@@ -181,6 +205,7 @@ private partial def buildSubtree
         skip := internals.size,
         left := some leftIdx, right := some rightIdx }
     (internals.set! myIdx updated, myIdx)
+  termination_by hi - lo
 
 /-- Rebuild the sorted-by-Hilbert view and the internals tree. Leaves remain
     in place; `alive` flags are untouched. Bucket directory is left empty
@@ -200,33 +225,46 @@ def build (t : PbvhTree) : PbvhTree :=
 -- ── Queries ──────────────────────────────────────────────────────────────────
 
 /-- Iterative skip-pointer descent. Returns every live leaf eclass whose
-    bounds overlap `query`. Emits in pre-order DFS order. -/
+    bounds overlap `query`. Emits in pre-order DFS order. Terminates on
+    `end_ - i`: each step either advances `i` by one or jumps forward via
+    the skip pointer. A defensive clamp `clampedNext` guarantees the next
+    index is strictly greater than `i` and at most `end_`, so the measure
+    decreases even before `skip_equals_dfs_next` is proved. -/
 def aabbQueryN (t : PbvhTree) (query : BoundingBox) : List EClassId :=
   if t.internals.isEmpty then []
   else
     let end_ := t.internals.size
-    let rec go (i : Nat) (acc : List EClassId) (fuel : Nat) : List EClassId :=
-      match fuel with
-      | 0 => acc.reverse
-      | fuel' + 1 =>
-        if i ≥ end_ then acc.reverse
+    -- Ensure `next > i ∧ next ≤ end_` so `end_ - next < end_ - i`.
+    let clampedNext (i skip : Nat) : Nat :=
+      if h : i < skip ∧ skip ≤ end_ then skip else i + 1
+    let rec go (i : Nat) (acc : List EClassId) : List EClassId :=
+      if hlt : i ≥ end_ then acc.reverse
+      else
+        let n := t.internals[i]!
+        let next := clampedNext i n.skip
+        have hnext_lt : end_ - next < end_ - i := by
+          have hi : i < end_ := by omega
+          show end_ - (if _ : i < n.skip ∧ n.skip ≤ end_ then n.skip else i + 1) < end_ - i
+          split <;> rename_i h <;> omega
+        if ¬ aabbOverlapsDec n.bounds query then
+          go next acc
+        else if n.left.isNone && n.right.isNone then
+          -- Leaf block: scan the (offset, span) window in `sorted`.
+          let acc := (List.range n.span).foldl (fun acc j =>
+            let lid := t.sorted[n.offset + j]!
+            match t.leaves[lid]? with
+            | some l =>
+              if l.alive && aabbOverlapsDec l.bounds query then
+                l.eclass :: acc else acc
+            | none => acc) acc
+          go next acc
         else
-          let n := t.internals[i]!
-          if ¬ aabbOverlapsDec n.bounds query then
-            go n.skip acc fuel'
-          else if n.left.isNone && n.right.isNone then
-            -- Leaf block: scan the (offset, span) window in `sorted`.
-            let acc := (List.range n.span).foldl (fun acc j =>
-              let lid := t.sorted[n.offset + j]!
-              match t.leaves[lid]? with
-              | some l =>
-                if l.alive && aabbOverlapsDec l.bounds query then
-                  l.eclass :: acc else acc
-              | none => acc) acc
-            go n.skip acc fuel'
-          else
-            go (i + 1) acc fuel'
-    go (t.internalRoot.getD 0) [] (2 * t.internals.size + 1)
+          have hinc : end_ - (i + 1) < end_ - i := by
+            have hi : i < end_ := by omega
+            omega
+          go (i + 1) acc
+    termination_by t.internals.size - i
+    go (t.internalRoot.getD 0) []
 
 /-- Enumerate all overlapping live-leaf pairs as `(a, b)` with `a < b` by
     EClassId. Eclass-style broadphase: no pointers, no per-slot callback. -/
