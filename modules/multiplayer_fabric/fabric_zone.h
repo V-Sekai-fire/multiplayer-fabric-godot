@@ -98,14 +98,14 @@ public:
 		//   payload[4..7] = game-mode payload — health/ammo, animation state, item IDs, blendshapes…
 		//
 		// ── Abyssal VR Grid (CONCEPT.md) concrete layout ───────────────────
-		//   jellyfish_bloom (global_id 0–255):
-		//     payload[0] = class=0 | owner_id=server | bloom_phase(8b)
+		//   concert (global_id 0–255):
+		//     payload[0] = class=0 | owner_id=server | beat_phase(8b)
 		//     payload[1] = kick_timer(16b) | reserved
-		//   jellyfish_zone_crossing (global_id 256–399):
+		//   choke_point (global_id 256–399):
 		//     payload[0] = class=1 | owner_id=server | crossing_flags(8b)
 		//     payload[1] = group_id(4b) | waypoint_idx(6b) | reserved
-		//   whale_with_sharks (global_id 400–511):
-		//     payload[0] = class=2 | owner_id=server | is_whale(1b)|pod_id(7b)
+		//   convoy (global_id 400–511):
+		//     payload[0] = class=2 | owner_id=server | is_lead_cabin(1b)|vehicle_id(7b)
 		//     payload[1] = slot_idx(4b) | reserved
 		//   pen stroke knots (global_id >= STROKE_ENTITY_BASE):
 		//     payload[0] = class=3 | owner_id=player_id | reserved
@@ -204,10 +204,10 @@ public:
 	// ── Scenario enum ───────────────────────────────────────────────────
 	enum Scenario {
 		SCENARIO_DEFAULT,
-		SCENARIO_JELLYFISH_BLOOM,
-		SCENARIO_JELLYFISH_ZONE_CROSSING,
-		SCENARIO_WHALE_WITH_SHARKS,
-		SCENARIO_CURRENT_FUNNEL,
+		SCENARIO_CONCERT,
+		SCENARIO_CHOKE_POINT,
+		SCENARIO_CONVOY,
+		SCENARIO_RAGDOLL,
 		SCENARIO_MIXED,
 	};
 
@@ -227,23 +227,23 @@ private:
 	static constexpr real_t INTEREST_RADIUS = PBVH_INTEREST_RADIUS_UM * 0.000001; // m
 	static constexpr float V_SCALE = 32767.0f / (PBVH_V_MAX_PHYSICAL_DEFAULT * 1.0e-6f); // m/tick → int16
 	static constexpr float A_SCALE = 32767.0f / (2.0f * PBVH_V_MAX_PHYSICAL_DEFAULT * 1.0e-6f); // m/tick² → int16
-	static constexpr real_t CURRENT_FUNNEL_PEAK_V = V_MAX * 6.0; // m/tick — C7 rip-current impulse cap (60 m/s)
+	static constexpr real_t RAGDOLL_PEAK_V = V_MAX * 6.0; // m/tick — C7 velocity-spike cap (60 m/s)
 	static constexpr real_t ACCEL_FLOOR_M = PBVH_ACCEL_FLOOR_DEFAULT * 0.000001; // m/tick²
 	static constexpr int N_TOTAL = 100000;
 	static constexpr int DEFAULT_ZONE_COUNT = 3;
-	// WP_PERIOD: half-cycle duration for jellyfish zone-crossing waypoint flips.
+	// WP_PERIOD: half-cycle duration for choke_point waypoint flips.
 	// 10 seconds of wall time; the actual tick count is computed at use-site
 	// from Engine::get_physics_ticks_per_second(). Must exceed WaypointBound.lean's
 	// wpPeriodMin (travel + hysteresis + latency, all simTickHz-parametric).
 	static constexpr int WP_PERIOD_SECONDS = 10;
 	// Scenario animation cadences, all declared in seconds/ms and converted to ticks
 	// at the use site against the engine's physics tick rate.
-	static constexpr int BLOOM_BEAT_PERIOD_SECONDS = 1; // jellyfish_bloom pulse cycle
-	static constexpr uint32_t BLOOM_BEAT_ON_MS = 83; // pulse-on fraction
-	static constexpr int WHALE_PHASE_PERIOD_SECONDS = 2; // whale-with-sharks heading phase
-	static constexpr int FUNNEL_PRONE_PERIOD_SECONDS = 3; // current_funnel prone cycle
-	static constexpr int JET_BELL_PERIOD_SECONDS = 3; // jellyfish_zone_crossing bell period
-	static constexpr uint32_t JET_PULSE_MS = 100; // jet thrust duration
+	static constexpr int CONCERT_BEAT_PERIOD_SECONDS = 1; // concert pulse cycle
+	static constexpr uint32_t CONCERT_BEAT_ON_MS = 83; // pulse-on fraction
+	static constexpr int CONVOY_PHASE_PERIOD_SECONDS = 2; // convoy heading phase
+	static constexpr int RAGDOLL_PRONE_PERIOD_SECONDS = 3; // ragdoll prone cycle
+	static constexpr int CHOKE_POINT_BELL_PERIOD_SECONDS = 3; // choke_point bell period
+	static constexpr uint32_t CHOKE_POINT_PULSE_MS = 100; // choke_point pulse duration
 	static constexpr uint32_t STATS_LOG_INTERVAL_SECONDS = 20; // periodic stats log cadence
 	static constexpr int MAX_ZONES = 32;
 	// ZONE_CAPACITY: hard upper bound on slot array size (compile-time max).
@@ -264,7 +264,7 @@ private:
 	int zone_count = 3;
 	uint16_t cluster_base_port = 17500; // base_port+zone_id = this zone's listen port
 	// Centroid of each zone's entities, computed in initialize() from the
-	// same N_TOTAL spawn pass. Used as waypoints for jellyfish_zone_crossing.
+	// same N_TOTAL spawn pass. Used as waypoints for choke_point.
 	real_t _zone_centroid[MAX_ZONES][3] = {};
 	uint32_t tick = 0;
 	uint64_t migrations = 0;
@@ -353,11 +353,11 @@ private:
 	static constexpr int MAX_MIGRATIONS_PER_TICK = 50;
 	// Migration headroom: slots reserved for inbound migrations.
 	// Two components must both fit within headroom:
-	//   1. Burst (jellyfish_zone_crossing): 144 entities arrive at tick ~282.
+	//   1. Burst (choke_point): 144 entities arrive at tick ~282.
 	//   2. Pre-burst drift: non-crossing entities drift via free vz into zone 1's
 	//      Hilbert region. Measured: ~166 drift entities arrive before the burst.
 	//      Total peak = 166 + 144 = 310. ×1.15 safety = 357 → 400.
-	// Erlang-B sizing (jellyfish_bloom 256-entity burst) also satisfied: 400 > 300.
+	// Erlang-B sizing (concert 256-entity burst) also satisfied: 400 > 300.
 	// Effective spawn cap = _zone_capacity - MIGRATION_HEADROOM = 1800 - 400 = 1400.
 	static constexpr int MIGRATION_HEADROOM = 400;
 
@@ -370,7 +370,7 @@ private:
 	uint64_t entities_received = 0;
 
 	// ── Phase-1 pass condition tracking (player/observer mode) ───────────
-	// Tracks jellyfish_zone_crossing entities (gid 256–399, exactly 144).
+	// Tracks choke_point entities (gid 256–399, exactly 144).
 	// Indexed by gid - 256.  _p1_seen is false until the gid is first received.
 	static constexpr int XING_ID_LO = 256;
 	static constexpr int XING_ID_HI = 399;

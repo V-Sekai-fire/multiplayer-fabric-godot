@@ -133,7 +133,7 @@ Upstream: <https://github.com/V-Sekai/godot-interaction-system>
 
 GDScript addon that delegates input events (mouse clicks, VR controller
 triggers) as 3D raycasts into the scene. The fabric demo's trident
-controller (`current_funnel`, CH_PLAYER cmd=1) and pen tool
+controller (`ragdoll`, CH_PLAYER cmd=1) and pen tool
 (`spawn_stroke_knot`, cmd=3) originate from interaction-system actions
 routed through `fabric_client.gd`.
 

@@ -104,9 +104,9 @@ Three populations stress-test different failure modes:
 
 | Population | IDs | What it tests |
 |---|---|---|
-| `jellyfish_bloom_concert` | 0--255 | Dense crowd at the origin. Players appear alongside NPCs in CH_INTEREST — the concert scenario where everyone sees everyone. |
-| `jellyfish_zone_crossing` | 256--399 | 144 entities burst across a zone boundary simultaneously. This is the worst-case migration spike. |
-| `whale_with_sharks` | 400--511 | 8 pods of 14 at cruising speed. Tests sustained cross-zone movement, not just a spike. |
+| `concert` | 0--255 | Dense crowd at the origin. Players appear alongside NPCs in CH_INTEREST — everyone sees everyone, including the performers (also players). |
+| `choke_point` | 256--399 | 144 entities burst across a zone boundary simultaneously. This is the worst-case migration spike. |
+| `convoy` | 400--511 | 8 articulated vehicles (Subway Simulator--style trains), 14 entities each, at cruising speed. Tests sustained cross-zone movement, not just a spike. |
 
 Pass condition: an observer in Zone B receives all 144 burst entities
 from Zone A without snap, duplicate, or loss. The Predictive BVH
@@ -160,7 +160,7 @@ Confirm `WorldGrab`, `XRPinch`, `ProceduralGrid3D`, and
 ## Wire trident trigger to CH_PLAYER cmd=1
 
 `trident_hand.gd` is a cosmetic CSG mesh. Wire the XR controller
-trigger to emit a CH_PLAYER cmd=1 (`current_funnel`) packet from
+trigger to emit a CH_PLAYER cmd=1 (`ragdoll`) packet from
 `fabric_client.gd`. The server-side handler in `fabric_zone.cpp:1494`
 already injects the C7 velocity spike — only the client send path is
 missing.
@@ -170,7 +170,7 @@ missing.
 ## End-to-end trident test
 
 Trident trigger in PCVR produces a C7 spike visible in Zone B's
-interest range at `CURRENT_FUNNEL_PEAK_V` without a false negative.
+interest range at `RAGDOLL_PEAK_V` without a false negative.
 First test that exercises the full client, zone, observer path through
 CH_PLAYER and CH_INTEREST.
 
@@ -284,7 +284,7 @@ populations and confirm total SAH cost is ≤ the Morton baseline.
 
 The initial split axis is now picked by max child centroid separation
 instead of `depth % 3`. Instrument `lbvhAux` to log the chosen axis
-for each node. Run on `jellyfish_bloom_concert` and `whale_with_sharks`
+for each node. Run on `concert` and `convoy`
 and confirm the heuristic distributes axes sensibly (not always `.horz`
 or degenerate on flat populations).
 

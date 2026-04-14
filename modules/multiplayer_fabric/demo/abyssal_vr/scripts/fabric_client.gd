@@ -10,9 +10,9 @@
 # Broadcast every 5 physics ticks, chunked at 1200 bytes (~12 entities).
 #
 # Entity classification by global_id:
-#   0–255   → JellyfishVisual (jellyfish_bloom)
-#   256–399 → JellyfishVisual (jellyfish_zone_crossing)
-#   400–511 → WhaleVisual     (global_id % 14 == 0 = whale, else remora)
+#   0–255   → JellyfishVisual (concert audience)
+#   256–399 → JellyfishVisual (choke_point crossers)
+#   400–511 → WhaleVisual     (convoy: global_id % 14 == 0 = lead cabin, else passenger/trailing)
 
 extends Node
 

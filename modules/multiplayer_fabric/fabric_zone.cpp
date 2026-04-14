@@ -67,7 +67,7 @@ static inline uint32_t _fz_hz() {
 	return (uint32_t)Engine::get_singleton()->get_physics_ticks_per_second();
 }
 
-// ── Diagnostic knobs for jellyfish_zone_crossing minimal-repro tiers ────────
+// ── Diagnostic knobs for choke_point minimal-repro tiers ────────
 // s_xing_count: how many of the XING_ID_LO..XING_ID_HI tracers use the
 //   crossing behavior. Remaining IDs in the range fall through to the
 //   centering-drift branch and stay in their home zone.
@@ -130,12 +130,12 @@ void FabricZone::_step_entity(FabricEntity &e, uint32_t p_tick, Scenario p_scena
 	}
 
 	switch (p_scenario) {
-		case SCENARIO_JELLYFISH_BLOOM: {
+		case SCENARIO_CONCERT: {
 			// ~1 Hz beat with a short pulse (~80 ms). Both expressed in terms of
 			// the engine's physics tick rate so the rhythm is wall-clock stable.
 			const uint32_t hz = _fz_hz();
-			const uint32_t beat_period = hz * (uint32_t)BLOOM_BEAT_PERIOD_SECONDS;
-			const uint32_t beat_on = MAX((BLOOM_BEAT_ON_MS * hz + 999u) / 1000u, 1u);
+			const uint32_t beat_period = hz * (uint32_t)CONCERT_BEAT_PERIOD_SECONDS;
+			const uint32_t beat_on = MAX((CONCERT_BEAT_ON_MS * hz + 999u) / 1000u, 1u);
 			real_t rx = -(e.cx / 0.8f);
 			real_t ry = -(e.cy / 0.8f);
 			real_t beat_ax = (p_tick % beat_period < beat_on) ? -(e.cx / 0.2f) : 0.0f;
@@ -164,7 +164,7 @@ void FabricZone::_step_entity(FabricEntity &e, uint32_t p_tick, Scenario p_scena
 			e.vz = nvz;
 		} break;
 
-		case SCENARIO_WHALE_WITH_SHARKS: {
+		case SCENARIO_CONVOY: {
 			// Multi-cabin articulated vehicle (train) with passengers.
 			// Each 14-entity group is one train:
 			//   slot 0..2  → three cabins, slot 0 is the lead cabin.
@@ -178,13 +178,13 @@ void FabricZone::_step_entity(FabricEntity &e, uint32_t p_tick, Scenario p_scena
 			// Leader path is a pure function of (vehicle_idx, tick, hz) so followers
 			// read no other entity's state — slot-order-independent.
 			const uint32_t hz = _fz_hz();
-			const int phase_period = MAX((int)(hz * (uint32_t)WHALE_PHASE_PERIOD_SECONDS), 1);
+			const int phase_period = MAX((int)(hz * (uint32_t)CONVOY_PHASE_PERIOD_SECONDS), 1);
 			const int group_size = 14;
 			const int vehicle_idx = e.global_id / group_size;
 			const int slot = e.global_id % group_size;
 			// No output velocity clamp: terminal velocity is the natural equilibrium
 			// between bounded steering force and drag. A C7 impulse (up to
-			// CURRENT_FUNNEL_PEAK_V) simply rides through and decays over ~1 second,
+			// RAGDOLL_PEAK_V) simply rides through and decays over ~1 second,
 			// so the BVH observes the true peak magnitude instead of a truncated value.
 			// DRAG chosen so |steer_max| / (1 - DRAG) ≈ V_MAX (terminal ≈ 10 m/s).
 			const real_t DRAG = 0.92f;
@@ -253,12 +253,12 @@ void FabricZone::_step_entity(FabricEntity &e, uint32_t p_tick, Scenario p_scena
 			e.vz = nvz;
 		} break;
 
-		case SCENARIO_CURRENT_FUNNEL: {
-			const uint32_t prone_period = _fz_hz() * (uint32_t)FUNNEL_PRONE_PERIOD_SECONDS;
+		case SCENARIO_RAGDOLL: {
+			const uint32_t prone_period = _fz_hz() * (uint32_t)RAGDOLL_PRONE_PERIOD_SECONDS;
 			bool is_prone = (p_tick / prone_period + (uint32_t)e.global_id) % 4 == 3;
 			bool just_entered = is_prone && ((p_tick - 1) / prone_period + (uint32_t)e.global_id) % 4 != 3;
 			bool spike = just_entered && ((e.global_id * 7 + (int)p_tick) % 10 == 0);
-			real_t v_cap = spike ? CURRENT_FUNNEL_PEAK_V : V_MAX;
+			real_t v_cap = spike ? RAGDOLL_PEAK_V : V_MAX;
 			real_t rx = -(e.cx / 0.8f);
 			real_t ry = -(e.cy / 0.8f);
 			real_t kx = (real_t)(((int)p_tick * 7 + e.global_id * 13) % 25 - 12) * 0.001f;
@@ -313,14 +313,14 @@ void FabricZone::_step_entity(FabricEntity &e, uint32_t p_tick, Scenario p_scena
 			}
 			break;
 
-		case SCENARIO_JELLYFISH_ZONE_CROSSING: {
-			// Chokepoint stress test — 144 jellyfish_zone_crossing entities (IDs 256-399)
+		case SCENARIO_CHOKE_POINT: {
+			// Chokepoint stress test — 144 choke_point entities (IDs 256-399)
 			// clump-spring toward (0,0,0) and cross zone boundaries in a burst.
 			// All other entities use default centering drift so zone density stays even:
 			// only the 144 tracers move cross-zone; the rest stay in their home zone.
 			const uint32_t hz = _fz_hz();
-			const int BELL_PERIOD = (int)(hz * (uint32_t)JET_BELL_PERIOD_SECONDS);
-			const int JET_TICKS_N = (int)MAX((JET_PULSE_MS * hz + 999u) / 1000u, 1u);
+			const int BELL_PERIOD = (int)(hz * (uint32_t)CHOKE_POINT_BELL_PERIOD_SECONDS);
+			const int JET_TICKS_N = (int)MAX((CHOKE_POINT_PULSE_MS * hz + 999u) / 1000u, 1u);
 			const int WP_PERIOD_N = (int)(hz * (uint32_t)WP_PERIOD_SECONDS);
 			static constexpr real_t JET_JITTER = 0.08f; // small per-entity noise
 			static constexpr real_t CLUMP_K = 0.06f; // spring toward curtain
@@ -452,14 +452,14 @@ void FabricZone::_step_entity(FabricEntity &e, uint32_t p_tick, Scenario p_scena
 
 		case SCENARIO_MIXED: {
 			int n = p_n;
-			int jellyfish_bloom_end = n / 2;
-			int jellyfish_zone_crossing_end = jellyfish_bloom_end + n * 28 / 100;
-			if (e.global_id < jellyfish_bloom_end) {
-				_step_entity(e, p_tick, SCENARIO_JELLYFISH_BLOOM, n);
-			} else if (e.global_id < jellyfish_zone_crossing_end) {
-				_step_entity(e, p_tick, SCENARIO_CURRENT_FUNNEL, n);
+			int concert_end = n / 2;
+			int choke_point_end = concert_end + n * 28 / 100;
+			if (e.global_id < concert_end) {
+				_step_entity(e, p_tick, SCENARIO_CONCERT, n);
+			} else if (e.global_id < choke_point_end) {
+				_step_entity(e, p_tick, SCENARIO_RAGDOLL, n);
 			} else {
-				_step_entity(e, p_tick, SCENARIO_WHALE_WITH_SHARKS, n);
+				_step_entity(e, p_tick, SCENARIO_CONVOY, n);
 			}
 		} break;
 	}
@@ -977,14 +977,14 @@ void FabricZone::initialize() {
 			explicit_player_id = args[i + 1].to_int();
 		} else if (args[i] == "--scenario" && i + 1 < args.size()) {
 			String s = args[i + 1];
-			if (s == "jellyfish_bloom" || s == "jellyfish_bloom_concert") {
-				scenario = SCENARIO_JELLYFISH_BLOOM;
-			} else if (s == "jellyfish_zone_crossing") {
-				scenario = SCENARIO_JELLYFISH_ZONE_CROSSING;
-			} else if (s == "whale_with_sharks") {
-				scenario = SCENARIO_WHALE_WITH_SHARKS;
-			} else if (s == "current_funnel") {
-				scenario = SCENARIO_CURRENT_FUNNEL;
+			if (s == "concert") {
+				scenario = SCENARIO_CONCERT;
+			} else if (s == "choke_point") {
+				scenario = SCENARIO_CHOKE_POINT;
+			} else if (s == "convoy") {
+				scenario = SCENARIO_CONVOY;
+			} else if (s == "ragdoll") {
+				scenario = SCENARIO_RAGDOLL;
 			} else if (s == "mixed") {
 				scenario = SCENARIO_MIXED;
 			} else {
@@ -1063,7 +1063,7 @@ void FabricZone::initialize() {
 
 	// ── Create entities, keep our partition; accumulate per-zone centroids ──
 	// All zone centroids are computed here so every zone process knows the
-	// waypoint targets for jellyfish_zone_crossing without any inter-zone comms.
+	// waypoint targets for choke_point without any inter-zone comms.
 	double centroid_sum[MAX_ZONES][3] = {};
 	int centroid_cnt[MAX_ZONES] = {};
 	for (int i = 0; i < N_TOTAL; i++) {
@@ -1503,7 +1503,7 @@ bool FabricZone::physics_process(double p_time) {
 		// Drain player commands (CH_PLAYER, 100-byte packets — same skeleton as CH_INTEREST).
 		// Format: [u32 player_id][f64 cx/cy/cz][i16×6 vx/vy/vz/ax/ay/az][u32 hlc][u32×14 payload]
 		// cmd lives in low byte of payload[0] (offset 44).
-		// cmd=1: current_funnel — inject C7 velocity spike into nearby jellyfish_zone_crossing (IDs 256-399).
+		// cmd=1: ragdoll — inject C7 velocity spike into nearby choke_point (IDs 256-399).
 		// cmd=2: nudge — payload[1] = target_entity_id, add Y velocity impulse.
 		// cmd=3: spawn_stroke_knot — payload[1] = stroke_id, payload[2] = RGBA8888 color.
 		LocalVector<Vector<uint8_t>> player_pkts = peer_callbacks.drain_channel_raw(fabric_peer.ptr(), CH_PLAYER);
@@ -1587,14 +1587,14 @@ bool FabricZone::physics_process(double p_time) {
 			real_t pcz = (real_t)player_cz_d;
 
 			if (cmd == 1) {
-				// current_funnel: C7 velocity spike. Hits every entity within the
-				// interest radius, no exceptions — humans (jellyfish), vehicles
-				// (whale+remoras = train+passengers), pen annotations, everything.
+				// ragdoll: C7 velocity spike. Hits every entity within the
+				// interest radius, no exceptions — players, convoy cabins, passengers,
+				// pen annotations, everything.
 				// There is no "static" entity class in this system: every entity is
 				// dynamic and can be displaced by a world-scale event.
-				// Downstream _step_entity clamps must have v_cap ≥ CURRENT_FUNNEL_PEAK_V
+				// Downstream _step_entity clamps must have v_cap ≥ RAGDOLL_PEAK_V
 				// so the spike survives the next tick and the BVH registers its true
-				// magnitude (see static_assert near SCENARIO_WHALE_WITH_SHARKS).
+				// magnitude (see static_assert near SCENARIO_CONVOY).
 				for (int si = 0; si < _zone_capacity; si++) {
 					if (!slots[si].active) {
 						continue;
@@ -1605,7 +1605,7 @@ bool FabricZone::physics_process(double p_time) {
 					if (dist2 > INTEREST_RADIUS * INTEREST_RADIUS) {
 						continue;
 					}
-					e.vy = CURRENT_FUNNEL_PEAK_V;
+					e.vy = RAGDOLL_PEAK_V;
 				}
 			} else if (cmd == 2) {
 				// nudge: add Y impulse to target entity to push it toward zone boundary.
@@ -1683,11 +1683,11 @@ bool FabricZone::physics_process(double p_time) {
 	Scenario cur_scenario = scenario;
 	int n = entity_count;
 
-	// For jellyfish_zone_crossing: precompute local tracer clump centroid (O(N), not O(N²)).
+	// For choke_point: precompute local tracer clump centroid (O(N), not O(N²)).
 	// Tracers in this zone attract each other via cohesion spring → natural clumping.
 	real_t local_clump[3] = {};
 	bool has_local_clump = false;
-	if (cur_scenario == SCENARIO_JELLYFISH_ZONE_CROSSING) {
+	if (cur_scenario == SCENARIO_CHOKE_POINT) {
 		double tc[3] = {};
 		int tc_n = 0;
 		for (int i = 0; i < _zone_capacity; i++) {
@@ -2077,17 +2077,17 @@ bool FabricZone::physics_process(double p_time) {
 		}
 		const char *scenario_name;
 		switch (scenario) {
-			case SCENARIO_JELLYFISH_BLOOM:
-				scenario_name = "jellyfish_bloom_concert";
+			case SCENARIO_CONCERT:
+				scenario_name = "concert";
 				break;
-			case SCENARIO_JELLYFISH_ZONE_CROSSING:
-				scenario_name = "jellyfish_zone_crossing";
+			case SCENARIO_CHOKE_POINT:
+				scenario_name = "choke_point";
 				break;
-			case SCENARIO_WHALE_WITH_SHARKS:
-				scenario_name = "whale_with_sharks";
+			case SCENARIO_CONVOY:
+				scenario_name = "convoy";
 				break;
-			case SCENARIO_CURRENT_FUNNEL:
-				scenario_name = "current_funnel";
+			case SCENARIO_RAGDOLL:
+				scenario_name = "ragdoll";
 				break;
 			case SCENARIO_MIXED:
 				scenario_name = "mixed";

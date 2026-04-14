@@ -19,7 +19,7 @@ bin/godot --test -tc "*MultiplierFabric*"
 
 ```bash
 # Single zone
-bin/godot --headless --main-loop FabricZone -- --zone-id 0 --zone-count 1 --scenario jellyfish_bloom_concert
+bin/godot --headless --main-loop FabricZone -- --zone-id 0 --zone-count 1 --scenario concert
 
 # 3-zone fabric with inter-zone migration
 for z in 0 1 2; do
@@ -47,12 +47,12 @@ bin/godot --path modules/multiplayer_fabric/demo/abyssal_vr/ scenes/observer.tsc
 
 | Scenario | What it simulates |
 |----------|-------------------|
-| `jellyfish_bloom_concert` | 256 jellyfish clustered near origin; bells pulse inward every 3 s. Players appear in CH_INTEREST so all clients see each other (concert scenario) |
-| `jellyfish_zone_crossing` | 144 jellyfish cycling through waypoints — crosses zone borders |
-| `whale_with_sharks` | 112 entities in 8 pods; one fast Whale leads 13 Remoras in formation |
-| `current_funnel` | Velocity-spike stress test (C7): entities hit 60 m/s |
-| `mixed` | All three populations simultaneously |
-| `default` | Simple random drift |
+| `concert` | 256 audience entities clustered near origin; beats pulse inward once per second. Players appear in CH_INTEREST so all clients see each other plus the performers (also players). |
+| `choke_point` | 144 entities cycling through waypoints — crosses zone borders and stresses the migration path. |
+| `convoy` | 112 entities in 8 articulated vehicles (Subway Simulator–style trains): 3 cabins per vehicle with 11 passengers distributed across seats; followers read no other entity state. |
+| `ragdoll` | Velocity-spike stress test (C7): entities hit 60 m/s when the impulse fires — no static-entity class, every entity is displaceable. |
+| `mixed` | All populations simultaneously. |
+| `default` | Simple random drift. |
 
 ## Documentation style: Hz, seconds, meters
 
