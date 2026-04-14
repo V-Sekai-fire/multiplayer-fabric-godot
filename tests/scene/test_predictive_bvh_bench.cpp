@@ -19,6 +19,7 @@ TEST_FORCE_LINK(test_predictive_bvh_bench)
 #include "core/os/os.h"
 
 #include "thirdparty/predictive_bvh/predictive_bvh.h"
+#include "thirdparty/predictive_bvh/predictive_bvh_tree.h"
 
 namespace TestPredictiveBVHBench {
 
@@ -216,6 +217,69 @@ static void run_one_n(uint32_t n) {
 	print_line(vformat("    R128 aabb_overlaps       : %d us total  %.2f ns/pair", t_r128, ns_r128));
 	print_line(vformat("    R128 + Hilbert prefix    : %d us total  %.2f ns/pair", t_prefix, ns_prefix));
 	print_line(vformat("    DynamicBVH aabb_query    : %d us total  %.2f ns/query (N queries)", t_bvh, ns_bvh));
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Phase 1 RED: pbvh_tree parity against DynamicBVH. Drives the red→green
+// cycle. Until pbvh_tree_t lands, this TEST_CASE fails to compile.
+// ──────────────────────────────────────────────────────────────────────────
+
+struct PBVHParityCollector {
+	Vector<uint32_t> hits;
+};
+
+static int pbvh_parity_cb(pbvh_eclass_id_t id, void *ud) {
+	((PBVHParityCollector *)ud)->hits.push_back((uint32_t)id);
+	return 0;
+}
+
+TEST_CASE("[PredictiveBVH][Parity] pbvh_tree vs DynamicBVH aabb_query") {
+	constexpr uint32_t N = 256;
+	Vector<FloatLeaf> floats;
+	Vector<R128Leaf> r128s;
+	generate_dataset(N, 0xDEADBEEFull, floats, r128s);
+
+	DynamicBVH dtree;
+	LocalVector<DynamicBVH::ID> dids;
+	dids.resize(N);
+	for (uint32_t i = 0; i < N; i++) {
+		dids[i] = dtree.insert(floats[i].box, (void *)(uintptr_t)i);
+	}
+
+	Vector<pbvh_node_t> storage;
+	storage.resize(N * 2 + 8);
+	pbvh_tree_t ptree = {};
+	ptree.nodes = storage.ptrw();
+	ptree.capacity = storage.size();
+	ptree.root = PBVH_NULL_NODE;
+	ptree.free_head = PBVH_NULL_NODE;
+
+	LocalVector<pbvh_node_id_t> pids;
+	pids.resize(N);
+	for (uint32_t i = 0; i < N; i++) {
+		pids[i] = pbvh_tree_insert(&ptree, (pbvh_eclass_id_t)i, r128s[i].box);
+	}
+
+	for (uint32_t i = 0; i < N; i++) {
+		Vector<uint32_t> dhits;
+		struct DCollect {
+			Vector<uint32_t> *out = nullptr;
+			bool operator()(void *ud) {
+				out->push_back((uint32_t)(uintptr_t)ud);
+				return false;
+			}
+		} dcb;
+		dcb.out = &dhits;
+		dtree.aabb_query(floats[i].box, dcb);
+
+		PBVHParityCollector pcb;
+		pbvh_tree_aabb_query(&ptree, &r128s[i].box, pbvh_parity_cb, &pcb);
+
+		dhits.sort();
+		pcb.hits.sort();
+		CHECK_MESSAGE(dhits == pcb.hits,
+				vformat("pbvh_tree parity mismatch at i=%d: dbvh=%d hits pbvh=%d hits", i, dhits.size(), pcb.hits.size()));
+	}
 }
 
 TEST_CASE("[PredictiveBVH][Bench] R128 vs float vs Hilbert-prefix vs DynamicBVH") {
