@@ -290,6 +290,67 @@ TEST_CASE("[PredictiveBVH][Bench] R128 vs float vs Hilbert-prefix vs DynamicBVH"
 	run_one_n(4096);
 }
 
+TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_aabb_query_h matches linear scan, prunes visits") {
+	constexpr uint32_t N = 1024;
+	constexpr uint32_t PREFIX_BITS = 6; // 2 m cells at scene size 30 m
+	Vector<FloatLeaf> floats;
+	Vector<R128Leaf> r128s;
+	generate_dataset(N, 0xF00DFEEDull, floats, r128s);
+
+	Vector<pbvh_node_t> storage;
+	storage.resize(N + 8);
+	Vector<pbvh_node_id_t> sorted;
+	sorted.resize(N + 8);
+
+	pbvh_tree_t tree = {};
+	tree.nodes = storage.ptrw();
+	tree.capacity = storage.size();
+	tree.root = PBVH_NULL_NODE;
+	tree.free_head = PBVH_NULL_NODE;
+	tree.sorted = sorted.ptrw();
+
+	for (uint32_t i = 0; i < N; i++) {
+		pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i, r128s[i].box, r128s[i].hilbert);
+	}
+	pbvh_tree_build(&tree);
+
+	// Query each leaf against both APIs; hit sets must match, and the
+	// Hilbert-keyed query must visit strictly fewer leaves than the
+	// linear scan on average (sparse dataset → prefix prune wins).
+	uint64_t total_visits_linear = 0;
+	uint64_t total_visits_h = 0;
+	for (uint32_t i = 0; i < N; i++) {
+		Vector<uint32_t> linear_hits, h_hits;
+		struct Collect {
+			Vector<uint32_t> *out = nullptr;
+		} lc, hc;
+		lc.out = &linear_hits;
+		hc.out = &h_hits;
+
+		pbvh_tree_aabb_query(&tree, &r128s[i].box,
+				[](pbvh_eclass_id_t id, void *ud) {
+					((Collect *)ud)->out->push_back((uint32_t)id);
+					return 0;
+				}, &lc);
+		total_visits_linear += tree.last_visits;
+
+		pbvh_tree_aabb_query_h(&tree, &r128s[i].box, r128s[i].hilbert, PREFIX_BITS,
+				[](pbvh_eclass_id_t id, void *ud) {
+					((Collect *)ud)->out->push_back((uint32_t)id);
+					return 0;
+				}, &hc);
+		total_visits_h += tree.last_visits;
+
+		linear_hits.sort();
+		h_hits.sort();
+		CHECK_MESSAGE(linear_hits == h_hits,
+				vformat("hit-set mismatch at i=%d: linear=%d h=%d", i, linear_hits.size(), h_hits.size()));
+	}
+	CHECK_MESSAGE(total_visits_h * 4 < total_visits_linear,
+			vformat("Hilbert prefix prune failed: linear visits=%d h visits=%d (want h*4 < linear)",
+					(int)total_visits_linear, (int)total_visits_h));
+}
+
 } // namespace TestPredictiveBVHBench
 
 #endif // MODULE_MULTIPLAYER_FABRIC_ENABLED

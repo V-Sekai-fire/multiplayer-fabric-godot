@@ -2208,31 +2208,43 @@ int FabricZone::_count_ghost_overlapping_pairs_s(const EntitySlot *p_slots, int 
 	}
 	Vector<pbvh_node_t> storage;
 	storage.resize(p_capacity);
+	Vector<pbvh_node_id_t> sorted;
+	sorted.resize(p_capacity);
 	pbvh_tree_t tree = {};
 	tree.nodes = storage.ptrw();
 	tree.capacity = (uint32_t)storage.size();
 	tree.root = PBVH_NULL_NODE;
 	tree.free_head = PBVH_NULL_NODE;
+	tree.sorted = sorted.ptrw();
 
-	// Pass 1: insert every active slot's ghost AABB, keyed by slot index.
+	const Aabb scene = aabb_from_floats(-SIM_BOUND, SIM_BOUND,
+			-SIM_BOUND, SIM_BOUND, -SIM_BOUND, SIM_BOUND);
+
+	// Pass 1: insert every active slot's ghost AABB keyed by Hilbert code.
 	for (int i = 0; i < p_capacity; i++) {
 		if (!p_slots[i].active) {
 			continue;
 		}
 		Aabb g = _ghost_aabb_from_snap(p_slots[i].snap);
-		pbvh_tree_insert(&tree, (pbvh_eclass_id_t)i, g);
+		uint32_t hcode = hilbert_of_aabb(&g, &scene);
+		pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i, g, hcode);
 	}
+	pbvh_tree_build(&tree);
 
 	// Pass 2: query each active slot's ghost AABB, count (i<j) overlaps.
+	// prefix_bits=6 mirrors the bench's 2 m-cell prune; ghost AABBs expand
+	// across cells so larger prefixes would drop true overlaps.
+	constexpr uint32_t PREFIX_BITS = 6u;
 	int pairs = 0;
 	for (int i = 0; i < p_capacity; i++) {
 		if (!p_slots[i].active) {
 			continue;
 		}
 		Aabb g = _ghost_aabb_from_snap(p_slots[i].snap);
+		uint32_t hcode = hilbert_of_aabb(&g, &scene);
 		GhostPairCB cb;
 		cb.self_id = (pbvh_eclass_id_t)i;
-		pbvh_tree_aabb_query(&tree, &g, _ghost_pair_cb, &cb);
+		pbvh_tree_aabb_query_h(&tree, &g, hcode, PREFIX_BITS, _ghost_pair_cb, &cb);
 		pairs += cb.matches;
 	}
 	return pairs;
