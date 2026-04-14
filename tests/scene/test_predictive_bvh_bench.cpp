@@ -19,7 +19,6 @@ TEST_FORCE_LINK(test_predictive_bvh_bench)
 #include "core/os/os.h"
 
 #include "thirdparty/predictive_bvh/predictive_bvh.h"
-#include "thirdparty/predictive_bvh/predictive_bvh_tree.h"
 
 namespace TestPredictiveBVHBench {
 

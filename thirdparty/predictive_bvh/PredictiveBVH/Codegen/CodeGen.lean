@@ -5,6 +5,7 @@ import AmoLean.CodeGen
 import AmoLean.EGraph.Saturate
 import PredictiveBVH.Formulas.Formula
 import PredictiveBVH.Codegen.QuinticHermite
+import PredictiveBVH.Codegen.TreeC
 import PredictiveBVH.Spatial.ScaleContradictions
 import PredictiveBVH.Spatial.EMLAdversarialHeuristic
 import PredictiveBVH.Formulas.Resources
@@ -1225,6 +1226,7 @@ private def cFile : String :=
   scalarFnC ++ "\n\n" ++
   deltaSelectC ++ "\n\n" ++
   quinticHermiteC ++ "\n\n" ++
+  PredictiveBVH.Codegen.TreeC.treeC ++ "\n\n" ++
   "#endif /* PREDICTIVE_BVH_H */\n"
 
 private def cPath      : String := "predictive_bvh.h"

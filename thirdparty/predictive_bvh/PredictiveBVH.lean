@@ -27,4 +27,5 @@ import PredictiveBVH.Formulas.Resources
 
 -- Code generation pipeline
 import PredictiveBVH.Codegen.QuinticHermite
+import PredictiveBVH.Codegen.TreeC
 import PredictiveBVH.Codegen.CodeGen
