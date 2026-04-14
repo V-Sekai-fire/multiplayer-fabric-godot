@@ -1,0 +1,387 @@
+-- SPDX-License-Identifier: MIT
+-- Copyright (c) 2026-present K. S. Ernest (iFire) Lee
+
+import PredictiveBVH.Primitives.Types
+import PredictiveBVH.Formulas.LowerBound
+import PredictiveBVH.Spatial.HilbertBroadphase
+
+-- ============================================================================
+-- PREDICTIVE BVH TREE — Lean codification of predictive_bvh_tree.h
+--
+-- Mirrors the hand-written C scaffold verbatim in shape. Leaves carry an
+-- EClassId (Nat) payload; internal nodes form a nested-set pre-order DFS
+-- layout with skip-pointer descent. Queries prune by bounds on internals
+-- and by Hilbert prefix on the optional bucket directory.
+--
+-- Invariants (proved where feasible in this first pass; see theorems below):
+--   - liveness: remove/update/build do not resurrect dead leaves
+--   - sort:     `sorted` is ascending by leaves[·].hilbert over live leaves
+--   - eclass uniqueness: each EClassId appears in at most one live leaf
+--   - nested-set: internals[i].skip = i + 1 + subtreeSize(left) + subtreeSize(right)
+--   - bound containment: union of live leaf bounds under i ⊆ internals[i].bounds
+-- ============================================================================
+
+abbrev LeafId     := Nat
+abbrev InternalId := Nat
+
+/-- One leaf in the tree. Tombstoned by flipping `alive` to false so that
+    `sorted` can stay stable across removals without a rebuild. -/
+structure PbvhLeaf where
+  eclass  : EClassId
+  bounds  : BoundingBox
+  hilbert : Nat            -- 30-bit Hilbert code
+  alive   : Bool
+  deriving Inhabited, Repr
+
+/-- One internal node. `(offset, span)` is the nested-set range into `sorted`;
+    `skip` is the next pre-order DFS index past this subtree. -/
+structure PbvhInternal where
+  bounds : BoundingBox
+  offset : Nat
+  span   : Nat
+  skip   : InternalId
+  left   : Option InternalId
+  right  : Option InternalId
+  deriving Inhabited, Repr
+
+/-- Purely-functional BVH tree over EClassId leaves. -/
+structure PbvhTree where
+  leaves       : Array PbvhLeaf
+  sorted       : Array LeafId       -- ascending by leaves[·].hilbert
+  internals    : Array PbvhInternal -- pre-order DFS
+  bucketBits   : Nat                -- 0 disables bucket dir
+  bucketDir    : Array (Nat × Nat)  -- (lo, hi) per Hilbert prefix
+  internalRoot : Option InternalId
+  deriving Inhabited
+
+namespace PbvhTree
+
+/-- The empty tree. -/
+def empty : PbvhTree :=
+  { leaves := #[], sorted := #[], internals := #[],
+    bucketBits := 0, bucketDir := #[], internalRoot := none }
+
+/-- Count of leaves currently live. -/
+def liveCount (t : PbvhTree) : Nat :=
+  t.leaves.foldl (fun acc l => if l.alive then acc + 1 else acc) 0
+
+-- ── insert / remove / update ─────────────────────────────────────────────────
+
+/-- Append a new live leaf. Returns the new tree and its LeafId. `sorted`,
+    `internals`, `bucketDir` go stale until `build` runs. -/
+def insert (t : PbvhTree) (eclass : EClassId) (bounds : BoundingBox)
+    (hilbert : Nat) : PbvhTree × LeafId :=
+  let newLeaf : PbvhLeaf := { eclass, bounds, hilbert, alive := true }
+  let id := t.leaves.size
+  ({ t with leaves := t.leaves.push newLeaf }, id)
+
+/-- Tombstone a leaf. No-op if out of bounds or already dead. -/
+def remove (t : PbvhTree) (id : LeafId) : PbvhTree :=
+  if h : id < t.leaves.size then
+    let l := t.leaves[id]
+    let l' := { l with alive := false }
+    { t with leaves := t.leaves.set id l' }
+  else t
+
+/-- Update bounds and hilbert of a leaf. No-op if out of bounds. Does not
+    touch `alive`. `sorted` is stale until `build` runs. -/
+def update (t : PbvhTree) (id : LeafId) (bounds : BoundingBox)
+    (hilbert : Nat) : PbvhTree :=
+  if h : id < t.leaves.size then
+    let l := t.leaves[id]
+    let l' := { l with bounds := bounds, hilbert := hilbert }
+    { t with leaves := t.leaves.set id l' }
+  else t
+
+-- ── build: sort live leaves by hilbert, construct internals ──────────────────
+
+/-- Insertion-sort pass over `sorted` indices by `leaves[·].hilbert`. Stable
+    on equal codes. Dead leaves are filtered out before sorting. -/
+private def insertionSortByHilbert
+    (leaves : Array PbvhLeaf) (ids : Array LeafId) : Array LeafId :=
+  let n := ids.size
+  Id.run do
+    let mut arr := ids
+    let mut i := 1
+    while i < n do
+      let mut j := i
+      while j > 0 &&
+            (leaves[arr[j]!]?.map (·.hilbert)).getD 0 <
+            (leaves[arr[j-1]!]?.map (·.hilbert)).getD 0 do
+        let a := arr[j]!
+        let b := arr[j-1]!
+        arr := arr.set! j b
+        arr := arr.set! (j-1) a
+        j := j - 1
+      i := i + 1
+    return arr
+
+/-- Live leaf ids in tombstone-stripped original-index order. -/
+private def liveIds (leaves : Array PbvhLeaf) : Array LeafId :=
+  Id.run do
+    let mut out : Array LeafId := #[]
+    for i in [:leaves.size] do
+      if leaves[i]!.alive then out := out.push i
+    return out
+
+/-- Union of leaf bounds over a window `[lo, hi)` in `sorted`. -/
+private def windowBounds
+    (leaves : Array PbvhLeaf) (sorted : Array LeafId) (lo hi : Nat) : BoundingBox :=
+  if lo ≥ hi then
+    { minX := 0, maxX := 0, minY := 0, maxY := 0, minZ := 0, maxZ := 0 }
+  else
+    let init := (leaves[sorted[lo]!]?.map (·.bounds)).getD
+      { minX := 0, maxX := 0, minY := 0, maxY := 0, minZ := 0, maxZ := 0 }
+    (List.range (hi - lo - 1)).foldl (fun acc j =>
+      let lb := (leaves[sorted[lo + j + 1]!]?.map (·.bounds)).getD acc
+      unionBounds acc lb) init
+
+/-- Recursive builder: returns the updated internals array plus the root
+    index for this subtree. Splits on Hilbert prefix when possible, else
+    falls back to median. Fuel bounds recursion depth. -/
+private partial def buildSubtree
+    (leaves : Array PbvhLeaf) (sorted : Array LeafId)
+    (internals : Array PbvhInternal)
+    (lo hi : Nat) : Array PbvhInternal × InternalId :=
+  let bounds := windowBounds leaves sorted lo hi
+  if hi - lo ≤ 1 then
+    let leaf : PbvhInternal :=
+      { bounds, offset := lo, span := hi - lo, skip := internals.size + 1,
+        left := none, right := none }
+    (internals.push leaf, internals.size)
+  else
+    -- Hilbert prefix split on the highest bit that differs between window ends.
+    let myIdx := internals.size
+    -- Placeholder; fixed up after children built.
+    let placeholder : PbvhInternal :=
+      { bounds, offset := lo, span := hi - lo, skip := myIdx + 1,
+        left := none, right := none }
+    let internals := internals.push placeholder
+    let hlo := (leaves[sorted[lo]!]?.map (·.hilbert)).getD 0
+    let hhi := (leaves[sorted[hi - 1]!]?.map (·.hilbert)).getD 0
+    let mid :=
+      if hlo == hhi then
+        lo + (hi - lo) / 2
+      else
+        let xor := hlo ^^^ hhi
+        let depth := clz30 xor
+        let mask : Nat := 1 <<< (29 - depth)
+        -- First index in (lo, hi) whose hilbert has the split bit set.
+        -- Fold over the window, taking the minimum such index; default to hi.
+        let m := (List.range (hi - lo - 1)).foldl (fun acc j =>
+          let k := lo + 1 + j
+          let hk := (leaves[sorted[k]!]?.map (·.hilbert)).getD 0
+          if hk &&& mask != 0 && acc == hi then k else acc) hi
+        if m ≤ lo || m ≥ hi then lo + (hi - lo) / 2 else m
+    let (internals, leftIdx) := buildSubtree leaves sorted internals lo mid
+    let (internals, rightIdx) := buildSubtree leaves sorted internals mid hi
+    -- Patch our node with children and correct skip pointer.
+    let updated : PbvhInternal :=
+      { bounds, offset := lo, span := hi - lo,
+        skip := internals.size,
+        left := some leftIdx, right := some rightIdx }
+    (internals.set! myIdx updated, myIdx)
+
+/-- Rebuild the sorted-by-Hilbert view and the internals tree. Leaves remain
+    in place; `alive` flags are untouched. Bucket directory is left empty
+    in this Lean codification; callers that want O(1)+k prefix queries can
+    populate `bucketDir` in the C emission. -/
+def build (t : PbvhTree) : PbvhTree :=
+  let live := liveIds t.leaves
+  let sorted := insertionSortByHilbert t.leaves live
+  if sorted.isEmpty then
+    { t with sorted := #[], internals := #[], internalRoot := none,
+             bucketDir := #[] }
+  else
+    let (internals, root) := buildSubtree t.leaves sorted #[] 0 sorted.size
+    { t with sorted := sorted, internals := internals,
+             internalRoot := some root, bucketDir := #[] }
+
+-- ── Queries ──────────────────────────────────────────────────────────────────
+
+/-- Iterative skip-pointer descent. Returns every live leaf eclass whose
+    bounds overlap `query`. Emits in pre-order DFS order. -/
+def aabbQueryN (t : PbvhTree) (query : BoundingBox) : List EClassId :=
+  if t.internals.isEmpty then []
+  else
+    let end_ := t.internals.size
+    let rec go (i : Nat) (acc : List EClassId) (fuel : Nat) : List EClassId :=
+      match fuel with
+      | 0 => acc.reverse
+      | fuel' + 1 =>
+        if i ≥ end_ then acc.reverse
+        else
+          let n := t.internals[i]!
+          if ¬ aabbOverlapsDec n.bounds query then
+            go n.skip acc fuel'
+          else if n.left.isNone && n.right.isNone then
+            -- Leaf block: scan the (offset, span) window in `sorted`.
+            let acc := (List.range n.span).foldl (fun acc j =>
+              let lid := t.sorted[n.offset + j]!
+              match t.leaves[lid]? with
+              | some l =>
+                if l.alive && aabbOverlapsDec l.bounds query then
+                  l.eclass :: acc else acc
+              | none => acc) acc
+            go n.skip acc fuel'
+          else
+            go (i + 1) acc fuel'
+    go (t.internalRoot.getD 0) [] (2 * t.internals.size + 1)
+
+/-- Enumerate all overlapping live-leaf pairs as `(a, b)` with `a < b` by
+    EClassId. Eclass-style broadphase: no pointers, no per-slot callback. -/
+def enumeratePairs (t : PbvhTree) : List (EClassId × EClassId) :=
+  let n := t.leaves.size
+  (List.range n).foldl (fun acc i =>
+    match t.leaves[i]? with
+    | some li =>
+      if ¬ li.alive then acc
+      else
+        let peers := aabbQueryN t li.bounds
+        peers.foldl (fun acc e =>
+          if li.eclass < e then (li.eclass, e) :: acc
+          else if e < li.eclass then (e, li.eclass) :: acc
+          else acc) acc
+    | none => acc) []
+
+end PbvhTree
+
+-- ============================================================================
+-- PROOFS
+-- ============================================================================
+
+namespace PbvhTree
+
+/-- Generic foldl invariant: if `P` holds on the initial accumulator and is
+    preserved by every step, it holds on the final fold result. -/
+private theorem foldl_invariant {α β : Type _} (P : β → Prop)
+    (f : β → α → β) :
+    ∀ (l : List α) (b : β), P b → (∀ b a, P b → P (f b a)) → P (l.foldl f b) := by
+  intro l
+  induction l with
+  | nil => intro b hb _; exact hb
+  | cons x xs ih =>
+    intro b hb hf
+    exact ih (f b x) (hf b x hb) hf
+
+/-- `insert` extends `leaves` at the end; the `alive` flag at any existing
+    index is preserved. -/
+theorem insert_preserves_alive (t : PbvhTree) (e : EClassId) (b : BoundingBox)
+    (h : Nat) (i : LeafId) (hi : i < t.leaves.size) :
+    ((t.insert e b h).1.leaves[i]?.map (·.alive)) =
+      (t.leaves[i]?.map (·.alive)) := by
+  simp only [insert]
+  rw [Array.getElem?_push_lt hi]
+  simp [Array.getElem?_eq_getElem hi]
+
+/-- `update` does not touch the `alive` flag of any leaf (the write only
+    rewrites `bounds` and `hilbert`). -/
+theorem update_preserves_alive (t : PbvhTree) (id : LeafId) (b : BoundingBox)
+    (h : Nat) (i : LeafId) :
+    ((t.update id b h).leaves[i]?.map (·.alive)) =
+      (t.leaves[i]?.map (·.alive)) := by
+  simp only [update]
+  split
+  · rename_i hid
+    rw [Array.getElem?_set hid]
+    by_cases heq : id = i
+    · subst heq
+      simp [Array.getElem?_eq_getElem hid]
+    · simp [heq]
+  · rfl
+
+/-- `remove id` only flips `alive := false` at position `id`; every other
+    leaf's `alive` flag is unchanged. -/
+theorem remove_preserves_other_alive (t : PbvhTree) (id : LeafId) (i : LeafId)
+    (hne : i ≠ id) :
+    ((t.remove id).leaves[i]?.map (·.alive)) =
+      (t.leaves[i]?.map (·.alive)) := by
+  simp only [remove]
+  split
+  · rename_i hid
+    rw [Array.getElem?_set_ne hid hne.symm]
+  · rfl
+
+/-- Sizes never shrink across `insert` / `update` / `remove`. -/
+theorem ops_size_monotone (t : PbvhTree) (e : EClassId) (b : BoundingBox)
+    (h : Nat) (id : LeafId) :
+    t.leaves.size ≤ (t.insert e b h).1.leaves.size ∧
+    t.leaves.size ≤ (t.update id b h).leaves.size ∧
+    t.leaves.size ≤ (t.remove id).leaves.size := by
+  refine ⟨?_, ?_, ?_⟩
+  · simp [insert, Array.size_push]
+  · simp [update]; split <;> simp [Array.size_set]
+  · simp [remove]; split <;> simp [Array.size_set]
+
+/-- `build` never mutates `leaves`. Everything it touches is in `sorted`,
+    `internals`, `internalRoot`, `bucketDir`. -/
+theorem build_preserves_leaves (t : PbvhTree) :
+    t.build.leaves = t.leaves := by
+  simp only [build]
+  split <;> rfl
+
+/-- Corollary: `build` preserves every leaf's `alive` flag. -/
+theorem build_preserves_alive (t : PbvhTree) (i : LeafId) :
+    (t.build.leaves[i]?.map (·.alive)) = (t.leaves[i]?.map (·.alive)) := by
+  rw [build_preserves_leaves]
+
+/-- Inner step of `enumeratePairs`: emitting either `(li, e)` or `(e, li)`
+    (guarded by `<`) preserves the "every pair strictly ordered" invariant. -/
+private theorem enumeratePairs_inner_step
+    (li_eclass e : EClassId) (acc : List (EClassId × EClassId))
+    (hacc : ∀ q ∈ acc, q.1 < q.2) :
+    ∀ q ∈ (if li_eclass < e then (li_eclass, e) :: acc
+           else if e < li_eclass then (e, li_eclass) :: acc
+           else acc), q.1 < q.2 := by
+  intro q hq
+  by_cases h1 : li_eclass < e
+  · simp [h1] at hq
+    rcases hq with hq | hq
+    · rw [hq]; exact h1
+    · exact hacc q hq
+  · by_cases h2 : e < li_eclass
+    · simp [h1, h2] at hq
+      rcases hq with hq | hq
+      · rw [hq]; exact h2
+      · exact hacc q hq
+    · simp [h1, h2] at hq
+      exact hacc q hq
+
+/-- Every pair emitted by `enumeratePairs` is strictly ordered by EClassId. -/
+theorem enumeratePairs_strictly_ordered (t : PbvhTree) :
+    ∀ p ∈ t.enumeratePairs, p.1 < p.2 := by
+  have H := foldl_invariant
+    (P := fun (acc : List (EClassId × EClassId)) => ∀ q ∈ acc, q.1 < q.2)
+    (f := fun acc i =>
+      match t.leaves[i]? with
+      | some li =>
+        if ¬ li.alive then acc
+        else
+          (aabbQueryN t li.bounds).foldl (fun acc e =>
+            if li.eclass < e then (li.eclass, e) :: acc
+            else if e < li.eclass then (e, li.eclass) :: acc
+            else acc) acc
+      | none => acc)
+    (List.range t.leaves.size) []
+    (by intro q hq; exact absurd hq List.not_mem_nil)
+    (by
+      intro acc i hacc
+      -- Case split on the outer step.
+      cases hl : t.leaves[i]? with
+      | none => simpa [hl] using hacc
+      | some li =>
+        by_cases halive : li.alive
+        · simp only [hl, halive, not_true, ite_false]
+          -- Inner fold preserves the invariant.
+          exact foldl_invariant
+            (P := fun (acc : List (EClassId × EClassId)) => ∀ q ∈ acc, q.1 < q.2)
+            (f := fun acc e =>
+              if li.eclass < e then (li.eclass, e) :: acc
+              else if e < li.eclass then (e, li.eclass) :: acc
+              else acc)
+            (aabbQueryN t li.bounds) acc hacc
+            (fun acc' e hacc' => enumeratePairs_inner_step li.eclass e acc' hacc')
+        · simpa [hl, halive] using hacc)
+  simpa [enumeratePairs] using H
+
+end PbvhTree

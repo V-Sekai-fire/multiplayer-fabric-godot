@@ -9,6 +9,7 @@ import PredictiveBVH.Protocol.Build
 import PredictiveBVH.Protocol.Saturate
 import PredictiveBVH.Spatial.HilbertBroadphase
 import PredictiveBVH.Spatial.HilbertRoundtrip
+import PredictiveBVH.Spatial.Tree
 import PredictiveBVH.Formulas.LowerBound
 import PredictiveBVH.Protocol.Fabric
 import PredictiveBVH.Interest.AuthorityInterest
