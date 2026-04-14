@@ -14,7 +14,7 @@ import PredictiveBVH.Spatial.ScaleContradictions
 --   • A mitigation soundness proof (after mitigation, gap ≤ 0)
 -- ============================================================================
 
--- ── C1 / G13 — Velocity underestimate ────────────────────────────────────────
+-- ── 1. C1 / G13 — Velocity underestimate ────────────────────────────────────────
 
 /-- Witness for C1: oracle velocity underestimates true velocity. -/
 structure C1_VelocityUnderestimate where
@@ -50,7 +50,7 @@ theorem c1_mitigation_sound (vTrue delta : Nat) :
     ghostBound (min vTrue vMaxPhysical) 0 delta ≤ ghostBound vTrue 0 delta :=
   c1_clamp_sound vTrue delta
 
--- ── C2 / G29 — Acceleration underestimate ────────────────────────────────────
+-- ── 2. C2 / G29 — Acceleration underestimate ────────────────────────────────────
 
 /-- Witness for C2: oracle half-acceleration underestimates true half-acceleration. -/
 structure C2_AccelUnderestimate where
@@ -84,7 +84,7 @@ theorem c2_mitigation_sound (m : C2_Mitigated) :
     ghostBound m.v 0 m.delta ≤ ghostBound m.v m.aHalf m.delta := by
   simp only [ghostBound]; omega
 
--- ── C3 / G11 — Position discontinuity (teleport) ─────────────────────────────
+-- ── 3. C3 / G11 — Position discontinuity (teleport) ─────────────────────────────
 
 /-- Witness for C3: instantaneous jump exceeds ghost bound. -/
 structure C3_PositionDiscontinuity where
@@ -113,7 +113,7 @@ structure C3_Mitigated where
 
 theorem c3_mitigation_sound (m : C3_Mitigated) : 0 ≤ m.ghostAtDest := Nat.zero_le _
 
--- ── C4 / G131 — Entity lifecycle gap ─────────────────────────────────────────
+-- ── 4. C4 / G131 — Entity lifecycle gap ─────────────────────────────────────────
 
 /-- Witness for C4: entity absent from BVH for missingTicks after spawn commit. -/
 structure C4_EntityLifecycleGap where
@@ -140,7 +140,7 @@ structure C4_Mitigated where
 theorem c4_mitigation_sound (m : C4_Mitigated) :
     vMaxPhysical * m.missingTicks ≤ m.spawnGhostMm := m.hCovers
 
--- ── C5 / G181 — Effective delta exceeded (RTT) ───────────────────────────────
+-- ── 5. C5 / G181 — Effective delta exceeded (RTT) ───────────────────────────────
 
 /-- Witness for C5: configured δ < actual effective delta from client RTT. -/
 structure C5_EffectiveDeltaExceeded where
@@ -176,7 +176,7 @@ theorem c5_mitigation_delta_pos (rttTicks maxVelocity sceneMm : Nat) :
     0 < max 1 (min (max rttTicks 1) (deltaCapFromVelocity (max maxVelocity 1) sceneMm)) := by
   omega
 
--- ── C6 / G268 — Coordinate frame mismatch ────────────────────────────────────
+-- ── 6. C6 / G268 — Coordinate frame mismatch ────────────────────────────────────
 
 /-- Witness for C6: coordinate frame offset exceeds ghost bound. -/
 structure C6_CoordinateFrameMismatch where
@@ -201,7 +201,7 @@ def g268_c6 : C6_CoordinateFrameMismatch :=
 theorem c6_mitigation_sound (ghostMm : Nat) :
     (0 : Nat) - ghostMm = 0 := Nat.zero_sub ghostMm
 
--- ── C7 / G221 — Segment boundary violation ───────────────────────────────────
+-- ── 7. C7 / G221 — Segment boundary violation ───────────────────────────────────
 
 /-- Witness for C7: segment velocity exceeds oracle cap. -/
 structure C7_SegmentBoundaryViolation where
