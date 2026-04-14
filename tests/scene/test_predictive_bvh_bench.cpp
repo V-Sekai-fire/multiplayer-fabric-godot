@@ -436,6 +436,75 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_update_h moves leaf into new Hilber
 			vformat("h-query at the new position missed the moved leaf; hits=%d", hits.size()));
 }
 
+TEST_CASE("[PredictiveBVH][NestedSet] pbvh_tree_aabb_query_n matches linear scan and prunes visits") {
+	constexpr uint32_t N = 1024;
+	Vector<FloatLeaf> floats;
+	Vector<R128Leaf> r128s;
+	generate_dataset(N, 0xC0FFEEull, floats, r128s);
+
+	Vector<pbvh_node_t> storage;
+	storage.resize(N + 8);
+	Vector<pbvh_node_id_t> sorted;
+	sorted.resize(N + 8);
+	Vector<pbvh_internal_t> internals;
+	internals.resize(2 * (N + 8));
+
+	pbvh_tree_t tree = {};
+	tree.nodes = storage.ptrw();
+	tree.capacity = storage.size();
+	tree.root = PBVH_NULL_NODE;
+	tree.free_head = PBVH_NULL_NODE;
+	tree.sorted = sorted.ptrw();
+	tree.internals = internals.ptrw();
+	tree.internal_capacity = internals.size();
+	tree.internal_root = PBVH_NULL_NODE;
+
+	for (uint32_t i = 0; i < N; i++) {
+		pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i, r128s[i].box, r128s[i].hilbert);
+	}
+	pbvh_tree_build(&tree);
+
+	CHECK_MESSAGE(tree.internal_root != PBVH_NULL_NODE, "internal tree root should be set after build with N=1024 leaves");
+	CHECK_MESSAGE(tree.internal_count >= N, vformat("expected at least N internals for a radix tree over %d leaves; got %d", (int)N, (int)tree.internal_count));
+
+	// Subtree-bound containment invariant: the root's span covers every leaf.
+	REQUIRE(tree.internals[tree.internal_root].span == N);
+
+	uint64_t total_visits_linear = 0;
+	uint64_t total_visits_n = 0;
+	for (uint32_t i = 0; i < N; i++) {
+		Vector<uint32_t> linear_hits, n_hits;
+		struct Collect {
+			Vector<uint32_t> *out = nullptr;
+		} lc, nc;
+		lc.out = &linear_hits;
+		nc.out = &n_hits;
+
+		pbvh_tree_aabb_query(&tree, &r128s[i].box,
+				[](pbvh_eclass_id_t id, void *ud) {
+					((Collect *)ud)->out->push_back((uint32_t)id);
+					return 0;
+				}, &lc);
+		total_visits_linear += tree.last_visits;
+
+		pbvh_tree_aabb_query_n(&tree, &r128s[i].box,
+				[](pbvh_eclass_id_t id, void *ud) {
+					((Collect *)ud)->out->push_back((uint32_t)id);
+					return 0;
+				}, &nc);
+		total_visits_n += tree.last_visits;
+
+		linear_hits.sort();
+		n_hits.sort();
+		CHECK_MESSAGE(linear_hits == n_hits,
+				vformat("nested-set hit-set mismatch at i=%d: linear=%d n=%d",
+						i, linear_hits.size(), n_hits.size()));
+	}
+	CHECK_MESSAGE(total_visits_n * 4 < total_visits_linear,
+			vformat("nested-set prune failed: linear=%d n=%d (want n*4 < linear)",
+					(int)total_visits_linear, (int)total_visits_n));
+}
+
 } // namespace TestPredictiveBVHBench
 
 #endif // MODULE_MULTIPLAYER_FABRIC_ENABLED

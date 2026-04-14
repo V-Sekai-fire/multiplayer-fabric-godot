@@ -29,6 +29,7 @@ extern "C" {
 
 typedef uint32_t pbvh_eclass_id_t;
 typedef uint32_t pbvh_node_id_t;
+typedef uint32_t pbvh_internal_id_t;
 
 #define PBVH_NULL_NODE ((pbvh_node_id_t)0xFFFFFFFFu)
 
@@ -39,6 +40,18 @@ typedef struct pbvh_node {
 	uint32_t is_leaf;
 	uint32_t hilbert; /* 30-bit Hilbert code; sort key for query_h */
 } pbvh_node_t;
+
+/* Hilbert-radix internal node over sorted[]. Stored in pre-order DFS, so the
+ * array itself is a nested set: the subtree rooted at internals[i] occupies
+ * contiguous indices [i, i + subtree_count). On each node, (offset, span) is
+ * the corresponding range inside t->sorted[] — the leaf nested set. */
+typedef struct pbvh_internal {
+	Aabb bounds; /* union of every leaf AABB in [offset, offset+span) */
+	uint32_t offset; /* start index into t->sorted[] */
+	uint32_t span; /* leaf count in this subtree */
+	pbvh_internal_id_t left; /* PBVH_NULL_NODE when this is a leaf-range node */
+	pbvh_internal_id_t right; /* PBVH_NULL_NODE when this is a leaf-range node */
+} pbvh_internal_t;
 
 typedef struct pbvh_tree {
 	pbvh_node_t *nodes;
@@ -51,6 +64,13 @@ typedef struct pbvh_tree {
 	pbvh_node_id_t *sorted;
 	uint32_t sorted_count;
 	uint32_t last_visits; /* debug: # of leaves AABB-tested in the last query */
+	/* Optional Hilbert-radix internal tree over sorted[]. Built by
+	 * pbvh_tree_build iff `internals` is non-null and capacity allows.
+	 * Consumed by pbvh_tree_aabb_query_n. Caller-owned. */
+	pbvh_internal_t *internals;
+	uint32_t internal_capacity;
+	uint32_t internal_count;
+	pbvh_internal_id_t internal_root;
 } pbvh_tree_t;
 
 static inline pbvh_node_id_t pbvh_tree_insert_h(pbvh_tree_t *t, pbvh_eclass_id_t ec,
@@ -95,10 +115,70 @@ static inline void pbvh_tree_update_h(pbvh_tree_t *t, pbvh_node_id_t id,
 	n->hilbert = hilbert;
 }
 
+/* Build one internal node over sorted[lo, hi) by splitting on the highest
+ * bit where the first and last Hilbert codes disagree. Pre-order layout:
+ * the returned id is the slot claimed before any descendant, so internals[]
+ * itself ends up in DFS order (nested-set property on the internals array).
+ *
+ * Returns PBVH_NULL_NODE if the range is empty or the caller-provided
+ * internals[] capacity is exhausted. */
+static inline pbvh_internal_id_t pbvh_build_internal_(pbvh_tree_t *t, uint32_t lo, uint32_t hi) {
+	if (lo >= hi) {
+		return PBVH_NULL_NODE;
+	}
+	if (t->internal_count >= t->internal_capacity) {
+		return PBVH_NULL_NODE;
+	}
+	pbvh_internal_id_t id = t->internal_count++;
+	pbvh_internal_t *n = &t->internals[id];
+	n->offset = lo;
+	n->span = hi - lo;
+	n->bounds = t->nodes[t->sorted[lo]].bounds;
+	for (uint32_t i = lo + 1; i < hi; i++) {
+		n->bounds = aabb_union(&n->bounds, &t->nodes[t->sorted[i]].bounds);
+	}
+	if (hi - lo <= 1) {
+		n->left = PBVH_NULL_NODE;
+		n->right = PBVH_NULL_NODE;
+		return id;
+	}
+	uint32_t h_lo = t->nodes[t->sorted[lo]].hilbert;
+	uint32_t h_hi = t->nodes[t->sorted[hi - 1]].hilbert;
+	uint32_t diff = h_lo ^ h_hi;
+	uint32_t split = lo + (hi - lo) / 2;
+	if (diff != 0u) {
+		uint32_t bit = 31u;
+		while ((diff & (1u << bit)) == 0u) {
+			bit--;
+		}
+		uint32_t mask = 1u << bit;
+		/* first i in [lo, hi) with that bit set — sorted[] is ascending, so
+		 * the set-bit suffix is contiguous. */
+		uint32_t s = hi;
+		for (uint32_t i = lo; i < hi; i++) {
+			if ((t->nodes[t->sorted[i]].hilbert & mask) != 0u) {
+				s = i;
+				break;
+			}
+		}
+		if (s > lo && s < hi) {
+			split = s;
+		}
+	}
+	n->left = pbvh_build_internal_(t, lo, split);
+	n->right = pbvh_build_internal_(t, split, hi);
+	/* `n` pointer may have moved if internals[] were resizable; it's caller-
+	 * owned fixed storage so the pointer stays valid across recursion. */
+	return id;
+}
+
 /* Insertion sort `sorted[]` by nodes[sorted[i]].hilbert ascending.
  * For the tree sizes FabricZone operates on (<=1800) and the fact that
  * Hilbert codes change slowly between frames, insertion sort has the right
- * shape: O(N) on near-sorted inputs, no heap churn. */
+ * shape: O(N) on near-sorted inputs, no heap churn.
+ *
+ * If internals[] is provided, also build the Hilbert-radix internal tree
+ * on top of sorted[] so pbvh_tree_aabb_query_n can use nested-set ranges. */
 static inline void pbvh_tree_build(pbvh_tree_t *t) {
 	uint32_t k = 0;
 	for (uint32_t i = 0; i < t->count; i++) {
@@ -116,6 +196,11 @@ static inline void pbvh_tree_build(pbvh_tree_t *t) {
 			j--;
 		}
 		t->sorted[j] = cur;
+	}
+	t->internal_count = 0u;
+	t->internal_root = PBVH_NULL_NODE;
+	if (t->internals != NULL && t->internal_capacity > 0u && k > 0u) {
+		t->internal_root = pbvh_build_internal_(t, 0u, k);
 	}
 }
 
@@ -202,6 +287,52 @@ static inline int pbvh_query_fits_in_one_cell_(const Aabb *query, const Aabb *sc
 	return ((uint32_t)nxlo >> axis_shift) == ((uint32_t)nxhi >> axis_shift)
 			&& ((uint32_t)nylo >> axis_shift) == ((uint32_t)nyhi >> axis_shift)
 			&& ((uint32_t)nzlo >> axis_shift) == ((uint32_t)nzhi >> axis_shift);
+}
+
+/* Nested-set traversal over the internal tree. Descends from internal_root;
+ * on a bounds miss, the whole subtree is pruned without touching any leaf.
+ * On a terminal (leaf-range) node, iterates sorted[offset .. offset+span).
+ * Falls back to pbvh_tree_aabb_query if the internal tree was not built. */
+static inline int pbvh_tree_aabb_query_n_rec_(pbvh_tree_t *t, pbvh_internal_id_t nid,
+		const Aabb *query, uint32_t *visits,
+		int (*cb)(pbvh_eclass_id_t, void *), void *ud) {
+	if (nid == PBVH_NULL_NODE) {
+		return 0;
+	}
+	const pbvh_internal_t *n = &t->internals[nid];
+	if (!aabb_overlaps(&n->bounds, query)) {
+		return 0;
+	}
+	if (n->left == PBVH_NULL_NODE && n->right == PBVH_NULL_NODE) {
+		for (uint32_t i = n->offset; i < n->offset + n->span; i++) {
+			const pbvh_node_t *leaf = &t->nodes[t->sorted[i]];
+			if (!leaf->is_leaf) {
+				continue;
+			}
+			(*visits)++;
+			if (aabb_overlaps(&leaf->bounds, query)) {
+				if (cb(leaf->eclass, ud) != 0) {
+					return 1;
+				}
+			}
+		}
+		return 0;
+	}
+	if (pbvh_tree_aabb_query_n_rec_(t, n->left, query, visits, cb, ud) != 0) {
+		return 1;
+	}
+	return pbvh_tree_aabb_query_n_rec_(t, n->right, query, visits, cb, ud);
+}
+
+static inline void pbvh_tree_aabb_query_n(pbvh_tree_t *t, const Aabb *query,
+		int (*cb)(pbvh_eclass_id_t, void *), void *ud) {
+	if (t->internals == NULL || t->internal_root == PBVH_NULL_NODE) {
+		pbvh_tree_aabb_query(t, query, cb, ud);
+		return;
+	}
+	uint32_t visits = 0u;
+	pbvh_tree_aabb_query_n_rec_(t, t->internal_root, query, &visits, cb, ud);
+	t->last_visits = visits;
 }
 
 /* Hilbert-prefix bucket query. If `scene` is non-null and the query AABB
