@@ -393,6 +393,49 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_remove hides leaf from query_h with
 			vformat("h-query returned the removed eclass id 0 (stale sorted[] entry); hits=%d", hits.size()));
 }
 
+TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_update_h moves leaf into new Hilbert window") {
+	// One leaf at scene corner A, query at scene corner B after update_h.
+	// The two corners land in distant Hilbert cells, so a stale sort key
+	// keeps the moved leaf out of B's prefix window and the h-query misses.
+	Vector<pbvh_node_t> storage;
+	storage.resize(8);
+	Vector<pbvh_node_id_t> sorted;
+	sorted.resize(8);
+	pbvh_tree_t tree = {};
+	tree.nodes = storage.ptrw();
+	tree.capacity = storage.size();
+	tree.root = PBVH_NULL_NODE;
+	tree.free_head = PBVH_NULL_NODE;
+	tree.sorted = sorted.ptrw();
+
+	const Aabb scene = aabb_from_floats(-BENCH_BOUND, BENCH_BOUND,
+			-BENCH_BOUND, BENCH_BOUND, -BENCH_BOUND, BENCH_BOUND);
+	Aabb box_a = aabb_from_floats(-14.0f, -13.0f, -14.0f, -13.0f, -14.0f, -13.0f);
+	Aabb box_b = aabb_from_floats(13.0f, 14.0f, 13.0f, 14.0f, 13.0f, 14.0f);
+	uint32_t h_a = hilbert_of_aabb(&box_a, &scene);
+	uint32_t h_b = hilbert_of_aabb(&box_b, &scene);
+	REQUIRE(h_a != h_b);
+
+	pbvh_node_id_t id = pbvh_tree_insert_h(&tree, 42u, box_a, h_a);
+	pbvh_tree_build(&tree);
+
+	pbvh_tree_update_h(&tree, id, box_b, h_b);
+	pbvh_tree_build(&tree);
+
+	Vector<uint32_t> hits;
+	struct C {
+		Vector<uint32_t> *out = nullptr;
+	} c;
+	c.out = &hits;
+	pbvh_tree_aabb_query_h(&tree, &box_b, h_b, 6,
+			[](pbvh_eclass_id_t eid, void *ud) {
+				((C *)ud)->out->push_back((uint32_t)eid);
+				return 0;
+			}, &c);
+	CHECK_MESSAGE(hits.has(42u),
+			vformat("h-query at the new position missed the moved leaf; hits=%d", hits.size()));
+}
+
 } // namespace TestPredictiveBVHBench
 
 #endif // MODULE_MULTIPLAYER_FABRIC_ENABLED

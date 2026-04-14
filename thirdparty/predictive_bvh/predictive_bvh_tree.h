@@ -86,6 +86,15 @@ static inline void pbvh_tree_update(pbvh_tree_t *t, pbvh_node_id_t id, Aabb box)
 	t->nodes[id].bounds = box;
 }
 
+/* Update bounds AND hilbert code together. Caller must pbvh_tree_build()
+ * before the next h-query; the sort key has changed so sorted[] is stale. */
+static inline void pbvh_tree_update_h(pbvh_tree_t *t, pbvh_node_id_t id,
+		Aabb box, uint32_t hilbert) {
+	pbvh_node_t *n = &t->nodes[id];
+	n->bounds = box;
+	n->hilbert = hilbert;
+}
+
 /* Insertion sort `sorted[]` by nodes[sorted[i]].hilbert ascending.
  * For the tree sizes FabricZone operates on (<=1800) and the fact that
  * Hilbert codes change slowly between frames, insertion sort has the right
