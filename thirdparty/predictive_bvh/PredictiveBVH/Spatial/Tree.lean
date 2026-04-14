@@ -474,4 +474,82 @@ theorem buildSubtree_size_ge (leaves : Array PbvhLeaf) (sorted : Array LeafId) :
       simp
       omega
 
+/-- Strictly-increasing corollary: the returned root index is a valid slot in
+    the final internals array. Lets callers safely `[r]!` the root. -/
+theorem buildSubtree_root_lt_size (leaves : Array PbvhLeaf) (sorted : Array LeafId)
+    (internals : Array PbvhInternal) (lo hi : Nat) :
+    (buildSubtree leaves sorted internals lo hi).2 <
+      (buildSubtree leaves sorted internals lo hi).1.size := by
+  -- `.2 = internals.size` and `.1.size ≥ internals.size + 1`, since the base
+  -- case pushes a leaf and the recursive case pushes a placeholder first.
+  rw [buildSubtree_root]
+  unfold buildSubtree
+  split
+  · simp [Array.size_push]
+  · dsimp only
+    obtain ⟨mid, _, _⟩ := computeMid leaves sorted lo hi (by omega)
+    let ph : PbvhInternal :=
+      { bounds := windowBounds leaves sorted lo hi, offset := lo,
+        span := hi - lo, skip := internals.size + 1,
+        left := none, right := none }
+    let state0 := internals.push ph
+    have h0 : internals.size + 1 = state0.size := by
+      show internals.size + 1 = (internals.push ph).size
+      simp [Array.size_push]
+    have h1 := buildSubtree_size_ge leaves sorted _ state0 lo mid rfl
+    have h2 := buildSubtree_size_ge leaves sorted _
+      (buildSubtree leaves sorted state0 lo mid).1 mid hi rfl
+    show internals.size <
+      ((buildSubtree leaves sorted
+          (buildSubtree leaves sorted state0 lo mid).1 mid hi).1.set!
+        internals.size _).size
+    simp
+    omega
+
+/-- After `buildSubtree`, the root node's `skip` field equals the final
+    `internals.size`. This is the load-bearing invariant: it means the subtree
+    rooted at `myIdx` occupies exactly the contiguous range `[myIdx, skip)` in
+    the final array, so pruning that subtree is a single index assignment. -/
+theorem buildSubtree_skip_eq_final_size
+    (leaves : Array PbvhLeaf) (sorted : Array LeafId)
+    (internals : Array PbvhInternal) (lo hi : Nat) :
+    let r := (buildSubtree leaves sorted internals lo hi).1
+    r[(buildSubtree leaves sorted internals lo hi).2]!.skip = r.size := by
+  rw [buildSubtree_root]
+  unfold buildSubtree
+  split
+  · -- Base: pushed leaf has skip := internals.size + 1 = (internals.push leaf).size
+    dsimp only
+    show (internals.push _)[internals.size]!.skip = (internals.push _).size
+    rw [Array.getElem!_eq_getD, Array.getD, dif_pos (by simp [Array.size_push])]
+    simp [Array.getElem_push_eq]
+  · -- Recursive: final `set! myIdx updated` writes updated.skip = inner.size;
+    -- since myIdx < inner.size, the readback yields updated.skip = outer.size.
+    dsimp only
+    obtain ⟨mid, _, _⟩ := computeMid leaves sorted lo hi (by omega)
+    let ph : PbvhInternal :=
+      { bounds := windowBounds leaves sorted lo hi, offset := lo,
+        span := hi - lo, skip := internals.size + 1,
+        left := none, right := none }
+    let state0 := internals.push ph
+    have h0 : state0.size = internals.size + 1 := by
+      show (internals.push ph).size = internals.size + 1
+      simp [Array.size_push]
+    have h1 := buildSubtree_size_ge leaves sorted _ state0 lo mid rfl
+    have h2 := buildSubtree_size_ge leaves sorted _
+      (buildSubtree leaves sorted state0 lo mid).1 mid hi rfl
+    have hmyIdx : internals.size <
+        (buildSubtree leaves sorted
+          (buildSubtree leaves sorted state0 lo mid).1 mid hi).1.size := by
+      omega
+    show ((buildSubtree leaves sorted _ mid hi).1.set! internals.size _)[internals.size]!.skip = _
+    rw [Array.getElem!_eq_getD, Array.getD, dif_pos (by simp; exact hmyIdx)]
+    simp
+
+/-- Structural subtree size in the internals array: under the invariants
+    established by `build` (every internal's `skip` points past its subtree in
+    the nested-set pre-order DFS layout), `subtreeSize t i = skip - i`. -/
+def subtreeSize (t : PbvhTree) (i : InternalId) : Nat :=
+  if h : i < t.internals.size then t.internals[i].skip - i else 0
+
 end PbvhTree
