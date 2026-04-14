@@ -556,6 +556,48 @@ TEST_CASE("[FabricZone][Broadphase] ghost-overlapping-pairs count matches brute 
 			vformat("Expected %d overlapping ghost pairs (all %d entities co-located), got %d", expected, N, pairs));
 }
 
+TEST_CASE("[FabricZone][Broadphase] wide ghost AABBs across Hilbert cells still pair") {
+	// Two entities 2 m apart with ghost bounds that extend ~1.5 m each side
+	// → their ghost AABBs overlap in space, but their Hilbert cell codes at
+	// prefix=6 (cell width ≈ 30/64 ≈ 0.47 m) are four cells apart. A naive
+	// prefix prune drops the pair; the broadphase must still surface it.
+	ZoneState za;
+	za.alloc();
+
+	struct EntSpec {
+		real_t cx, cy, cz;
+	};
+	const EntSpec specs[2] = {
+		{ -6.0, 0.0, 0.0 },
+		{ 6.0, 0.0, 0.0 },
+	};
+
+	for (int i = 0; i < 2; i++) {
+		za.slots[i].active = true;
+		za.slots[i].entity.global_id = i;
+		za.slots[i].entity.cx = specs[i].cx;
+		za.slots[i].entity.cy = specs[i].cy;
+		za.slots[i].entity.cz = specs[i].cz;
+		za.slots[i].snap.cx = specs[i].cx;
+		za.slots[i].snap.cy = specs[i].cy;
+		za.slots[i].snap.cz = specs[i].cz;
+		// Ghost extent ≈ 7 m each side so the two AABBs overlap near x=0
+		// despite the 12 m spacing between centers.
+		za.slots[i].snap.vx = 140.0;
+		za.slots[i].snap.vy = 0.5;
+		za.slots[i].snap.vz = 0.5;
+		za.slots[i].snap.max_ahx = 20.0;
+		za.slots[i].snap.max_ahy = 1.0;
+		za.slots[i].snap.max_ahz = 1.0;
+		za.slots[i].snap.ticks_since_snap = 2;
+		za.entity_count++;
+	}
+
+	const int pairs = FabricZone::_count_ghost_overlapping_pairs_s(za.slots, za.capacity);
+	CHECK_MESSAGE(pairs == 1,
+			vformat("Expected 1 cross-cell overlapping pair, got %d (prefix prune likely dropped it)", pairs));
+}
+
 } // namespace TestFabricZone
 
 #endif // MODULE_MULTIPLAYER_FABRIC_ENABLED

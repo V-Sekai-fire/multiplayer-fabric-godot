@@ -2244,7 +2244,7 @@ int FabricZone::_count_ghost_overlapping_pairs_s(const EntitySlot *p_slots, int 
 		uint32_t hcode = hilbert_of_aabb(&g, &scene);
 		GhostPairCB cb;
 		cb.self_id = (pbvh_eclass_id_t)i;
-		pbvh_tree_aabb_query_h(&tree, &g, hcode, PREFIX_BITS, _ghost_pair_cb, &cb);
+		pbvh_tree_aabb_query_h(&tree, &g, hcode, PREFIX_BITS, &scene, _ghost_pair_cb, &cb);
 		pairs += cb.matches;
 	}
 	return pairs;

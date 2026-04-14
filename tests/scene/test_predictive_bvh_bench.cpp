@@ -334,7 +334,7 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_aabb_query_h matches linear scan, p
 				}, &lc);
 		total_visits_linear += tree.last_visits;
 
-		pbvh_tree_aabb_query_h(&tree, &r128s[i].box, r128s[i].hilbert, PREFIX_BITS,
+		pbvh_tree_aabb_query_h(&tree, &r128s[i].box, r128s[i].hilbert, PREFIX_BITS, nullptr,
 				[](pbvh_eclass_id_t id, void *ud) {
 					((Collect *)ud)->out->push_back((uint32_t)id);
 					return 0;
@@ -384,7 +384,7 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_remove hides leaf from query_h with
 		Vector<uint32_t> *out = nullptr;
 	} c;
 	c.out = &hits;
-	pbvh_tree_aabb_query_h(&tree, &r128s[0].box, r128s[0].hilbert, 6,
+	pbvh_tree_aabb_query_h(&tree, &r128s[0].box, r128s[0].hilbert, 6, nullptr,
 			[](pbvh_eclass_id_t id, void *ud) {
 				((C *)ud)->out->push_back((uint32_t)id);
 				return 0;
@@ -427,7 +427,7 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_update_h moves leaf into new Hilber
 		Vector<uint32_t> *out = nullptr;
 	} c;
 	c.out = &hits;
-	pbvh_tree_aabb_query_h(&tree, &box_b, h_b, 6,
+	pbvh_tree_aabb_query_h(&tree, &box_b, h_b, 6, &scene,
 			[](pbvh_eclass_id_t eid, void *ud) {
 				((C *)ud)->out->push_back((uint32_t)eid);
 				return 0;

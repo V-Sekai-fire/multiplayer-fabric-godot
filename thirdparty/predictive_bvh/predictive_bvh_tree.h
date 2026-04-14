@@ -166,12 +166,55 @@ static inline void pbvh_tree_aabb_query(pbvh_tree_t *t, const Aabb *query,
 	t->last_visits = visits;
 }
 
-/* Hilbert-prefix bucket query. Visits only the prefix window in `sorted[]`.
- * Requires pbvh_tree_build() to have been called since the last mutation. */
+/* Return 1 iff the query AABB fits inside a single Hilbert prefix cell at
+ * the given prefix_bits under the supplied scene AABB. Hilbert3D at prefix
+ * P (multiple of 3) is an axis-aligned 2^(P/3) × 2^(P/3) × 2^(P/3) grid,
+ * so the check reduces to: do min/max corners agree on the top (P/3) bits
+ * of each axis's 10-bit quantization? */
+static inline int pbvh_query_fits_in_one_cell_(const Aabb *query, const Aabb *scene,
+		uint32_t prefix_bits) {
+	if (prefix_bits == 0u || (prefix_bits % 3u) != 0u) {
+		return 0;
+	}
+	const uint32_t bits_per_axis = prefix_bits / 3u;
+	const uint32_t axis_shift = 10u - bits_per_axis;
+	R128 sw = r128_sub(scene->max_x, scene->min_x);
+	R128 sh = r128_sub(scene->max_y, scene->min_y);
+	R128 sd = r128_sub(scene->max_z, scene->min_z);
+	R128 k1024 = r128_from_int(1024LL);
+	int64_t swi = r128_to_int(sw), shi = r128_to_int(sh), sdi = r128_to_int(sd);
+	if (swi <= 0) swi = 1;
+	if (shi <= 0) shi = 1;
+	if (sdi <= 0) sdi = 1;
+	int64_t nxlo = r128_to_int(r128_mul(r128_sub(query->min_x, scene->min_x), k1024)) / swi;
+	int64_t nxhi = r128_to_int(r128_mul(r128_sub(query->max_x, scene->min_x), k1024)) / swi;
+	int64_t nylo = r128_to_int(r128_mul(r128_sub(query->min_y, scene->min_y), k1024)) / shi;
+	int64_t nyhi = r128_to_int(r128_mul(r128_sub(query->max_y, scene->min_y), k1024)) / shi;
+	int64_t nzlo = r128_to_int(r128_mul(r128_sub(query->min_z, scene->min_z), k1024)) / sdi;
+	int64_t nzhi = r128_to_int(r128_mul(r128_sub(query->max_z, scene->min_z), k1024)) / sdi;
+	const int64_t clamp_hi = 1023;
+	if (nxlo < 0) nxlo = 0; if (nxlo > clamp_hi) nxlo = clamp_hi;
+	if (nxhi < 0) nxhi = 0; if (nxhi > clamp_hi) nxhi = clamp_hi;
+	if (nylo < 0) nylo = 0; if (nylo > clamp_hi) nylo = clamp_hi;
+	if (nyhi < 0) nyhi = 0; if (nyhi > clamp_hi) nyhi = clamp_hi;
+	if (nzlo < 0) nzlo = 0; if (nzlo > clamp_hi) nzlo = clamp_hi;
+	if (nzhi < 0) nzhi = 0; if (nzhi > clamp_hi) nzhi = clamp_hi;
+	return ((uint32_t)nxlo >> axis_shift) == ((uint32_t)nxhi >> axis_shift)
+			&& ((uint32_t)nylo >> axis_shift) == ((uint32_t)nyhi >> axis_shift)
+			&& ((uint32_t)nzlo >> axis_shift) == ((uint32_t)nzhi >> axis_shift);
+}
+
+/* Hilbert-prefix bucket query. If `scene` is non-null and the query AABB
+ * spans more than one prefix cell, falls back to a linear scan to preserve
+ * correctness. Requires pbvh_tree_build() since the last mutation. */
 static inline void pbvh_tree_aabb_query_h(pbvh_tree_t *t, const Aabb *query,
-		uint32_t query_hilbert, uint32_t prefix_bits,
+		uint32_t query_hilbert, uint32_t prefix_bits, const Aabb *scene,
 		int (*cb)(pbvh_eclass_id_t, void *), void *ud) {
 	if (prefix_bits == 0u || prefix_bits >= 30u) {
+		pbvh_tree_aabb_query(t, query, cb, ud);
+		return;
+	}
+	if (scene != NULL && !pbvh_query_fits_in_one_cell_(query, scene, prefix_bits)) {
 		pbvh_tree_aabb_query(t, query, cb, ud);
 		return;
 	}
