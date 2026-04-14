@@ -17,6 +17,7 @@ import PredictiveBVH.Protocol.WaypointBound
 -- Scale and capacity proofs
 import PredictiveBVH.Formulas.ScaleProofs
 import PredictiveBVH.Spatial.ScaleContradictions
+import PredictiveBVH.Spatial.EMLAdversarialHeuristic
 import PredictiveBVH.Protocol.ScaleContradictionsGapClass
 import PredictiveBVH.Protocol.AbyssalSLA
 
