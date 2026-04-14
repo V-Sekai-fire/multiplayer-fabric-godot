@@ -367,19 +367,22 @@ static inline uint64_t pbvh_accel_floor_um_per_tick2(uint32_t hz) {
 /* ══════════════════════════════════════════════════════════════════════════
    EML ADVERSARIAL GAP BOUNDS (C1..C7, R128, e-graph optimized)
    Source: PredictiveBVH/Spatial/EMLAdversarialHeuristic.lean
-   Constants are baked at PBVH_SIM_TICK_HZ; regenerate after any
-   change to simTickHz in Primitives/Types.lean.
+   All physical constants (v_max, accel_floor, latency_ticks, sat_delta,
+   v_funnel, chunk_origin_offset_um) are runtime parameters — pass the
+   pbvh_* helpers from constantsC above, so the bounds track the engine's
+   actual physics tick rate instead of the default baked into Types.lean.
    ══════════════════════════════════════════════════════════════════════════ */
 
-static inline R128 pbvh_eml_c1_velocity_injection_gap(R128 v_true, R128 delta) {
-    R128 t0 = r128_add(v_true, r128_neg(r128_from_int(500000LL)));
-    R128 t1 = r128_mul(t0, delta);
-    return t1;
+static inline R128 pbvh_eml_c1_velocity_injection_gap(R128 v_true, R128 v_max, R128 delta) {
+    R128 t0 = r128_mul(r128_neg(R128_ONE), v_max);
+    R128 t1 = r128_add(v_true, t0);
+    R128 t2 = r128_mul(t1, delta);
+    return t2;
 }
 
-static inline R128 pbvh_eml_c2_acceleration_underreport_gap(R128 delta) {
+static inline R128 pbvh_eml_c2_acceleration_underreport_gap(R128 accel_floor, R128 delta) {
     R128 t0 = r128_mul(delta, delta);
-    R128 t1 = r128_mul(r128_from_int(1750LL), t0);
+    R128 t1 = r128_mul(accel_floor, t0);
     return t1;
 }
 
@@ -389,26 +392,28 @@ static inline R128 pbvh_eml_c3_portal_discontinuity_gap(R128 jump_um, R128 ghost
     return t1;
 }
 
-static inline R128 pbvh_eml_c4_lifecycle_gap_bound(R128 v) {
-    R128 t0 = r128_mul(v, r128_from_int(2LL));
+static inline R128 pbvh_eml_c4_lifecycle_gap_bound(R128 v, R128 latency_ticks) {
+    R128 t0 = r128_mul(v, latency_ticks);
     return t0;
 }
 
-static inline R128 pbvh_eml_c5_satellite_rtt_gap(R128 v, R128 local_delta) {
-    R128 t0 = r128_mul(local_delta, r128_neg(R128_ONE));
-    R128 t1 = r128_add(r128_from_int(40LL), t0);
+static inline R128 pbvh_eml_c5_satellite_rtt_gap(R128 v, R128 sat_delta, R128 local_delta) {
+    R128 t0 = r128_mul(r128_neg(R128_ONE), local_delta);
+    R128 t1 = r128_add(sat_delta, t0);
     R128 t2 = r128_mul(v, t1);
     return t2;
 }
 
-static inline R128 pbvh_eml_c6_coord_frame_offset_gap() {
+static inline R128 pbvh_eml_c6_coord_frame_offset_gap(R128 chunk_origin_offset_um) {
 
-    return r128_from_int(1000000000LL);
+    return chunk_origin_offset_um;
 }
 
-static inline R128 pbvh_eml_c7_segment_boundary_gap(R128 delta) {
-    R128 t0 = r128_mul(r128_from_int(2500000LL), delta);
-    return t0;
+static inline R128 pbvh_eml_c7_segment_boundary_gap(R128 v_funnel, R128 v_max, R128 delta) {
+    R128 t0 = r128_mul(r128_neg(R128_ONE), v_max);
+    R128 t1 = r128_add(v_funnel, t0);
+    R128 t2 = r128_mul(t1, delta);
+    return t2;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

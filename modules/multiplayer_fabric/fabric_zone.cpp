@@ -937,17 +937,15 @@ void FabricZone::initialize() {
 	SceneTree::initialize();
 
 	// ── EML proof-linkage check (C4 lifecycle gap) ──────────────────────
-	// pbvh_eml_c4_lifecycle_gap_bound(v) is Lean-derived (EMLAdversarialHeuristic.lean)
-	// and equals v * (simTickHz / 10) baked at PBVH_SIM_TICK_HZ. Verify it matches
-	// the ticks*v composition Godot uses for the migration in-flight window. If
-	// simTickHz in Primitives/Types.lean drifts from PBVH_SIM_TICK_HZ at
-	// initialization, this fires in dev builds and the header must be regenerated.
+	// pbvh_eml_c4_lifecycle_gap_bound(v, latency_ticks) is Lean-derived
+	// (EMLAdversarialHeuristic.lean): gap = v * latency_ticks. Verify the
+	// emitted R128 body agrees with a direct r128_mul under the current
+	// engine physics rate — catches genC/r128 emission drift in dev builds.
 	{
-		const R128 v_default = r128_from_int(pbvh_v_max_physical_um_per_tick(PBVH_SIM_TICK_HZ));
-		const R128 c4_bound = pbvh_eml_c4_lifecycle_gap_bound(v_default);
-		const R128 latency_r128 = r128_from_int((int64_t)pbvh_latency_ticks(PBVH_SIM_TICK_HZ));
-		const R128 expected = r128_mul(v_default, latency_r128);
-		DEV_ASSERT(r128_eq(c4_bound, expected));
+		const uint32_t hz = (uint32_t)Engine::get_singleton()->get_physics_ticks_per_second();
+		const R128 v = r128_from_int(pbvh_v_max_physical_um_per_tick(hz));
+		const R128 latency = r128_from_int((int64_t)pbvh_latency_ticks(hz));
+		DEV_ASSERT(r128_eq(pbvh_eml_c4_lifecycle_gap_bound(v, latency), r128_mul(v, latency)));
 	}
 
 	// ── Parse optional overrides from command line ──────────────────────

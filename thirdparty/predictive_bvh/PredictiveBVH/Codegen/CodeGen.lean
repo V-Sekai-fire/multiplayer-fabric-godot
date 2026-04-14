@@ -1191,16 +1191,18 @@ private def emlC : String :=
   "/* ══════════════════════════════════════════════════════════════════════════\n" ++
   "   EML ADVERSARIAL GAP BOUNDS (C1..C7, R128, e-graph optimized)\n" ++
   "   Source: PredictiveBVH/Spatial/EMLAdversarialHeuristic.lean\n" ++
-  "   Constants are baked at PBVH_SIM_TICK_HZ; regenerate after any\n" ++
-  "   change to simTickHz in Primitives/Types.lean.\n" ++
+  "   All physical constants (v_max, accel_floor, latency_ticks, sat_delta,\n" ++
+  "   v_funnel, chunk_origin_offset_um) are runtime parameters — pass the\n" ++
+  "   pbvh_* helpers from constantsC above, so the bounds track the engine's\n" ++
+  "   actual physics tick rate instead of the default baked into Types.lean.\n" ++
   "   ══════════════════════════════════════════════════════════════════════════ */\n\n" ++
-  genC "pbvh_eml_c1_velocity_injection_gap"       ["v_true", "delta"]             c1GapFormula ++ "\n\n" ++
-  genC "pbvh_eml_c2_acceleration_underreport_gap" ["delta"]                       c2GapFormula ++ "\n\n" ++
-  genC "pbvh_eml_c3_portal_discontinuity_gap"     ["jump_um", "ghost_bound_um"]   c3GapFormula ++ "\n\n" ++
-  genC "pbvh_eml_c4_lifecycle_gap_bound"          ["v"]                           c4GapFormula ++ "\n\n" ++
-  genC "pbvh_eml_c5_satellite_rtt_gap"            ["v", "local_delta"]            c5GapFormula ++ "\n\n" ++
-  genC "pbvh_eml_c6_coord_frame_offset_gap"       []                              c6GapFormula ++ "\n\n" ++
-  genC "pbvh_eml_c7_segment_boundary_gap"         ["delta"]                       c7GapFormula
+  genC "pbvh_eml_c1_velocity_injection_gap"       ["v_true", "v_max", "delta"]              c1GapFormula ++ "\n\n" ++
+  genC "pbvh_eml_c2_acceleration_underreport_gap" ["accel_floor", "delta"]                  c2GapFormula ++ "\n\n" ++
+  genC "pbvh_eml_c3_portal_discontinuity_gap"     ["jump_um", "ghost_bound_um"]             c3GapFormula ++ "\n\n" ++
+  genC "pbvh_eml_c4_lifecycle_gap_bound"          ["v", "latency_ticks"]                    c4GapFormula ++ "\n\n" ++
+  genC "pbvh_eml_c5_satellite_rtt_gap"            ["v", "sat_delta", "local_delta"]         c5GapFormula ++ "\n\n" ++
+  genC "pbvh_eml_c6_coord_frame_offset_gap"       ["chunk_origin_offset_um"]                c6GapFormula ++ "\n\n" ++
+  genC "pbvh_eml_c7_segment_boundary_gap"         ["v_funnel", "v_max", "delta"]            c7GapFormula
 
 -- ── C: Assemble complete header file ────────────────────────────────────────
 

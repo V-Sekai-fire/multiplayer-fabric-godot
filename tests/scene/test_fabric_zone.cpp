@@ -234,41 +234,46 @@ TEST_CASE("[FabricZone] hilbert_cell_of_aabb returns AABB containing the input p
 //
 // Each pbvh_eml_c*_*_gap helper is emitted from PredictiveBVH/Spatial/
 // EMLAdversarialHeuristic.lean via bvh-codegen (opt → toLowLevel → R128 C).
-// These tests verify the emitted bodies match what fabric_zone.cpp would
-// compute by hand, so a drift between Lean constants and PBVH_SIM_TICK_HZ
-// fails here instead of silently miscomputing migration windows.
+// All physical constants are runtime parameters, so callers pass the
+// pbvh_v_max_physical_um_per_tick / pbvh_latency_ticks / pbvh_accel_floor
+// helpers (parametric in hz) — these tests exercise the emitted bodies
+// with both default-hz and off-default values to prove they track hz.
 
-TEST_CASE("[FabricZone][EML] C4 lifecycle gap equals v * pbvh_latency_ticks at default hz") {
-	const int64_t v_um = pbvh_v_max_physical_um_per_tick(PBVH_SIM_TICK_HZ);
-	const R128 c4 = pbvh_eml_c4_lifecycle_gap_bound(r128_from_int(v_um));
-	const R128 expected = r128_mul(r128_from_int(v_um),
-			r128_from_int((int64_t)pbvh_latency_ticks(PBVH_SIM_TICK_HZ)));
-	CHECK(r128_eq(c4, expected));
+TEST_CASE("[FabricZone][EML] C4 lifecycle gap equals v * latency_ticks at arbitrary hz") {
+	for (uint32_t hz : { (uint32_t)PBVH_SIM_TICK_HZ, 60u, 144u }) {
+		const R128 v = r128_from_int(pbvh_v_max_physical_um_per_tick(hz));
+		const R128 latency = r128_from_int((int64_t)pbvh_latency_ticks(hz));
+		CHECK(r128_eq(pbvh_eml_c4_lifecycle_gap_bound(v, latency), r128_mul(v, latency)));
+	}
 }
 
 TEST_CASE("[FabricZone][EML] C1 velocity-injection gap = (v_true - v_max) * delta") {
-	// Cheat: compare at v_true == v_max → gap must be zero regardless of delta.
 	const R128 v_max = r128_from_int(pbvh_v_max_physical_um_per_tick(PBVH_SIM_TICK_HZ));
 	const R128 delta = r128_from_int(5);
-	const R128 gap = pbvh_eml_c1_velocity_injection_gap(v_max, delta);
-	CHECK(r128_eq(gap, R128_ZERO));
+	// v_true == v_max → gap must be zero regardless of delta.
+	CHECK(r128_eq(pbvh_eml_c1_velocity_injection_gap(v_max, v_max, delta), R128_ZERO));
 
-	// Positive case: 1 μm over v_max for 3 ticks → 3 μm gap.
+	// 1 μm over v_max for 3 ticks → 3 μm gap.
 	const R128 v_over = r128_add(v_max, R128_ONE);
-	const R128 gap_over = pbvh_eml_c1_velocity_injection_gap(v_over, r128_from_int(3));
-	CHECK(r128_eq(gap_over, r128_from_int(3)));
+	CHECK(r128_eq(pbvh_eml_c1_velocity_injection_gap(v_over, v_max, r128_from_int(3)),
+			r128_from_int(3)));
 }
 
 TEST_CASE("[FabricZone][EML] C7 segment-boundary gap scales linearly with delta") {
-	const R128 g1 = pbvh_eml_c7_segment_boundary_gap(r128_from_int(1));
-	const R128 g4 = pbvh_eml_c7_segment_boundary_gap(r128_from_int(4));
-	// g4 must be exactly 4 * g1 (linear in delta).
+	const R128 v_funnel = r128_from_int(3000000LL); // μm/tick at default hz
+	const R128 v_max = r128_from_int(pbvh_v_max_physical_um_per_tick(PBVH_SIM_TICK_HZ));
+	const R128 g1 = pbvh_eml_c7_segment_boundary_gap(v_funnel, v_max, r128_from_int(1));
+	const R128 g4 = pbvh_eml_c7_segment_boundary_gap(v_funnel, v_max, r128_from_int(4));
 	CHECK(r128_eq(g4, r128_mul(g1, r128_from_int(4))));
 }
 
-TEST_CASE("[FabricZone][EML] C6 coord-frame offset equals chunkOriginOffsetUm (1 km)") {
-	const R128 g = pbvh_eml_c6_coord_frame_offset_gap();
-	CHECK(r128_eq(g, r128_from_int(1000000000LL))); // 1 km in μm
+TEST_CASE("[FabricZone][EML] C6 coord-frame offset is the identity (pass-through)") {
+	// Caller supplies the offset — default chunkOriginOffsetUm = 1 km, but
+	// the helper accepts any μm offset for per-deployment overrides.
+	for (int64_t offset : { 1000000000LL, 500000LL, 42LL }) {
+		const R128 g = pbvh_eml_c6_coord_frame_offset_gap(r128_from_int(offset));
+		CHECK(r128_eq(g, r128_from_int(offset)));
+	}
 }
 
 // ── Migration state-machine tests ──────────────────────────────────────────

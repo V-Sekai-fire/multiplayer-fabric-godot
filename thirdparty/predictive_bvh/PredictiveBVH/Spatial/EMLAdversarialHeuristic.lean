@@ -28,9 +28,9 @@ open AmoLean.EGraph
 -- ============================================================================
 
 def c1GapFormula : Expr Int :=
-  -- (vTrue - vMaxPhysical) * delta
-  -- var 0 = vTrue, var 1 = delta
-  .mul (.add (.var 0) (.const (- (vMaxPhysical : Int)))) (.var 1)
+  -- (vTrue - vMax) * delta
+  -- var 0 = vTrue, var 1 = vMax, var 2 = delta
+  .mul (.add (.var 0) (.mul (.const (-1)) (.var 1))) (.var 2)
 
 def saturateC1Heuristic : (EGraph.EClassId × EGraph) :=
   EGraph.addExpr EGraph.empty c1GapFormula
@@ -46,9 +46,10 @@ def extractOptimalC1Bound : Option (Expr Int) :=
 -- ============================================================================
 
 def c2GapFormula : Expr Int :=
-  -- aHalfMinForearm * delta^2
-  -- var 0 = delta
-  .mul (.const (aHalfMinForearm : Int)) (.pow (.var 0) 2)
+  -- accelFloor * delta^2
+  -- var 0 = accelFloor (caller supplies pbvh_accel_floor_um_per_tick2(hz)),
+  -- var 1 = delta
+  .mul (.var 0) (.pow (.var 1) 2)
 
 def saturateC2Heuristic : (EGraph.EClassId × EGraph) :=
   EGraph.addExpr EGraph.empty c2GapFormula
@@ -82,9 +83,9 @@ def extractOptimalC3Bound : Option (Expr Int) :=
 -- ============================================================================
 
 def c4GapFormula : Expr Int :=
-  -- v * 2 (assuming 20Hz / 10 = 2 ticks latency)
-  -- var 0 = v
-  .mul (.var 0) (.const ((simTickHz : Int) / 10))
+  -- v * latency_ticks
+  -- var 0 = v, var 1 = latency_ticks (caller supplies pbvh_latency_ticks(hz))
+  .mul (.var 0) (.var 1)
 
 def saturateC4Heuristic : (EGraph.EClassId × EGraph) :=
   EGraph.addExpr EGraph.empty c4GapFormula
@@ -100,9 +101,9 @@ def extractOptimalC4Bound : Option (Expr Int) :=
 -- ============================================================================
 
 def c5GapFormula : Expr Int :=
-  -- v * (satelliteDelta - localDelta)
-  -- var 0 = v, satelliteDelta is var 1 (or constant)
-  .mul (.var 0) (.add (.const (satelliteDelta : Int)) (.mul (.var 1) (.const (-1))))
+  -- v * (sat_delta - local_delta)
+  -- var 0 = v, var 1 = sat_delta (ticks), var 2 = local_delta (ticks)
+  .mul (.var 0) (.add (.var 1) (.mul (.const (-1)) (.var 2)))
 
 def saturateC5Heuristic : (EGraph.EClassId × EGraph) :=
   EGraph.addExpr EGraph.empty c5GapFormula
@@ -118,8 +119,12 @@ def extractOptimalC5Bound : Option (Expr Int) :=
 -- ============================================================================
 
 def c6GapFormula : Expr Int :=
-  -- A constant coordinate injection gap
-  .const (chunkOriginOffsetUm : Int)
+  -- Coordinate-space offset between zones (tick-rate-invariant physical
+  -- distance). Caller supplies the offset in μm (default
+  -- chunkOriginOffsetUm = 1 km), allowing per-deployment overrides (e.g.
+  -- tighter offsets for unit tests, looser for world-scale fabrics).
+  -- var 0 = chunk_origin_offset_um
+  .var 0
 
 def saturateC6Heuristic : (EGraph.EClassId × EGraph) :=
   EGraph.addExpr EGraph.empty c6GapFormula
@@ -135,9 +140,9 @@ def extractOptimalC6Bound : Option (Expr Int) :=
 -- ============================================================================
 
 def c7GapFormula : Expr Int :=
-  -- (currentFunnelPeakV - vMaxPhysical) * delta
-  -- var 0 = delta
-  .mul (.const ((currentFunnelPeakVUmTick : Int) - (vMaxPhysical : Int))) (.var 0)
+  -- (v_funnel - v_max) * delta
+  -- var 0 = v_funnel, var 1 = v_max, var 2 = delta
+  .mul (.add (.var 0) (.mul (.const (-1)) (.var 1))) (.var 2)
 
 def saturateC7Heuristic : (EGraph.EClassId × EGraph) :=
   EGraph.addExpr EGraph.empty c7GapFormula
