@@ -2188,17 +2188,8 @@ bool FabricZone::physics_process(double p_time) {
 // ── Broadphase diagnostic ───────────────────────────────────────────────────
 
 namespace {
-struct GhostPairCB {
-	pbvh_eclass_id_t self_id = 0;
-	int matches = 0;
-};
-
-int _ghost_pair_cb(pbvh_eclass_id_t other, void *ud) {
-	GhostPairCB *cb = (GhostPairCB *)ud;
-	if (other > cb->self_id) { // (i<j) convention — each unordered pair counted once
-		cb->matches++;
-	}
-	return 0;
+int _ghost_pair_noop_cb(pbvh_eclass_id_t, pbvh_eclass_id_t, void *) {
+	return 0; // counting happens inside pbvh_tree_enumerate_pairs
 }
 } // namespace
 
@@ -2210,17 +2201,22 @@ int FabricZone::_count_ghost_overlapping_pairs_s(const EntitySlot *p_slots, int 
 	storage.resize(p_capacity);
 	Vector<pbvh_node_id_t> sorted;
 	sorted.resize(p_capacity);
+	Vector<pbvh_internal_t> internals;
+	internals.resize(2 * p_capacity);
+
 	pbvh_tree_t tree = {};
 	tree.nodes = storage.ptrw();
 	tree.capacity = (uint32_t)storage.size();
 	tree.root = PBVH_NULL_NODE;
 	tree.free_head = PBVH_NULL_NODE;
 	tree.sorted = sorted.ptrw();
+	tree.internals = internals.ptrw();
+	tree.internal_capacity = (uint32_t)internals.size();
+	tree.internal_root = PBVH_NULL_NODE;
 
 	const Aabb scene = aabb_from_floats(-SIM_BOUND, SIM_BOUND,
 			-SIM_BOUND, SIM_BOUND, -SIM_BOUND, SIM_BOUND);
 
-	// Pass 1: insert every active slot's ghost AABB keyed by Hilbert code.
 	for (int i = 0; i < p_capacity; i++) {
 		if (!p_slots[i].active) {
 			continue;
@@ -2230,24 +2226,7 @@ int FabricZone::_count_ghost_overlapping_pairs_s(const EntitySlot *p_slots, int 
 		pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i, g, hcode);
 	}
 	pbvh_tree_build(&tree);
-
-	// Pass 2: query each active slot's ghost AABB, count (i<j) overlaps.
-	// prefix_bits=6 mirrors the bench's 2 m-cell prune; ghost AABBs expand
-	// across cells so larger prefixes would drop true overlaps.
-	constexpr uint32_t PREFIX_BITS = 6u;
-	int pairs = 0;
-	for (int i = 0; i < p_capacity; i++) {
-		if (!p_slots[i].active) {
-			continue;
-		}
-		Aabb g = _ghost_aabb_from_snap(p_slots[i].snap);
-		uint32_t hcode = hilbert_of_aabb(&g, &scene);
-		GhostPairCB cb;
-		cb.self_id = (pbvh_eclass_id_t)i;
-		pbvh_tree_aabb_query_h(&tree, &g, hcode, PREFIX_BITS, &scene, _ghost_pair_cb, &cb);
-		pairs += cb.matches;
-	}
-	return pairs;
+	return pbvh_tree_enumerate_pairs(&tree, _ghost_pair_noop_cb, nullptr);
 }
 
 // ── Migration sub-routines (public static for testability) ──────────────────

@@ -290,9 +290,8 @@ TEST_CASE("[PredictiveBVH][Bench] R128 vs float vs Hilbert-prefix vs DynamicBVH"
 	run_one_n(4096);
 }
 
-TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_aabb_query_h matches linear scan, prunes visits") {
+TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_aabb_query_n matches linear scan, prunes visits") {
 	constexpr uint32_t N = 1024;
-	constexpr uint32_t PREFIX_BITS = 6; // 2 m cells at scene size 30 m
 	Vector<FloatLeaf> floats;
 	Vector<R128Leaf> r128s;
 	generate_dataset(N, 0xF00DFEEDull, floats, r128s);
@@ -301,6 +300,8 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_aabb_query_h matches linear scan, p
 	storage.resize(N + 8);
 	Vector<pbvh_node_id_t> sorted;
 	sorted.resize(N + 8);
+	Vector<pbvh_internal_t> internals;
+	internals.resize(2 * (N + 8));
 
 	pbvh_tree_t tree = {};
 	tree.nodes = storage.ptrw();
@@ -308,24 +309,24 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_aabb_query_h matches linear scan, p
 	tree.root = PBVH_NULL_NODE;
 	tree.free_head = PBVH_NULL_NODE;
 	tree.sorted = sorted.ptrw();
+	tree.internals = internals.ptrw();
+	tree.internal_capacity = internals.size();
+	tree.internal_root = PBVH_NULL_NODE;
 
 	for (uint32_t i = 0; i < N; i++) {
 		pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i, r128s[i].box, r128s[i].hilbert);
 	}
 	pbvh_tree_build(&tree);
 
-	// Query each leaf against both APIs; hit sets must match, and the
-	// Hilbert-keyed query must visit strictly fewer leaves than the
-	// linear scan on average (sparse dataset → prefix prune wins).
 	uint64_t total_visits_linear = 0;
-	uint64_t total_visits_h = 0;
+	uint64_t total_visits_n = 0;
 	for (uint32_t i = 0; i < N; i++) {
-		Vector<uint32_t> linear_hits, h_hits;
+		Vector<uint32_t> linear_hits, n_hits;
 		struct Collect {
 			Vector<uint32_t> *out = nullptr;
-		} lc, hc;
+		} lc, nc;
 		lc.out = &linear_hits;
-		hc.out = &h_hits;
+		nc.out = &n_hits;
 
 		pbvh_tree_aabb_query(&tree, &r128s[i].box,
 				[](pbvh_eclass_id_t id, void *ud) {
@@ -334,24 +335,24 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_aabb_query_h matches linear scan, p
 				}, &lc);
 		total_visits_linear += tree.last_visits;
 
-		pbvh_tree_aabb_query_h(&tree, &r128s[i].box, r128s[i].hilbert, PREFIX_BITS, nullptr,
+		pbvh_tree_aabb_query_n(&tree, &r128s[i].box,
 				[](pbvh_eclass_id_t id, void *ud) {
 					((Collect *)ud)->out->push_back((uint32_t)id);
 					return 0;
-				}, &hc);
-		total_visits_h += tree.last_visits;
+				}, &nc);
+		total_visits_n += tree.last_visits;
 
 		linear_hits.sort();
-		h_hits.sort();
-		CHECK_MESSAGE(linear_hits == h_hits,
-				vformat("hit-set mismatch at i=%d: linear=%d h=%d", i, linear_hits.size(), h_hits.size()));
+		n_hits.sort();
+		CHECK_MESSAGE(linear_hits == n_hits,
+				vformat("hit-set mismatch at i=%d: linear=%d n=%d", i, linear_hits.size(), n_hits.size()));
 	}
-	CHECK_MESSAGE(total_visits_h * 4 < total_visits_linear,
-			vformat("Hilbert prefix prune failed: linear visits=%d h visits=%d (want h*4 < linear)",
-					(int)total_visits_linear, (int)total_visits_h));
+	CHECK_MESSAGE(total_visits_n * 4 < total_visits_linear,
+			vformat("nested-set prune failed: linear visits=%d n visits=%d (want n*4 < linear)",
+					(int)total_visits_linear, (int)total_visits_n));
 }
 
-TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_remove hides leaf from query_h without rebuild") {
+TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_remove hides leaf from query_n without rebuild") {
 	constexpr uint32_t N = 32;
 	Vector<FloatLeaf> floats;
 	Vector<R128Leaf> r128s;
@@ -361,12 +362,17 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_remove hides leaf from query_h with
 	storage.resize(N + 8);
 	Vector<pbvh_node_id_t> sorted;
 	sorted.resize(N + 8);
+	Vector<pbvh_internal_t> internals;
+	internals.resize(2 * (N + 8));
 	pbvh_tree_t tree = {};
 	tree.nodes = storage.ptrw();
 	tree.capacity = storage.size();
 	tree.root = PBVH_NULL_NODE;
 	tree.free_head = PBVH_NULL_NODE;
 	tree.sorted = sorted.ptrw();
+	tree.internals = internals.ptrw();
+	tree.internal_capacity = internals.size();
+	tree.internal_root = PBVH_NULL_NODE;
 
 	LocalVector<pbvh_node_id_t> ids;
 	ids.resize(N);
@@ -375,7 +381,7 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_remove hides leaf from query_h with
 	}
 	pbvh_tree_build(&tree);
 
-	// Remove leaf 0 WITHOUT rebuilding. A correct h-query must not surface
+	// Remove leaf 0 WITHOUT rebuilding. A correct query must not surface
 	// the dead eclass even though its slot still occupies sorted[].
 	pbvh_tree_remove(&tree, ids[0]);
 
@@ -384,29 +390,31 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_remove hides leaf from query_h with
 		Vector<uint32_t> *out = nullptr;
 	} c;
 	c.out = &hits;
-	pbvh_tree_aabb_query_h(&tree, &r128s[0].box, r128s[0].hilbert, 6, nullptr,
+	pbvh_tree_aabb_query_n(&tree, &r128s[0].box,
 			[](pbvh_eclass_id_t id, void *ud) {
 				((C *)ud)->out->push_back((uint32_t)id);
 				return 0;
 			}, &c);
 	CHECK_MESSAGE(!hits.has(0u),
-			vformat("h-query returned the removed eclass id 0 (stale sorted[] entry); hits=%d", hits.size()));
+			vformat("query returned the removed eclass id 0 (stale sorted[] entry); hits=%d", hits.size()));
 }
 
 TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_update_h moves leaf into new Hilbert window") {
-	// One leaf at scene corner A, query at scene corner B after update_h.
-	// The two corners land in distant Hilbert cells, so a stale sort key
-	// keeps the moved leaf out of B's prefix window and the h-query misses.
 	Vector<pbvh_node_t> storage;
 	storage.resize(8);
 	Vector<pbvh_node_id_t> sorted;
 	sorted.resize(8);
+	Vector<pbvh_internal_t> internals;
+	internals.resize(16);
 	pbvh_tree_t tree = {};
 	tree.nodes = storage.ptrw();
 	tree.capacity = storage.size();
 	tree.root = PBVH_NULL_NODE;
 	tree.free_head = PBVH_NULL_NODE;
 	tree.sorted = sorted.ptrw();
+	tree.internals = internals.ptrw();
+	tree.internal_capacity = internals.size();
+	tree.internal_root = PBVH_NULL_NODE;
 
 	const Aabb scene = aabb_from_floats(-BENCH_BOUND, BENCH_BOUND,
 			-BENCH_BOUND, BENCH_BOUND, -BENCH_BOUND, BENCH_BOUND);
@@ -427,13 +435,13 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree_update_h moves leaf into new Hilber
 		Vector<uint32_t> *out = nullptr;
 	} c;
 	c.out = &hits;
-	pbvh_tree_aabb_query_h(&tree, &box_b, h_b, 6, &scene,
+	pbvh_tree_aabb_query_n(&tree, &box_b,
 			[](pbvh_eclass_id_t eid, void *ud) {
 				((C *)ud)->out->push_back((uint32_t)eid);
 				return 0;
 			}, &c);
 	CHECK_MESSAGE(hits.has(42u),
-			vformat("h-query at the new position missed the moved leaf; hits=%d", hits.size()));
+			vformat("query at the new position missed the moved leaf; hits=%d", hits.size()));
 }
 
 TEST_CASE("[PredictiveBVH][NestedSet] pbvh_tree_aabb_query_n matches linear scan and prunes visits") {
