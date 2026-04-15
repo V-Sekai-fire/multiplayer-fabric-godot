@@ -81,8 +81,8 @@ structure C2_Mitigated where
   hAHalf : aHalfMinForearm ≤ aHalf
 
 theorem c2_mitigation_sound (m : C2_Mitigated) :
-    ghostBound m.v 0 m.delta ≤ ghostBound m.v m.aHalf m.delta := by
-  simp only [ghostBound]; omega
+    ghostBound m.v 0 m.delta ≤ ghostBound m.v m.aHalf m.delta :=
+  expansion_mono_a m.v 0 m.aHalf m.delta (Nat.zero_le _)
 
 -- ── 3. C3 / G11 — Position discontinuity (teleport) ─────────────────────────────
 

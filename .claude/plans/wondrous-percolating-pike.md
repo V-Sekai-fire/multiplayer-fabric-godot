@@ -39,3 +39,14 @@ Switched all tree node AABB storage from `R128` (software 128-bit) to `int64_t` 
 | STRESS 65k | — | 8,316us | **4.07×** |
 
 Hit counts identical across pbvh/dbvh/truth at all scales. Plan goal (≥2×) comfortably exceeded.
+
+## Godot integration (2026-04-15)
+Swapped `DynamicBVH` → `PredictiveBVH` at two call sites (commit f89228a9a0e):
+- [servers/rendering/renderer_scene_cull.h](servers/rendering/renderer_scene_cull.h) + [.cpp](servers/rendering/renderer_scene_cull.cpp) — scene culling BVH
+- [modules/godot_physics_3d/godot_soft_body_3d.h](modules/godot_physics_3d/godot_soft_body_3d.h) — soft body broadphase
+- [core/math/dynamic_bvh.h](core/math/dynamic_bvh.h) / [.cpp](core/math/dynamic_bvh.cpp) — kept as-is (still used elsewhere)
+- [tests/scene/test_predictive_bvh_bench.cpp](tests/scene/test_predictive_bvh_bench.cpp) — bench expanded (+529 lines) to cover the new integration paths
+
+## Outstanding
+- Working tree: [thirdparty/predictive_bvh/PredictiveBVH/Protocol/ScaleContradictionsGapClass.lean](thirdparty/predictive_bvh/PredictiveBVH/Protocol/ScaleContradictionsGapClass.lean) modified, uncommitted
+- Branch `vsk-multiplayer-fabric-4.7` is 17 commits ahead of origin — not pushed
