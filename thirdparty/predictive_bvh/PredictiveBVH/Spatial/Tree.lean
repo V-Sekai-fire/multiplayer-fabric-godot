@@ -1043,6 +1043,90 @@ theorem buildSubtree_new_node_skip_monotone (leaves : Array PbvhLeaf)
           push_neg at hj_s1
           exact ih (hi - mid) hright_lt s1 mid hi rfl j hj_s1 hj_s2
 
+/-- **Leaf-block skip equals next DFS index.** For every newly-built
+    internal `j ≥ internals.size`, if both children are `none` then
+    `skip[j] = j + 1`. Strong induction on `hi - lo`:
+    base case pushes a leaf with this exact shape; recursive case shows
+    the root (at `internals.size`) *always* has children `= some _`
+    (vacuous antecedent), and propagates to descendants via
+    `preserves_prefix` across the final `set!` + sibling subcall.
+
+    This is one half of `skip_equals_dfs_next`: leaf-block nodes have
+    `skip = i + 1`, so the DFS advance after a leaf-block via the skip
+    pointer is the same as the advance via `i + 1`. -/
+theorem buildSubtree_new_node_leaf_block_skip (leaves : Array PbvhLeaf)
+    (sorted : Array LeafId) :
+    ∀ (n : Nat) (internals : Array PbvhInternal) (lo hi : Nat), hi - lo = n →
+      ∀ (j : Nat), internals.size ≤ j →
+        ∀ (hj : j < (buildSubtree leaves sorted internals lo hi).1.size),
+          let node := (buildSubtree leaves sorted internals lo hi).1[j]'hj
+          node.left = none → node.right = none → node.skip = j + 1 := by
+  intro n
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+    intro internals lo hi hn j hj_ge hj
+    unfold buildSubtree
+    split
+    · -- Base: pushed leaf with skip = internals.size + 1 and left/right = none.
+      rename_i hle
+      dsimp only at hj ⊢
+      have hpsize : (internals.push _).size = internals.size + 1 := by
+        simp [Array.size_push]
+      have hj_eq : j = internals.size := by
+        have hlt : j < internals.size + 1 := by rw [← hpsize]; exact hj
+        omega
+      subst hj_eq
+      rw [Array.getElem_push_eq]
+      intro _ _; rfl
+    · -- Recursive: root at internals.size has children = some (vacuous).
+      rename_i hgt
+      dsimp only at hj ⊢
+      obtain ⟨mid, hmlo, hmhi⟩ := computeMid leaves sorted lo hi (by omega)
+      let ph : PbvhInternal :=
+        { bounds := windowBounds leaves sorted lo hi, offset := lo,
+          span := hi - lo, skip := internals.size + 1,
+          left := none, right := none }
+      let state0 := internals.push ph
+      have hstate0_size : state0.size = internals.size + 1 := by
+        show (internals.push ph).size = internals.size + 1
+        simp [Array.size_push]
+      have hleft_lt : mid - lo < n := by omega
+      have hright_lt : hi - mid < n := by omega
+      set s1 := (buildSubtree leaves sorted state0 lo mid).1 with hs1
+      set s2 := (buildSubtree leaves sorted s1 mid hi).1 with hs2
+      have hs1_ge : state0.size ≤ s1.size :=
+        buildSubtree_size_ge leaves sorted _ state0 lo mid rfl
+      have hs2_ge : s1.size ≤ s2.size :=
+        buildSubtree_size_ge leaves sorted _ s1 mid hi rfl
+      show let node := (s2.set! internals.size _)[j]'(by simp; exact hj)
+        node.left = none → node.right = none → node.skip = j + 1
+      dsimp only
+      by_cases hj_eq : j = internals.size
+      · -- Root slot: updated record has left = some _, so hleft is false.
+        subst hj_eq
+        rw [Array.getElem_set_eq (by simp; omega)]
+        intro hleft _
+        -- `updated.left = some leftIdx`; reduces the antecedent to False.
+        exact absurd hleft (by simp)
+      · -- j > internals.size: set! doesn't touch j; reduce to s2[j].
+        rw [Array.getElem_set_ne (h := hj_eq)]
+        have hj_s2 : j < s2.size := by
+          have hj' : j < (s2.set! internals.size _).size := hj
+          simp at hj'; exact hj'
+        by_cases hj_s1 : j < s1.size
+        · -- Preserves_prefix across subcall2, then IH on subcall1.
+          obtain ⟨_, hpresv⟩ := buildSubtree_preserves_prefix leaves sorted
+            (hi - mid) s1 mid hi rfl j hj_s1
+          have hs2_j : s2[j]'hj_s2 = s1[j]'hj_s1 := by
+            change (buildSubtree leaves sorted s1 mid hi).1[j]'_ = _
+            exact hpresv
+          rw [hs2_j]
+          have hj_state0 : state0.size ≤ j := by omega
+          exact ih (mid - lo) hleft_lt state0 lo mid rfl j hj_state0 hj_s1
+        · -- j ≥ s1.size: IH on subcall2 directly.
+          push_neg at hj_s1
+          exact ih (hi - mid) hright_lt s1 mid hi rfl j hj_s1 hj_s2
+
 -- ── Tier 3 preparatory lemmas (query soundness predicate is stable) ─────────
 
 /-- The soundness witness for one eclass `e`: a live leaf whose bounds
