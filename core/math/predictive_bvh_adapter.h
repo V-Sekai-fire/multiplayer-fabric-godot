@@ -26,6 +26,75 @@
 
 #include "thirdparty/predictive_bvh/predictive_bvh.h"
 
+// ─────────────────────────────────────────────────────────────────────────────
+// pbvh_real_t — R128-backed scalar with a real_t-shaped C++ interface.
+//
+// This is the "real_t backend" type: callers pass real_t values in/out, but
+// all arithmetic internally uses 64.64 fixed-point (R128) for the precision
+// that the Lean-proved polynomial functions require.
+//
+// Template specialization selects this type transparently via pbvh_backend<T>:
+//   pbvh_backend<real_t>::type  = pbvh_real_t   (R128 precision)
+//   pbvh_backend<int64_t>::type = int64_t        (native integer)
+// ─────────────────────────────────────────────────────────────────────────────
+struct pbvh_real_t {
+	R128 v;
+
+	pbvh_real_t() : v(R128_ZERO) {}
+	/* Construct from R128 — used internally and by r128_* return values. */
+	pbvh_real_t(R128 r) : v(r) {}
+	/* Construct from integer literal — satisfies T(n) in template code. */
+	pbvh_real_t(int n) : v(r128_from_int((int64_t)n)) {}
+	pbvh_real_t(int64_t n) : v(r128_from_int(n)) {}
+	/* Construct from Godot real_t (float or double). */
+	explicit pbvh_real_t(real_t f) : v(r128_from_float((float)f)) {}
+
+	/* Implicit decay to R128 — lets r128_le/r128_add etc. accept pbvh_real_t
+	 * arguments without explicit casts (single user-defined conversion). */
+	operator R128() const { return v; }
+	/* Explicit export to real_t for output side. */
+	explicit operator real_t() const { return (real_t)r128_to_float(v); }
+
+	/* Arithmetic operators — satisfy (a + b), (a * b) in template code. */
+	pbvh_real_t operator+(pbvh_real_t o) const { return r128_add(v, o.v); }
+	pbvh_real_t operator*(pbvh_real_t o) const { return r128_mul(v, o.v); }
+	pbvh_real_t operator-() const { return r128_neg(v); }
+	pbvh_real_t operator-(pbvh_real_t o) const { return r128_sub(v, o.v); }
+
+	/* Comparison — satisfies operator<= used in template predicates. */
+	bool operator<=(pbvh_real_t o) const { return r128_le(v, o.v); }
+	bool operator==(pbvh_real_t o) const { return r128_eq(v, o.v); }
+	bool operator!=(pbvh_real_t o) const { return !r128_eq(v, o.v); }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// pbvh_backend<T> — traits class: maps caller-facing scalar types to the
+// internal storage type used by the BVH template instantiations.
+//
+// Template specialization allows callers to write pbvh_tree_for<real_t> and
+// get R128-backed precision, or pbvh_tree_for<int64_t> for integer coordinates,
+// without knowing about the R128 representation.
+// ─────────────────────────────────────────────────────────────────────────────
+template <typename T>
+struct pbvh_backend { using type = T; };
+
+template <>
+struct pbvh_backend<real_t> { using type = pbvh_real_t; };
+
+// Convenience alias: pbvh_tree_for<real_t> → pbvh_tree<pbvh_real_t>, etc.
+template <typename T>
+using pbvh_tree_for = pbvh_tree<typename pbvh_backend<T>::type>;
+template <typename T>
+using pbvh_node_for = pbvh_node<typename pbvh_backend<T>::type>;
+template <typename T>
+using pbvh_internal_for = pbvh_internal<typename pbvh_backend<T>::type>;
+template <typename T>
+using AabbFor = AabbT<typename pbvh_backend<T>::type>;
+
+// Named aliases for the two concrete instantiations.
+using AabbReal     = AabbFor<real_t>;   // AabbT<pbvh_real_t>  — R128 precision
+using AabbI64      = AabbFor<int64_t>;  // AabbT<int64_t>      — integer coords
+
 // Float-AABB constructor glue. Non-templated boilerplate, so it lives here per
 // the codegen discipline in thirdparty/predictive_bvh/CONTRIBUTING.md rather
 // than inside the emitted header.
@@ -38,6 +107,24 @@ static inline Aabb aabb_from_floats(float x0, float x1, float y0, float y1, floa
 	a.min_z = r128_from_int((int64_t)(z0 * 1000000.0f));
 	a.max_z = r128_from_int((int64_t)(z1 * 1000000.0f));
 	return a;
+}
+
+// real_t variant — passes through R128 precision. Callers work with real_t;
+// each field is stored as r128_from_float(x * 1e6) ≈ 1 µm resolution.
+static inline AabbReal aabb_from_reals(real_t x0, real_t x1, real_t y0, real_t y1, real_t z0, real_t z1) {
+	AabbReal a;
+	a.min_x = pbvh_real_t(r128_from_float((float)(x0 * 1000000.0)));
+	a.max_x = pbvh_real_t(r128_from_float((float)(x1 * 1000000.0)));
+	a.min_y = pbvh_real_t(r128_from_float((float)(y0 * 1000000.0)));
+	a.max_y = pbvh_real_t(r128_from_float((float)(y1 * 1000000.0)));
+	a.min_z = pbvh_real_t(r128_from_float((float)(z0 * 1000000.0)));
+	a.max_z = pbvh_real_t(r128_from_float((float)(z1 * 1000000.0)));
+	return a;
+}
+
+// int64_t variant — integer µm coordinates, no floating-point conversion.
+static inline AabbI64 aabb_from_um(int64_t x0, int64_t x1, int64_t y0, int64_t y1, int64_t z0, int64_t z1) {
+	return { x0, x1, y0, y1, z0, z1 };
 }
 
 class PredictiveBVH {
