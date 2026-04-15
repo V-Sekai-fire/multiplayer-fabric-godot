@@ -11,6 +11,7 @@ import PredictiveBVH.Spatial.HilbertBroadphase
 import PredictiveBVH.Spatial.HilbertRoundtrip
 import PredictiveBVH.Spatial.Tree
 import PredictiveBVH.Spatial.RefitIncremental
+import PredictiveBVH.Spatial.BucketBound
 import PredictiveBVH.Formulas.LowerBound
 import PredictiveBVH.Protocol.Fabric
 import PredictiveBVH.Interest.AuthorityInterest

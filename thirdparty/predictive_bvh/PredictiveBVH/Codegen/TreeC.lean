@@ -88,6 +88,54 @@ typedef struct pbvh_tree {
 \tuint64_t *touched_meta_bits; /* size ((internal_capacity + 63)/64 + 63)/64, caller-owned */
 } pbvh_tree_t;
 
+/* ============================================================================
+ * BUCKET AUTO-TUNE (Phase 2e)
+ *
+ * Target max entities per bucket. Controls the constant-time upper bound on
+ * pbvh_tree_aabb_query_b's per-bucket scan: a bucket cannot exceed
+ * ceil(N / (1 << bucket_bits)) entities, so bucket_bits = ceil(log2(N/K))
+ * gives at most K entities per bucket under uniform Hilbert distribution.
+ * Empirical max/mean on uniform random inputs is ~1.06-1.30x (sub-Poisson),
+ * so a K_TARGET of 32 yields worst-case ~40-entity scans at any N.
+ * ========================================================================= */
+#ifndef PBVH_BUCKET_K_TARGET
+#define PBVH_BUCKET_K_TARGET 32u
+#endif
+
+/* ceil(log2(n)) clamped to [0, 30]. n == 0 maps to 0. */
+static inline uint32_t pbvh_ceil_log2(uint32_t n) {
+\tif (n <= 1u) {
+\t\treturn 0u;
+\t}
+\tuint32_t v = n - 1u;
+\tuint32_t r = 0u;
+\twhile (v > 0u) {
+\t\tv >>= 1u;
+\t\tr++;
+\t}
+\tif (r > 30u) {
+\t\tr = 30u;
+\t}
+\treturn r;
+}
+
+/* Ideal bucket_bits for N leaves: ceil(log2(N / K_TARGET)), clamped to [0, 30].
+ * At N < K_TARGET, returns 0 (single bucket covers the whole tree). */
+static inline uint32_t pbvh_bucket_bits_for(uint32_t n) {
+\tif (n <= PBVH_BUCKET_K_TARGET) {
+\t\treturn 0u;
+\t}
+\treturn pbvh_ceil_log2((n + PBVH_BUCKET_K_TARGET - 1u) / PBVH_BUCKET_K_TARGET);
+}
+
+/* Required uint32 element count for bucket_dir given N leaves.
+ * Each bucket stores [lo, hi) as two uint32, so size = 2 * (1 << bucket_bits).
+ * Callers use this to size their bucket_dir allocation before pbvh_tree_build;
+ * the build itself overwrites t->bucket_bits with pbvh_bucket_bits_for(N). */
+static inline uint32_t pbvh_bucket_dir_size(uint32_t n) {
+\treturn 2u * (1u << pbvh_bucket_bits_for(n));
+}
+
 static inline pbvh_node_id_t pbvh_tree_insert_h(pbvh_tree_t *t, pbvh_eclass_id_t ec,
 \t\tAabb box, uint32_t hilbert) {
 \tpbvh_node_id_t id;
@@ -448,6 +496,12 @@ static inline void pbvh_tree_build(pbvh_tree_t *t) {
 \tt->internal_root = PBVH_NULL_NODE;
 \tif (t->internals != NULL && t->internal_capacity > 0u && k > 0u) {
 \t\tt->internal_root = pbvh_build_internal_(t, 0u, k);
+\t}
+\t/* Auto-tune bucket_bits from leaf count. Caller pre-allocated bucket_dir
+\t * via pbvh_bucket_dir_size(N); this overwrite keeps per-query scan cost
+\t * bounded by PBVH_BUCKET_K_TARGET at any N. */
+\tif (t->bucket_dir != NULL) {
+\t\tt->bucket_bits = pbvh_bucket_bits_for(k);
 \t}
 \tpbvh_build_bucket_dir_(t);
 \t/* Populate leaf_to_internal[] from the leaf-range internals produced

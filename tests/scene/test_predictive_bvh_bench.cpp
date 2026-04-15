@@ -646,7 +646,7 @@ struct Harness {
 		storage.resize(n + 16);
 		sorted.resize(n + 16);
 		internals.resize(2 * (n + 16));
-		bucket_dir.resize(2u * (1u << HILBERT_PREFIX_BITS));
+		bucket_dir.resize(pbvh_bucket_dir_size(n));
 		tree.nodes = storage.ptrw();
 		tree.capacity = storage.size();
 		tree.root = PBVH_NULL_NODE;
@@ -862,7 +862,7 @@ TEST_CASE("[PredictiveBVH][Bench] growth rate of insert+tick vs DynamicBVH") {
 		Vector<pbvh_internal_t> internals;
 		internals.resize(2 * (N + 16));
 		Vector<uint32_t> bucket_dir;
-		bucket_dir.resize(2u * (1u << HILBERT_PREFIX_BITS));
+		bucket_dir.resize(pbvh_bucket_dir_size(N));
 
 		pbvh_tree_t tree = {};
 		tree.nodes = storage.ptrw();
@@ -991,7 +991,7 @@ TEST_CASE("[PredictiveBVH][Bench] per-frame 1%-dirty + Q-queries steady-state") 
 		Vector<pbvh_node_id_t> sorted_buf; sorted_buf.resize(N + 16);
 		const uint32_t internal_cap = 2u * (N + 16u);
 		Vector<pbvh_internal_t> internals; internals.resize(internal_cap);
-		Vector<uint32_t> bucket_dir; bucket_dir.resize(2u * (1u << HILBERT_PREFIX_BITS));
+		Vector<uint32_t> bucket_dir; bucket_dir.resize(pbvh_bucket_dir_size(N));
 		Vector<uint32_t> parent_of; parent_of.resize(internal_cap);
 		Vector<uint32_t> leaf_to; leaf_to.resize(N + 16);
 		const uint32_t touched_words = (internal_cap + 63u) / 64u;
@@ -1020,7 +1020,7 @@ TEST_CASE("[PredictiveBVH][Bench] per-frame 1%-dirty + Q-queries steady-state") 
 		// max/p99 drive whether Phase 2e auto-tune is sufficient or whether a
 		// leaf-split op is needed.
 		{
-			const uint32_t num_buckets = 1u << HILBERT_PREFIX_BITS;
+			const uint32_t num_buckets = 1u << tree.bucket_bits;
 			uint32_t bmax = 0;
 			uint32_t non_empty = 0;
 			uint64_t sum_sq = 0;
@@ -1036,11 +1036,16 @@ TEST_CASE("[PredictiveBVH][Bench] per-frame 1%-dirty + Q-queries steady-state") 
 				}
 				sum_sq += (uint64_t)sz * (uint64_t)sz;
 			}
-			const double mean = (double)N / (double)num_buckets;
-			const double rms = std::sqrt((double)sum_sq / (double)num_buckets);
-			print_line(vformat("  [BUCKET N=%d bits=%d buckets=%d nonempty=%d] max=%d mean=%.1f rms=%.1f max/mean=%.2f",
-					(int)N, (int)HILBERT_PREFIX_BITS, (int)num_buckets, (int)non_empty,
-					(int)bmax, mean, rms, (double)bmax / mean));
+			const double mean = num_buckets > 0u ? (double)N / (double)num_buckets : (double)N;
+			const double rms = num_buckets > 0u ? std::sqrt((double)sum_sq / (double)num_buckets) : 0.0;
+			print_line(vformat("  [BUCKET N=%d bits=%d buckets=%d nonempty=%d] max=%d mean=%.1f rms=%.1f max/mean=%.2f (K_target=%d)",
+					(int)N, (int)tree.bucket_bits, (int)num_buckets, (int)non_empty,
+					(int)bmax, mean, rms, mean > 0.0 ? (double)bmax / mean : 0.0,
+					(int)PBVH_BUCKET_K_TARGET));
+			// Phase 2e gate: auto-tuned bucket_bits bounds max bucket to ~1.3·K_target.
+			CHECK_MESSAGE(bmax <= 2u * PBVH_BUCKET_K_TARGET,
+					vformat("bucket occupancy overflow: max=%d K_target=%d (N=%d bits=%d)",
+							(int)bmax, (int)PBVH_BUCKET_K_TARGET, (int)N, (int)tree.bucket_bits));
 		}
 
 		DynamicBVH dtree;
@@ -1194,7 +1199,7 @@ TEST_CASE("[PredictiveBVH][Bench] per-frame stress 20%-dirty metre-scale motion"
 		Vector<pbvh_node_id_t> sorted_buf; sorted_buf.resize(N + 16);
 		const uint32_t internal_cap = 2u * (N + 16u);
 		Vector<pbvh_internal_t> internals; internals.resize(internal_cap);
-		Vector<uint32_t> bucket_dir; bucket_dir.resize(2u * (1u << HILBERT_PREFIX_BITS));
+		Vector<uint32_t> bucket_dir; bucket_dir.resize(pbvh_bucket_dir_size(N));
 		Vector<uint32_t> parent_of; parent_of.resize(internal_cap);
 		Vector<uint32_t> leaf_to; leaf_to.resize(N + 16);
 		const uint32_t touched_words = (internal_cap + 63u) / 64u;
