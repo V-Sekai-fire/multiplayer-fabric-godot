@@ -1243,6 +1243,119 @@ theorem aabbQueryN_sound (t : PbvhTree) (q : BoundingBox) :
   · exact aabbQueryNGo_preserves_sound t q _ _ [] rfl
       (fun _ h => absurd h List.not_mem_nil) e he
 
+/-- **Accumulator membership is preserved** through `aabbQueryNGo`. If
+    `e ∈ acc`, then `e` is in the result. Strong induction on the termination
+    measure. The leaf-block fold only extends `acc` (via `foldl_cons_preserves`
+    reasoning), and the base case `acc.reverse` preserves membership via
+    `List.mem_reverse`. This is the compositional piece that combines with
+    `aabbQueryN_leaf_fold_emits` to give local completeness at any reached
+    leaf-block. -/
+theorem aabbQueryNGo_preserves_membership (t : PbvhTree) (q : BoundingBox) :
+    ∀ (m : Nat) (i : Nat) (acc : List EClassId) (e : EClassId),
+      t.internals.size - i = m →
+      e ∈ acc →
+      e ∈ aabbQueryNGo t q i acc := by
+  intro m
+  induction m using Nat.strongRecOn with
+  | _ m ih =>
+    intro i acc e hm he
+    rw [aabbQueryNGo]
+    dsimp only
+    split
+    · -- Base: result = acc.reverse; membership via mem_reverse.
+      rw [List.mem_reverse]; exact he
+    · rename_i hlt
+      have hi_lt : i < t.internals.size := by omega
+      set n := t.internals[i]! with hn_def
+      set next : Nat :=
+        if _ : i < n.skip ∧ n.skip ≤ t.internals.size then n.skip else i + 1
+        with hnext_def
+      have hnext_gt : next > i := by
+        rw [hnext_def]; split <;> rename_i h <;> omega
+      have hnext_le : next ≤ t.internals.size := by
+        rw [hnext_def]; split <;> rename_i h <;> omega
+      have hnext_measure : t.internals.size - next < m := by omega
+      split
+      · exact ih _ hnext_measure next acc e rfl he
+      · split
+        · -- Leaf block: fold extends acc; fold membership gives e ∈ acc'.
+          have hfold : e ∈ (List.range n.span).foldl (fun acc j =>
+              let lid := t.sorted[n.offset + j]!
+              match t.leaves[lid]? with
+              | some l =>
+                if l.alive && aabbOverlapsDec l.bounds q then
+                  l.eclass :: acc else acc
+              | none => acc) acc := by
+            -- Direct use of foldl_cons_preserves with the extend-only shape.
+            have hmono : ∀ (acc : List EClassId) (k : Nat) (x : EClassId),
+                x ∈ acc →
+                x ∈ (fun acc j =>
+                  let lid := t.sorted[n.offset + j]!
+                  match t.leaves[lid]? with
+                  | some l =>
+                    if l.alive && aabbOverlapsDec l.bounds q then
+                      l.eclass :: acc else acc
+                  | none => acc) acc k := by
+              intro acc' k x hx
+              dsimp only
+              cases hlk : t.leaves[t.sorted[n.offset + k]!]? with
+              | none => simpa [hlk] using hx
+              | some l' =>
+                by_cases hg : l'.alive && aabbOverlapsDec l'.bounds q
+                · simp only [hlk, hg, if_true]; exact List.mem_cons_of_mem _ hx
+                · simp only [hlk, hg, if_false]; exact hx
+            exact foldl_cons_preserves _ hmono (List.range n.span) acc e he
+          exact ih _ hnext_measure next _ e rfl hfold
+        · have hi1_measure : t.internals.size - (i + 1) < m := by omega
+          exact ih _ hi1_measure (i + 1) acc e rfl he
+
+/-- **Local completeness at a reached leaf-block.** If `aabbQueryNGo` is
+    called at an index `i` whose node is a leaf-block (no children) with
+    overlapping bounds, and a live leaf in the window overlaps the query,
+    then the leaf's eclass is in the result.
+
+    This is *local* — the "aabbQueryNGo called at i" assumption is load-bearing.
+    Full tree-level completeness upgrades this by showing that the DFS
+    *does* visit the correct leaf-block, which in turn needs
+    `skip_equals_dfs_next` for non-root nodes (deferred to Phase 1c). -/
+theorem aabbQueryNGo_leaf_block_complete (t : PbvhTree) (q : BoundingBox)
+    (i : Nat) (hi : i < t.internals.size)
+    (hleaf : (t.internals[i]!).left.isNone ∧ (t.internals[i]!).right.isNone)
+    (hov : aabbOverlapsDec (t.internals[i]!).bounds q = true)
+    (j : Nat) (hj : j < (t.internals[i]!).span)
+    (l : PbvhLeaf)
+    (hl : t.leaves[t.sorted[(t.internals[i]!).offset + j]!]? = some l)
+    (halive : l.alive = true)
+    (hl_ov : aabbOverlapsDec l.bounds q = true)
+    (acc : List EClassId) :
+    l.eclass ∈ aabbQueryNGo t q i acc := by
+  rw [aabbQueryNGo]
+  dsimp only
+  split
+  · rename_i h; omega
+  · rename_i hlt
+    set n := t.internals[i]! with hn_def
+    set next : Nat :=
+      if _ : i < n.skip ∧ n.skip ≤ t.internals.size then n.skip else i + 1
+      with hnext_def
+    have hnext_gt : next > i := by
+      rw [hnext_def]; split <;> rename_i h <;> omega
+    have hnext_le : next ≤ t.internals.size := by
+      rw [hnext_def]; split <;> rename_i h <;> omega
+    have hnext_measure : t.internals.size - next < t.internals.size - i := by omega
+    split
+    · rename_i hnov
+      exact absurd hov (by rw [Bool.not_eq_true] at hnov; rw [hnov]; decide)
+    · split
+      · rename_i _
+        -- Leaf block: fold emits l.eclass, then membership preserved by tail.
+        have hemit := aabbQueryN_leaf_fold_emits t q n.offset n.span acc
+          j hj l hl halive hl_ov
+        exact aabbQueryNGo_preserves_membership t q _ next _ l.eclass rfl hemit
+      · rename_i hchild
+        -- Contradiction: hleaf says both children are none, but hchild denies it.
+        exact absurd (by simp [hleaf.1, hleaf.2]) hchild
+
 /-- Root-level skip monotonicity: the root node returned by `buildSubtree`
     has `root < skip[root] ≤ result.size`. Direct composition of
     `buildSubtree_root`, `buildSubtree_root_lt_size`, and
