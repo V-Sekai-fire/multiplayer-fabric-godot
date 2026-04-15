@@ -1083,5 +1083,188 @@ static inline int pbvh_tree_enumerate_pairs(pbvh_tree_t *t,
 	return pairs;
 }
 
+/* ── Phase 2b primitives: ray, convex, clear, is_empty, optimize, index ─── */
+
+/* Oriented half-space {p : normal · p + d >= 0}. Kept side is positive. */
+typedef struct pbvh_plane {
+	R128 nx, ny, nz;
+	R128 d;
+} pbvh_plane_t;
+
+/* Build the segment-AABB of a ray segment from (ox,oy,oz) to (tx,ty,tz).
+ * Conservative broadphase: a segment hits `b` only if its AABB overlaps `b`. */
+static inline Aabb pbvh_segment_aabb_(R128 ox, R128 oy, R128 oz,
+		R128 tx, R128 ty, R128 tz) {
+	Aabb s;
+	s.min_x = r128_le(ox, tx) ? ox : tx;
+	s.max_x = r128_le(ox, tx) ? tx : ox;
+	s.min_y = r128_le(oy, ty) ? oy : ty;
+	s.max_y = r128_le(oy, ty) ? ty : oy;
+	s.min_z = r128_le(oz, tz) ? oz : tz;
+	s.max_z = r128_le(oz, tz) ? tz : oz;
+	return s;
+}
+
+/* Iterative skip-pointer descent over internals[] using a ray segment. Every
+ * live leaf whose AABB overlaps the segment's AABB has its eclass passed to
+ * `cb`. Callback returns nonzero to stop early. Mirrors _n's traversal shape
+ * exactly; only the prune predicate changes. Emitted from Spatial/Tree.lean
+ * `rayQueryN`; soundness of a tight slab test is deferred to Phase 2b'. */
+static inline void pbvh_tree_ray_query(pbvh_tree_t *t,
+		R128 ox, R128 oy, R128 oz, R128 tx, R128 ty, R128 tz,
+		int (*cb)(pbvh_eclass_id_t, void *), void *ud) {
+	if (t->internal_root == PBVH_NULL_NODE) {
+		return;
+	}
+	const Aabb seg = pbvh_segment_aabb_(ox, oy, oz, tx, ty, tz);
+	uint32_t i = t->internal_root;
+	const uint32_t end = t->internal_count;
+	while (i < end) {
+		const pbvh_internal_t *n = &t->internals[i];
+		if (!aabb_overlaps(&n->bounds, &seg)) {
+			i = n->skip;
+			continue;
+		}
+		if (n->left == PBVH_NULL_NODE && n->right == PBVH_NULL_NODE) {
+			const uint32_t o = n->offset;
+			const uint32_t s = n->span;
+			for (uint32_t j = o; j < o + s; j++) {
+				const pbvh_node_t *leaf = &t->nodes[t->sorted[j]];
+				if (!leaf->is_leaf) {
+					continue;
+				}
+				if (aabb_overlaps(&leaf->bounds, &seg)) {
+					if (cb(leaf->eclass, ud) != 0) {
+						return;
+					}
+				}
+			}
+			i = n->skip;
+			continue;
+		}
+		i++;
+	}
+}
+
+/* Half-space test: does AABB `b` have any corner `c` satisfying
+ * normal · c + d >= 0 ? If every corner is strictly below the plane,
+ * the entire box is rejected. Unrolled 8-corner loop in R128. */
+static inline bool pbvh_half_space_keeps_(const pbvh_plane_t *p, const Aabb *b) {
+	const R128 zero = r128_from_int(0);
+	R128 xs[2]; xs[0] = b->min_x; xs[1] = b->max_x;
+	R128 ys[2]; ys[0] = b->min_y; ys[1] = b->max_y;
+	R128 zs[2]; zs[0] = b->min_z; zs[1] = b->max_z;
+	for (int ix = 0; ix < 2; ix++) {
+		for (int iy = 0; iy < 2; iy++) {
+			for (int iz = 0; iz < 2; iz++) {
+				R128 dot = r128_add(r128_add(r128_mul(p->nx, xs[ix]),
+						r128_mul(p->ny, ys[iy])),
+						r128_mul(p->nz, zs[iz]));
+				R128 val = r128_add(dot, p->d);
+				if (r128_le(zero, val)) {
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
+static inline bool pbvh_convex_keeps_box_(const pbvh_plane_t *planes,
+		uint32_t plane_count, const Aabb *b) {
+	for (uint32_t k = 0; k < plane_count; k++) {
+		if (!pbvh_half_space_keeps_(&planes[k], b)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/* Convex-hull broadphase: every live leaf whose AABB has at least one corner
+ * on the kept side of every plane is passed to `cb`. Hull `points` parameter
+ * is accepted for DynamicBVH-FFI parity (convex_query callers pass both a
+ * plane list and the hull vertices); we use plane-only pruning which is the
+ * safer over-approximation. Callback returns nonzero to stop early. */
+static inline void pbvh_tree_convex_query(pbvh_tree_t *t,
+		const pbvh_plane_t *planes, uint32_t plane_count,
+		const R128 *points, uint32_t point_count,
+		int (*cb)(pbvh_eclass_id_t, void *), void *ud) {
+	(void)points; (void)point_count;
+	if (t->internal_root == PBVH_NULL_NODE || plane_count == 0u) {
+		return;
+	}
+	uint32_t i = t->internal_root;
+	const uint32_t end = t->internal_count;
+	while (i < end) {
+		const pbvh_internal_t *n = &t->internals[i];
+		if (!pbvh_convex_keeps_box_(planes, plane_count, &n->bounds)) {
+			i = n->skip;
+			continue;
+		}
+		if (n->left == PBVH_NULL_NODE && n->right == PBVH_NULL_NODE) {
+			const uint32_t o = n->offset;
+			const uint32_t s = n->span;
+			for (uint32_t j = o; j < o + s; j++) {
+				const pbvh_node_t *leaf = &t->nodes[t->sorted[j]];
+				if (!leaf->is_leaf) {
+					continue;
+				}
+				if (pbvh_convex_keeps_box_(planes, plane_count, &leaf->bounds)) {
+					if (cb(leaf->eclass, ud) != 0) {
+						return;
+					}
+				}
+			}
+			i = n->skip;
+			continue;
+		}
+		i++;
+	}
+}
+
+/* Reset the tree to empty. Preserves caller-owned buffer pointers/capacities
+ * and the `index` tag; zeroes every *_count and clears the free list. */
+static inline void pbvh_tree_clear(pbvh_tree_t *t) {
+	t->count = 0u;
+	t->sorted_count = 0u;
+	t->internal_count = 0u;
+	t->root = PBVH_NULL_NODE;
+	t->free_head = PBVH_NULL_NODE;
+	t->internal_root = PBVH_NULL_NODE;
+	t->last_visits = 0u;
+}
+
+/* True iff the tree has no live leaves (no live `is_leaf` node). */
+static inline bool pbvh_tree_is_empty(const pbvh_tree_t *t) {
+	for (uint32_t i = 0; i < t->count; i++) {
+		if (t->nodes[i].is_leaf) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/* DynamicBVH-parity wrapper: ignore `passes`, run a full pbvh_tree_build.
+ * Phase 2c will replace this with bucket-localized `pbvh_tree_tick`. */
+static inline void pbvh_tree_optimize_incremental(pbvh_tree_t *t, int passes) {
+	(void)passes;
+	pbvh_tree_build(t);
+}
+
+/* Opaque uint32 tag for consumers that multiplex multiple trees (e.g.
+ * RendererSceneCull::Scenario::indexers[] distinguishes GEOMETRY/VOLUMES).
+ * Stored in bucket_bits' high bits is avoided; the adapter allocates a
+ * dedicated member on the C++ side. These two accessors exist only so the
+ * adapter surface matches DynamicBVH byte-for-byte. Stored in t->bucket_bits
+ * is unavailable (it has spatial meaning), so this pair operates on a
+ * separate caller-owned `uint32_t *out_index` the adapter threads alongside. */
+static inline uint32_t pbvh_tree_get_index(const uint32_t *idx_slot) {
+	return *idx_slot;
+}
+
+static inline void pbvh_tree_set_index(uint32_t *idx_slot, uint32_t idx) {
+	*idx_slot = idx;
+}
+
 
 #endif /* PREDICTIVE_BVH_H */

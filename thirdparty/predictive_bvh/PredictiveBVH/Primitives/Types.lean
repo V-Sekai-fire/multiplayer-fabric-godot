@@ -38,6 +38,22 @@ structure BoundingBox where
   deriving Inhabited, Repr, DecidableEq
 -- #end BoundingBox
 
+/-- Integer-valued 3D vector (micrometres). Used by Plane and by segment/convex queries. -/
+structure Vec3 where
+  x : Int
+  y : Int
+  z : Int
+  deriving Inhabited, Repr, DecidableEq
+
+/-- Oriented half-space `{p : normal · p + d ≥ 0}`. The *kept* side is where
+    `normal · p + d ≥ 0`; a point with `normal · p + d < 0` is rejected.
+    Matches DynamicBVH's `Plane::is_point_over` convention but inverted
+    so `is_point_over p = ¬ keeps p`. -/
+structure Plane where
+  normal : Vec3
+  d      : Int
+  deriving Inhabited, Repr, DecidableEq
+
 -- Physics leaf: one entity, all quantities in μm / μm/tick / μm/tick².
 -- timeOffset: ticks from "now" when this ghost's window starts (0 = current).
 -- duration:   ticks this ghost covers (0 = use the BVH's global δstar).

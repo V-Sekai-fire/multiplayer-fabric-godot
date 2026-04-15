@@ -53,6 +53,10 @@ structure PbvhTree where
   bucketBits   : Nat                -- 0 disables bucket dir
   bucketDir    : Array (Nat × Nat)  -- (lo, hi) per Hilbert prefix
   internalRoot : Option InternalId
+  /-- Opaque uint32-sized tag used by `RendererSceneCull::Scenario::indexers`
+      to recover which indexer a callback came from. Preserved by `build` /
+      `clear`; never inspected by tree ops. -/
+  index        : Nat := 0
   deriving Inhabited
 
 namespace PbvhTree
@@ -267,6 +271,136 @@ def aabbQueryNGo (t : PbvhTree) (query : BoundingBox)
 def aabbQueryN (t : PbvhTree) (query : BoundingBox) : List EClassId :=
   if t.internals.isEmpty then []
   else aabbQueryNGo t query (t.internalRoot.getD 0) []
+
+-- ── Phase 2b primitives: ray, convex, clear, is_empty, optimize, index ──────
+
+/-- True if the AABB-of-the-segment from `(ox,oy,oz)` to `(tx,ty,tz)` overlaps
+    `b`. Necessary condition for segment-box intersection; conservative
+    broadphase prune that over-emits (caller re-verifies with a real raycast).
+    Soundness of a tighter slab test is deferred to Phase 2b'. -/
+def segmentOverlapsBox (ox oy oz tx ty tz : Int) (b : BoundingBox) : Bool :=
+  let sMinX := if ox ≤ tx then ox else tx
+  let sMaxX := if ox ≤ tx then tx else ox
+  let sMinY := if oy ≤ ty then oy else ty
+  let sMaxY := if oy ≤ ty then ty else oy
+  let sMinZ := if oz ≤ tz then oz else tz
+  let sMaxZ := if oz ≤ tz then tz else oz
+  aabbOverlapsDec { minX := sMinX, maxX := sMaxX,
+                    minY := sMinY, maxY := sMaxY,
+                    minZ := sMinZ, maxZ := sMaxZ } b
+
+/-- Top-level recursive worker for `rayQueryN`. Mirrors `aabbQueryNGo` verbatim
+    except that the internal-node prune predicate is `segmentOverlapsBox`. -/
+def rayQueryNGo (t : PbvhTree) (ox oy oz tx ty tz : Int)
+    (i : Nat) (acc : List EClassId) : List EClassId :=
+  let end_ := t.internals.size
+  if hlt : i ≥ end_ then acc.reverse
+  else
+    let n := t.internals[i]!
+    let next : Nat := if h : i < n.skip ∧ n.skip ≤ end_ then n.skip else i + 1
+    have hnext_lt : end_ - next < end_ - i := by
+      have hi : i < end_ := by omega
+      show end_ - (if _ : i < n.skip ∧ n.skip ≤ end_ then n.skip else i + 1) < end_ - i
+      split <;> rename_i h <;> omega
+    if ¬ segmentOverlapsBox ox oy oz tx ty tz n.bounds then
+      rayQueryNGo t ox oy oz tx ty tz next acc
+    else if n.left.isNone && n.right.isNone then
+      let acc := (List.range n.span).foldl (fun acc j =>
+        let lid := t.sorted[n.offset + j]!
+        match t.leaves[lid]? with
+        | some l =>
+          if l.alive && segmentOverlapsBox ox oy oz tx ty tz l.bounds then
+            l.eclass :: acc else acc
+        | none => acc) acc
+      rayQueryNGo t ox oy oz tx ty tz next acc
+    else
+      have hinc : end_ - (i + 1) < end_ - i := by
+        have hi : i < end_ := by omega
+        omega
+      rayQueryNGo t ox oy oz tx ty tz (i + 1) acc
+  termination_by t.internals.size - i
+
+/-- Iterative skip-pointer ray broadphase. Every live leaf whose AABB overlaps
+    the segment-AABB of `(ox,oy,oz)→(tx,ty,tz)` has its eclass emitted.
+    Over-approximates a true slab test (Phase 2b' tightens). -/
+def rayQueryN (t : PbvhTree) (ox oy oz tx ty tz : Int) : List EClassId :=
+  if t.internals.isEmpty then []
+  else rayQueryNGo t ox oy oz tx ty tz (t.internalRoot.getD 0) []
+
+/-- True if the AABB `b` has any corner on the kept side of plane `p`
+    (i.e. `normal · corner + d ≥ 0`). If every corner is strictly below
+    the plane, the entire box is rejected. -/
+def halfSpaceKeepsBox (p : Plane) (b : BoundingBox) : Bool :=
+  let xs := [b.minX, b.maxX]
+  let ys := [b.minY, b.maxY]
+  let zs := [b.minZ, b.maxZ]
+  xs.any (fun x => ys.any (fun y => zs.any (fun z =>
+    p.normal.x * x + p.normal.y * y + p.normal.z * z + p.d ≥ 0)))
+
+/-- True if every plane in `planes` keeps at least one corner of `b`.
+    A single rejecting plane kills the box. -/
+def convexKeepsBox (planes : List Plane) (b : BoundingBox) : Bool :=
+  planes.all (fun p => halfSpaceKeepsBox p b)
+
+/-- Top-level recursive worker for `convexQueryN`. Mirror of `aabbQueryNGo`
+    with the internal-node prune predicate replaced by `convexKeepsBox`. -/
+def convexQueryNGo (t : PbvhTree) (planes : List Plane)
+    (i : Nat) (acc : List EClassId) : List EClassId :=
+  let end_ := t.internals.size
+  if hlt : i ≥ end_ then acc.reverse
+  else
+    let n := t.internals[i]!
+    let next : Nat := if h : i < n.skip ∧ n.skip ≤ end_ then n.skip else i + 1
+    have hnext_lt : end_ - next < end_ - i := by
+      have hi : i < end_ := by omega
+      show end_ - (if _ : i < n.skip ∧ n.skip ≤ end_ then n.skip else i + 1) < end_ - i
+      split <;> rename_i h <;> omega
+    if ¬ convexKeepsBox planes n.bounds then
+      convexQueryNGo t planes next acc
+    else if n.left.isNone && n.right.isNone then
+      let acc := (List.range n.span).foldl (fun acc j =>
+        let lid := t.sorted[n.offset + j]!
+        match t.leaves[lid]? with
+        | some l =>
+          if l.alive && convexKeepsBox planes l.bounds then
+            l.eclass :: acc else acc
+        | none => acc) acc
+      convexQueryNGo t planes next acc
+    else
+      have hinc : end_ - (i + 1) < end_ - i := by
+        have hi : i < end_ := by omega
+        omega
+      convexQueryNGo t planes (i + 1) acc
+  termination_by t.internals.size - i
+
+/-- Iterative skip-pointer convex-hull broadphase. Every live leaf whose AABB
+    has at least one corner on the kept side of every plane is emitted. -/
+def convexQueryN (t : PbvhTree) (planes : List Plane) : List EClassId :=
+  if t.internals.isEmpty then []
+  else convexQueryNGo t planes (t.internalRoot.getD 0) []
+
+/-- True iff the tree has no live leaves. -/
+def isEmpty (t : PbvhTree) : Bool :=
+  t.leaves.all (fun l => ¬ l.alive)
+
+/-- Reset the tree to empty while preserving `bucketBits` and `index`. -/
+def clear (t : PbvhTree) : PbvhTree :=
+  { leaves := #[], sorted := #[], internals := #[],
+    bucketBits := t.bucketBits, bucketDir := #[],
+    internalRoot := none, index := t.index }
+
+/-- DynamicBVH-parity wrapper: ignore `passes`, just run a full `build`.
+    Our answer to incremental optimization is bucket-localized rebuild (Phase
+    2c). Until `tick` lands, the safe semantics is a complete rebuild. -/
+def optimizeIncremental (t : PbvhTree) (_passes : Nat) : PbvhTree :=
+  build t
+
+/-- Read the opaque indexer tag. -/
+def getIndex (t : PbvhTree) : Nat := t.index
+
+/-- Write the opaque indexer tag. -/
+def setIndex (t : PbvhTree) (idx : Nat) : PbvhTree :=
+  { t with index := idx }
 
 /-- Enumerate all overlapping live-leaf pairs as `(a, b)` with `a < b` by
     EClassId. Eclass-style broadphase: no pointers, no per-slot callback. -/
