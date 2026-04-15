@@ -2,6 +2,9 @@
 /.lake/
 /build/
 
+# Rust / Cargo build artifacts
+/target/
+
 # Generated code
 /generated/
 
