@@ -1603,4 +1603,79 @@ theorem buildSubtree_root_skip_monotone (leaves : Array PbvhLeaf)
   · rw [hskip]; exact hroot
   · rw [hskip]; exact Nat.le_refl _
 
+/-- **Tree-level structural invariants after `build`.** Packages the per-node
+    theorems into a single consumable interface keyed on the fully-built tree
+    `t' = build t`. All four claims hold simultaneously for every internal
+    index `j < t'.internals.size`:
+
+    1. `skip_monotone`: `j < t'.internals[j].skip ≤ t'.internals.size`.
+    2. `bounds_shape`:  `bounds = windowBounds sorted offset (offset+span)`.
+    3. `leaf_block_skip`: if `left=none ∧ right=none` then `skip = j+1`.
+    4. `right_is_left_skip`: if `left=some L ∧ right=some R` then `L = j+1`
+        and `(t'.internals[L]).skip = R`.
+
+    All four are immediate corollaries of the per-node theorems because
+    `build` starts `buildSubtree` from `internals = #[]` (so the threshold
+    `internals.size ≤ j` is `0 ≤ j`, trivial). -/
+theorem build_skip_invariants (t : PbvhTree) :
+    let t' := build t
+    ∀ (j : Nat) (hj : j < t'.internals.size),
+      let node := t'.internals[j]'hj
+      (j < node.skip ∧ node.skip ≤ t'.internals.size) ∧
+      node.bounds = windowBounds t.leaves t'.sorted node.offset
+        (node.offset + node.span) ∧
+      (node.left = none → node.right = none → node.skip = j + 1) ∧
+      (∀ L R, node.left = some L → node.right = some R →
+        ∃ (hL : L < t'.internals.size), L = j + 1 ∧
+          (t'.internals[L]'hL).skip = R) := by
+  intro t' j hj
+  simp only [build] at *
+  split at hj
+  · -- Empty case: t'.internals = #[], so j < 0 is absurd.
+    rename_i hemp
+    simp [hemp] at hj
+    exact absurd hj (Nat.not_lt_zero _)
+  · -- Non-empty case: t'.internals = (buildSubtree ... #[] 0 sorted.size).1.
+    rename_i hnemp
+    dsimp only at hj ⊢
+    set sorted := insertionSortByHilbert t.leaves (liveIds t.leaves)
+    set R := buildSubtree t.leaves sorted #[] 0 sorted.size
+    have hj_ge : (#[] : Array PbvhInternal).size ≤ j := by simp
+    have hj_R : j < R.1.size := hj
+    refine ⟨?_, ?_, ?_, ?_⟩
+    · exact buildSubtree_new_node_skip_monotone t.leaves sorted
+        sorted.size #[] 0 sorted.size rfl j hj_ge hj_R
+    · exact buildSubtree_new_node_bounds t.leaves sorted
+        sorted.size #[] 0 sorted.size rfl j hj_ge hj_R
+    · exact buildSubtree_new_node_leaf_block_skip t.leaves sorted
+        sorted.size #[] 0 sorted.size rfl j hj_ge hj_R
+    · intro L Rc hL hR
+      exact buildSubtree_new_node_right_is_left_skip t.leaves sorted
+        sorted.size #[] 0 sorted.size rfl j hj_ge hj_R L Rc hL hR
+
+/-- **Tree-level bound containment after `build`.** For every internal
+    node `j` and every leaf position `k` in its `(offset, span)` window,
+    the node's bounds contain the leaf's bounds. Direct corollary of
+    `buildSubtree_new_node_contains_leaf`. -/
+theorem build_contains_leaf (t : PbvhTree)
+    (j : Nat) (hj : j < (build t).internals.size)
+    (l : PbvhLeaf) (k : Nat)
+    (node_offset_le : ((build t).internals[j]'hj).offset ≤ k)
+    (k_lt_node_end :
+      k < ((build t).internals[j]'hj).offset +
+          ((build t).internals[j]'hj).span)
+    (hl : t.leaves[(build t).sorted[k]!]? = some l) :
+    aabbContains ((build t).internals[j]'hj).bounds l.bounds := by
+  simp only [build] at *
+  split at hj
+  · rename_i hemp
+    simp [hemp] at hj
+    exact absurd hj (Nat.not_lt_zero _)
+  · rename_i hnemp
+    dsimp only at *
+    set sorted := insertionSortByHilbert t.leaves (liveIds t.leaves)
+    have hj_ge : (#[] : Array PbvhInternal).size ≤ j := by simp
+    exact buildSubtree_new_node_contains_leaf t.leaves sorted #[] 0 sorted.size
+      j hj_ge hj l k node_offset_le k_lt_node_end hl
+
 end PbvhTree
