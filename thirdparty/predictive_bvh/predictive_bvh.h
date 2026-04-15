@@ -730,8 +730,6 @@ typedef struct pbvh_tree {
 	uint32_t *parent_of_internal; /* size internal_capacity, caller-owned */
 	uint32_t *leaf_to_internal; /* size capacity, caller-owned, indexed by node id */
 	uint64_t *touched_bits; /* size (internal_capacity + 63) / 64, caller-owned */
-	uint32_t *touched_list; /* size internal_capacity, caller-owned; scratch for ancestor walk */
-	uint32_t *touched_scratch; /* size internal_capacity, caller-owned; scratch for radix sort */
 } pbvh_tree_t;
 
 static inline pbvh_node_id_t pbvh_tree_insert_h(pbvh_tree_t *t, pbvh_eclass_id_t ec,
@@ -911,26 +909,33 @@ static inline void pbvh_tree_refit(pbvh_tree_t *t) {
 }
 
 /* Incremental refit: touches only the leaf-range internals containing dirty
- * leaves and their ancestor chain up to the root. Relies on two caller-owned
- * sidecars (leaf_to_internal[], parent_of_internal[]) plus scratch (touched_bits,
- * touched_list, touched_scratch).
+ * leaves and their ancestor chain up to the first ancestor whose current
+ * bounds already cover the dirty leaf's new bounds. Relies on two caller-owned
+ * sidecars (leaf_to_internal[], parent_of_internal[]) plus scratch touched_bits.
  *
- * Complexity: O(K + n_touched) where K = dirty_count and n_touched = size of
- * the ancestor-union set (bounded by K × depth, typically much smaller when
- * dirty leaves cluster inside Hilbert buckets). Strictly bounded by O(N + K).
+ * Complexity: O(K + n_touched) where K = dirty_count and n_touched is the
+ * ancestor-union set truncated by per-leaf containment. A leaf whose new AABB
+ * is already covered by its direct enclosing internal contributes O(1) — no
+ * ancestor work at all. In the worst case (every leaf grows past the root)
+ * n_touched is bounded by K × depth.
  *
  * Algorithm:
- *   1. For each dirty leaf d, look up its enclosing leaf-range internal via
- *      leaf_to_internal[d.leaf_id]. Walk up parent_of_internal[] marking a
- *      bitmap and appending newly-marked ids to touched_list[]. Stop at
- *      already-marked (covers the shared-ancestor case in O(1)).
- *   2. LSD-radix-sort touched_list[] ascending on internal id (one O(n) pass).
- *      Since pre-order DFS gives parent < child, iterating DESCENDING on id
- *      visits children before parents — the bottom-up order refit needs.
- *   3. For each touched id in descending order: if leaf-range, re-union from
- *      sorted[offset..offset+span); else union children's bounds (which have
- *      either been refit already in this pass or remain correct from the last
- *      build because the corresponding subtree had no dirty leaf).
+ *   1. For each dirty leaf d, fetch new_leaf = t->nodes[d].bounds and walk
+ *      up parent_of_internal[] starting from leaf_to_internal[d]. At each
+ *      ancestor, break if ancestor.bounds already contains new_leaf (BVH
+ *      invariant + transitivity: nothing above needs refit). Otherwise mark
+ *      a bit in touched_bits and continue. Walks also short-circuit on
+ *      already-marked bits (covers shared-ancestor case in O(1)).
+ *   2. Scan touched_bits from max_word down to min_word. Within each word,
+ *      pop bits highest-to-lowest via __builtin_clzll — pre-order DFS gives
+ *      parent < child, so this yields strictly bottom-up refit order with
+ *      no sort step. Refit each: leaf-range nodes re-union their sorted[]
+ *      window; inner nodes union their two children's (already-refit or
+ *      still-valid) bounds. Bits self-clear during the scan.
+ *
+ * Soundness license for the early-out: Lean theorem
+ * aabbQueryN_complete_from_invariants only requires each internal's bounds
+ * to be a superset of its subtree leaves. Over-conservative bounds stay sound.
  *
  * Falls back to pbvh_tree_refit when any sidecar is NULL. */
 static inline void pbvh_tree_refit_incremental_(pbvh_tree_t *t,
@@ -938,70 +943,77 @@ static inline void pbvh_tree_refit_incremental_(pbvh_tree_t *t,
 	if (t->internal_count == 0u) { return; }
 	if (dirty == NULL || dirty_count == 0u ||
 			t->parent_of_internal == NULL || t->leaf_to_internal == NULL ||
-			t->touched_bits == NULL || t->touched_list == NULL ||
-			t->touched_scratch == NULL) {
+			t->touched_bits == NULL) {
 		pbvh_tree_refit(t);
 		return;
 	}
-	const uint32_t words = (t->internal_count + 63u) / 64u;
-	for (uint32_t w = 0u; w < words; w++) { t->touched_bits[w] = 0ull; }
-	uint32_t n_touched = 0u;
+	/* Mark phase: walk ancestors, setting bits in touched_bits. Track the
+	 * narrow [min_word..max_word] range so the refit scan visits only
+	 * words containing set bits. Bits are self-clearing during the refit
+	 * pass, so the caller never needs to zero the bitmap between ticks —
+	 * the invariant is: bitmap is all-zero on entry; bitmap is all-zero
+	 * on exit. */
+	uint32_t min_word = t->internal_count; /* sentinel: > any real word */
+	uint32_t max_word = 0u;
 	for (uint32_t d = 0u; d < dirty_count; d++) {
 		const pbvh_node_id_t leaf_id = dirty[d].leaf_id;
 		if (leaf_id >= t->count) { continue; }
+		const Aabb new_leaf = t->nodes[leaf_id].bounds;
 		uint32_t i = t->leaf_to_internal[leaf_id];
 		while (i != PBVH_NULL_NODE && i < t->internal_count) {
+			/* Containment early-out: if this ancestor's current bounds already
+			 * contain the new leaf bounds, the existing bounds remain a valid
+			 * conservative superset. By the BVH invariant (every ancestor's
+			 * bounds are a superset of its subtree leaves) and transitivity,
+			 * all ancestors above this node also remain valid — no mark, no
+			 * refit, walk terminates in O(1) for shrinking / in-place leaves.
+			 * Soundness license: Lean theorem aabbQueryN_complete_from_invariants
+			 * only requires internals' bounds to cover their descendant leaves;
+			 * over-conservative bounds are permitted. */
+			if (aabb_contains(&t->internals[i].bounds, &new_leaf)) { break; }
 			const uint32_t w = i >> 6;
 			const uint64_t mask = 1ull << (i & 63u);
 			if ((t->touched_bits[w] & mask) != 0ull) { break; }
 			t->touched_bits[w] |= mask;
-			t->touched_list[n_touched++] = i;
+			if (w < min_word) { min_word = w; }
+			if (w > max_word) { max_word = w; }
 			i = t->parent_of_internal[i];
 		}
 	}
-	if (n_touched == 0u) { return; }
-	/* LSD radix sort ascending on internal id (4 passes × 8 bits).
-	 * touched_scratch is a caller-owned uint32_t array of size internal_capacity. */
-	uint32_t *src = t->touched_list;
-	uint32_t *dst = t->touched_scratch;
-	for (uint32_t pass = 0u; pass < 4u; pass++) {
-		uint32_t count_bin[256];
-		for (uint32_t b = 0u; b < 256u; b++) { count_bin[b] = 0u; }
-		const uint32_t shift = pass * 8u;
-		for (uint32_t i = 0u; i < n_touched; i++) {
-			count_bin[(src[i] >> shift) & 0xFFu]++;
-		}
-		uint32_t sum = 0u;
-		for (uint32_t b = 0u; b < 256u; b++) {
-			uint32_t c = count_bin[b]; count_bin[b] = sum; sum += c;
-		}
-		for (uint32_t i = 0u; i < n_touched; i++) {
-			dst[count_bin[(src[i] >> shift) & 0xFFu]++] = src[i];
-		}
-		uint32_t *tmp = src; src = dst; dst = tmp;
-	}
-	/* After 4 passes, src == touched_list (even swap count). Iterate descending
-	 * so children refit before parents. */
-	for (uint32_t k = n_touched; k > 0u; k--) {
-		const uint32_t idx = src[k - 1u];
-		pbvh_internal_t *n = &t->internals[idx];
-		if (n->left == PBVH_NULL_NODE && n->right == PBVH_NULL_NODE) {
-			const uint32_t o = n->offset;
-			const uint32_t s = n->span;
-			if (s == 0u) { continue; }
-			Aabb acc = t->nodes[t->sorted[o]].bounds;
-			for (uint32_t j = o + 1u; j < o + s; j++) {
-				acc = aabb_union(&acc, &t->nodes[t->sorted[j]].bounds);
+	if (min_word > max_word) { return; }
+	/* Refit phase: iterate words from max_word down to min_word. Within
+	 * each word, pop set bits highest-to-lowest via __builtin_clzll. This
+	 * yields indices in strictly descending order — pre-order DFS gives
+	 * parent < child, so children are visited before their parents and
+	 * every union reads already-refit children. No sort step. Bits are
+	 * cleared as they are consumed; at loop exit the bitmap is zero. */
+	for (uint32_t w = max_word + 1u; w > min_word; ) {
+		w--;
+		uint64_t bits = t->touched_bits[w];
+		while (bits != 0ull) {
+			const uint32_t b = 63u - (uint32_t)__builtin_clzll(bits);
+			bits &= ~(1ull << b);
+			const uint32_t idx = (w << 6) | b;
+			pbvh_internal_t *n = &t->internals[idx];
+			if (n->left == PBVH_NULL_NODE && n->right == PBVH_NULL_NODE) {
+				const uint32_t o = n->offset;
+				const uint32_t s = n->span;
+				if (s == 0u) { continue; }
+				Aabb acc = t->nodes[t->sorted[o]].bounds;
+				for (uint32_t j = o + 1u; j < o + s; j++) {
+					acc = aabb_union(&acc, &t->nodes[t->sorted[j]].bounds);
+				}
+				n->bounds = acc;
+			} else if (n->left != PBVH_NULL_NODE && n->right != PBVH_NULL_NODE) {
+				n->bounds = aabb_union(&t->internals[n->left].bounds,
+						&t->internals[n->right].bounds);
+			} else {
+				const pbvh_internal_id_t only =
+						(n->left != PBVH_NULL_NODE) ? n->left : n->right;
+				n->bounds = t->internals[only].bounds;
 			}
-			n->bounds = acc;
-		} else if (n->left != PBVH_NULL_NODE && n->right != PBVH_NULL_NODE) {
-			n->bounds = aabb_union(&t->internals[n->left].bounds,
-					&t->internals[n->right].bounds);
-		} else {
-			const pbvh_internal_id_t only =
-					(n->left != PBVH_NULL_NODE) ? n->left : n->right;
-			n->bounds = t->internals[only].bounds;
 		}
+		t->touched_bits[w] = 0ull;
 	}
 }
 
