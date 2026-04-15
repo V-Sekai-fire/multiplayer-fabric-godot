@@ -761,7 +761,10 @@ static inline void pbvh_tree_ray_query(pbvh_tree_t *t,
 
 /* Half-space test: does AABB `b` have any corner `c` satisfying
  * normal · c + d >= 0 ? If every corner is strictly below the plane,
- * the entire box is rejected. Unrolled 8-corner loop in R128. */
+ * the entire box is rejected. Arithmetic per corner is routed through
+ * the EGraph-emitted pbvh_plane_corner_val helper — the only remaining
+ * C here is control-flow (the 8-corner unroll) and the scalar
+ * comparison (not a ring op). */
 static inline bool pbvh_half_space_keeps_(const pbvh_plane_t *p, const Aabb *b) {
 \tconst R128 zero = r128_from_int(0);
 \tR128 xs[2]; xs[0] = b->min_x; xs[1] = b->max_x;
@@ -770,10 +773,8 @@ static inline bool pbvh_half_space_keeps_(const pbvh_plane_t *p, const Aabb *b) 
 \tfor (int ix = 0; ix < 2; ix++) {
 \t\tfor (int iy = 0; iy < 2; iy++) {
 \t\t\tfor (int iz = 0; iz < 2; iz++) {
-\t\t\t\tR128 dot = r128_add(r128_add(r128_mul(p->nx, xs[ix]),
-\t\t\t\t\t\tr128_mul(p->ny, ys[iy])),
-\t\t\t\t\t\tr128_mul(p->nz, zs[iz]));
-\t\t\t\tR128 val = r128_add(dot, p->d);
+\t\t\t\tR128 val = pbvh_plane_corner_val(p->nx, p->ny, p->nz, p->d,
+\t\t\t\t\t\txs[ix], ys[iy], zs[iz]);
 \t\t\t\tif (r128_le(zero, val)) {
 \t\t\t\t\treturn true;
 \t\t\t\t}

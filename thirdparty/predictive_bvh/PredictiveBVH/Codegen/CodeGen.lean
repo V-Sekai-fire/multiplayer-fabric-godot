@@ -945,6 +945,21 @@ private def ghostAabbC : String :=
   "/* Ghost AABB max bound per axis. Proved: expansion_covers_k_ticks */\n" ++
   genC "ghost_aabb_max" ["center","ext","v","a_half","tau"] ghostAabbMaxExpr
 
+-- ── Half-space corner valuation (plane polynomial) ─────────────────────────
+-- dot3 + d: nx*x + ny*y + nz*z + d. Pure ring expression, ordinary
+-- Expr Int / EGraph path. Used by pbvh_half_space_keeps_ (TreeC.lean) to
+-- replace its 8-corner inline r128_mul/r128_add unroll with 8 call sites
+-- to this emitted helper — one CSE'd polynomial instead of 24 hand-coded
+-- R128 ops per call.
+private def planeCornerValExpr : Expr Int :=
+  -- vars: 0=nx, 1=ny, 2=nz, 3=d, 4=x, 5=y, 6=z
+  .var 0 * .var 4 + .var 1 * .var 5 + .var 2 * .var 6 + .var 3
+
+private def planeCornerValC : String :=
+  "/* Plane corner valuation: nx*x + ny*y + nz*z + d.\n" ++
+  "   Pure ring polynomial, EGraph-CSE'd. Used by pbvh_half_space_keeps_. */\n" ++
+  genC "pbvh_plane_corner_val" ["nx","ny","nz","d","x","y","z"] planeCornerValExpr
+
 private def deltaCostFnsC : String :=
   let costFns := deltaCandidates.map fun dk =>
     genC s!"delta_cost_{dk}" ["v", "a_half"] (deltaCostExpr dk)
@@ -1215,6 +1230,7 @@ private def cFile : String :=
   ghostBoundC ++ "\n\n" ++
   surfaceAreaC ++ "\n\n" ++
   ghostAabbC ++ "\n\n" ++
+  planeCornerValC ++ "\n\n" ++
   aabbC ++ "\n\n" ++
   utilC ++ "\n\n" ++
   hilbertC ++ "\n\n" ++

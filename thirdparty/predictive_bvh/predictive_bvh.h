@@ -149,6 +149,18 @@ static inline R128 ghost_aabb_max(R128 center, R128 ext, R128 v, R128 a_half, R1
     return t5;
 }
 
+/* Plane corner valuation: nx*x + ny*y + nz*z + d.
+   Pure ring polynomial, EGraph-CSE'd. Used by pbvh_half_space_keeps_. */
+static inline R128 pbvh_plane_corner_val(R128 nx, R128 ny, R128 nz, R128 d, R128 x, R128 y, R128 z) {
+    R128 t0 = r128_mul(nx, x);
+    R128 t1 = r128_mul(ny, y);
+    R128 t2 = r128_add(t0, t1);
+    R128 t3 = r128_mul(nz, z);
+    R128 t4 = r128_add(t2, t3);
+    R128 t5 = r128_add(t4, d);
+    return t5;
+}
+
 /* Source: Types.lean:28 Proved: unionBounds_contains_left/right */
 typedef struct Aabb {
     R128 min_x, max_x;
@@ -1411,7 +1423,10 @@ static inline void pbvh_tree_ray_query(pbvh_tree_t *t,
 
 /* Half-space test: does AABB `b` have any corner `c` satisfying
  * normal · c + d >= 0 ? If every corner is strictly below the plane,
- * the entire box is rejected. Unrolled 8-corner loop in R128. */
+ * the entire box is rejected. Arithmetic per corner is routed through
+ * the EGraph-emitted pbvh_plane_corner_val helper — the only remaining
+ * C here is control-flow (the 8-corner unroll) and the scalar
+ * comparison (not a ring op). */
 static inline bool pbvh_half_space_keeps_(const pbvh_plane_t *p, const Aabb *b) {
 	const R128 zero = r128_from_int(0);
 	R128 xs[2]; xs[0] = b->min_x; xs[1] = b->max_x;
@@ -1420,10 +1435,8 @@ static inline bool pbvh_half_space_keeps_(const pbvh_plane_t *p, const Aabb *b) 
 	for (int ix = 0; ix < 2; ix++) {
 		for (int iy = 0; iy < 2; iy++) {
 			for (int iz = 0; iz < 2; iz++) {
-				R128 dot = r128_add(r128_add(r128_mul(p->nx, xs[ix]),
-						r128_mul(p->ny, ys[iy])),
-						r128_mul(p->nz, zs[iz]));
-				R128 val = r128_add(dot, p->d);
+				R128 val = pbvh_plane_corner_val(p->nx, p->ny, p->nz, p->d,
+						xs[ix], ys[iy], zs[iz]);
 				if (r128_le(zero, val)) {
 					return true;
 				}
