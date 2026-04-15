@@ -20,6 +20,8 @@ TEST_FORCE_LINK(test_predictive_bvh_bench)
 
 #include "thirdparty/predictive_bvh/predictive_bvh.h"
 
+#include <cmath>
+
 namespace TestPredictiveBVHBench {
 
 // Phase 0 of the "DynamicBVH parity via Lean proofs" plan. Three questions:
@@ -830,6 +832,127 @@ TEST_CASE("[PredictiveBVH][Tick] in-bucket perturbation takes refit fast path") 
 					(int)t_tick, (int)t_build));
 }
 
+// Growth-rate bench: double N across {1024, 2048, 4096, 8192, 16384} and
+// report per-doubling time ratios. The point is not the absolute numbers but
+// the scaling exponent — super-linear DBVH vs ~linear pbvh_tree_tick is the
+// signal that justifies Rung 4. Max N capped at 16384 so the entire sweep
+// fits inside a CI build slot; extrapolate to 65k at whatever growth
+// exponent the table shows.
+TEST_CASE("[PredictiveBVH][Bench] growth rate of insert+tick vs DynamicBVH") {
+	constexpr uint32_t Ns[] = { 1024u, 2048u, 4096u, 8192u, 16384u };
+	constexpr uint32_t kSweeps = sizeof(Ns) / sizeof(Ns[0]);
+
+	uint64_t pbvh_totals[kSweeps] = {};
+	uint64_t dbvh_totals[kSweeps] = {};
+
+	Aabb scene = aabb_from_floats(-BENCH_BOUND, BENCH_BOUND,
+			-BENCH_BOUND, BENCH_BOUND, -BENCH_BOUND, BENCH_BOUND);
+
+	for (uint32_t s = 0; s < kSweeps; s++) {
+		const uint32_t N = Ns[s];
+
+		Vector<FloatLeaf> floats;
+		Vector<R128Leaf> r128s;
+		generate_dataset(N, 0xFEED1234ull ^ (uint64_t)N, floats, r128s);
+
+		Vector<pbvh_node_t> storage;
+		storage.resize(N + 16);
+		Vector<pbvh_node_id_t> sorted_buf;
+		sorted_buf.resize(N + 16);
+		Vector<pbvh_internal_t> internals;
+		internals.resize(2 * (N + 16));
+		Vector<uint32_t> bucket_dir;
+		bucket_dir.resize(2u * (1u << HILBERT_PREFIX_BITS));
+
+		pbvh_tree_t tree = {};
+		tree.nodes = storage.ptrw();
+		tree.capacity = storage.size();
+		tree.root = PBVH_NULL_NODE;
+		tree.free_head = PBVH_NULL_NODE;
+		tree.sorted = sorted_buf.ptrw();
+		tree.internals = internals.ptrw();
+		tree.internal_capacity = internals.size();
+		tree.internal_root = PBVH_NULL_NODE;
+		tree.bucket_dir = bucket_dir.ptrw();
+		tree.bucket_bits = HILBERT_PREFIX_BITS;
+
+		const uint64_t t_p_ins0 = OS::get_singleton()->get_ticks_usec();
+		for (uint32_t i = 0; i < N; i++) {
+			pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i,
+					r128s[i].box, r128s[i].hilbert);
+		}
+		const uint64_t t_p_ins = OS::get_singleton()->get_ticks_usec() - t_p_ins0;
+
+		const uint64_t t_p_build0 = OS::get_singleton()->get_ticks_usec();
+		pbvh_tree_build(&tree);
+		const uint64_t t_p_build = OS::get_singleton()->get_ticks_usec() - t_p_build0;
+
+		LocalVector<pbvh_dirty_leaf_t> dirty;
+		dirty.resize(N);
+		XorShift rng(0xABCDEFull ^ (uint64_t)N);
+		for (uint32_t i = 0; i < N; i++) {
+			AABB moved = floats[i].box;
+			moved.position += Vector3(rng.uniform(-0.01f, 0.01f),
+					rng.uniform(-0.01f, 0.01f), rng.uniform(-0.01f, 0.01f));
+			Aabb rb = aabb_from_floats(
+					moved.position.x, moved.position.x + moved.size.x,
+					moved.position.y, moved.position.y + moved.size.y,
+					moved.position.z, moved.position.z + moved.size.z);
+			const uint32_t new_h = hilbert_of_aabb(&rb, &scene);
+			dirty[i].leaf_id = (pbvh_node_id_t)i;
+			dirty[i].old_hilbert = r128s[i].hilbert;
+			r128s.write[i].box = rb;
+			r128s.write[i].hilbert = new_h;
+			pbvh_tree_update_h(&tree, (pbvh_node_id_t)i, rb, new_h);
+		}
+
+		const uint64_t t_p_tick0 = OS::get_singleton()->get_ticks_usec();
+		pbvh_tree_tick(&tree, dirty.ptr(), N);
+		const uint64_t t_p_tick = OS::get_singleton()->get_ticks_usec() - t_p_tick0;
+
+		DynamicBVH dtree;
+		LocalVector<DynamicBVH::ID> dids;
+		dids.resize(N);
+
+		const uint64_t t_d_ins0 = OS::get_singleton()->get_ticks_usec();
+		for (uint32_t i = 0; i < N; i++) {
+			dids[i] = dtree.insert(floats[i].box, (void *)(uintptr_t)i);
+		}
+		const uint64_t t_d_ins = OS::get_singleton()->get_ticks_usec() - t_d_ins0;
+
+		const uint64_t t_d_upd0 = OS::get_singleton()->get_ticks_usec();
+		for (uint32_t i = 0; i < N; i++) {
+			dtree.update(dids[i], floats[i].box);
+		}
+		const uint64_t t_d_upd = OS::get_singleton()->get_ticks_usec() - t_d_upd0;
+
+		const uint64_t t_d_opt0 = OS::get_singleton()->get_ticks_usec();
+		dtree.optimize_incremental(1);
+		const uint64_t t_d_opt = OS::get_singleton()->get_ticks_usec() - t_d_opt0;
+
+		pbvh_totals[s] = t_p_ins + t_p_build + t_p_tick;
+		dbvh_totals[s] = t_d_ins + t_d_upd + t_d_opt;
+
+		print_line(vformat("[N=%5d] pbvh ins=%7d build=%7d tick=%7d total=%8d us  |  dbvh ins=%7d upd=%7d opt=%7d total=%8d us",
+				(int)N, (int)t_p_ins, (int)t_p_build, (int)t_p_tick, (int)pbvh_totals[s],
+				(int)t_d_ins, (int)t_d_upd, (int)t_d_opt, (int)dbvh_totals[s]));
+	}
+
+	print_line("[growth rate per doubling of N — exponent = log2(ratio)]");
+	for (uint32_t s = 1; s < kSweeps; s++) {
+		const double p_ratio = (double)pbvh_totals[s] / (double)MAX((uint64_t)1, pbvh_totals[s - 1]);
+		const double d_ratio = (double)dbvh_totals[s] / (double)MAX((uint64_t)1, dbvh_totals[s - 1]);
+		const double p_exp = p_ratio > 0.0 ? std::log2(p_ratio) : 0.0;
+		const double d_exp = d_ratio > 0.0 ? std::log2(d_ratio) : 0.0;
+		print_line(vformat("    N:%5d -> %5d   pbvh x%.2f (exp %.2f)   dbvh x%.2f (exp %.2f)",
+				(int)Ns[s - 1], (int)Ns[s], p_ratio, p_exp, d_ratio, d_exp));
+	}
+
+	for (uint32_t s = 0; s < kSweeps; s++) {
+		CHECK(pbvh_totals[s] > 0);
+		CHECK(dbvh_totals[s] > 0);
+	}
+}
 
 } // namespace TestPredictiveBVHBench
 

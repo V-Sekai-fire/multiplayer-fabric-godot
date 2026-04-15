@@ -882,8 +882,13 @@ static inline void pbvh_tree_refit(pbvh_tree_t *t) {
 	}
 }
 
-/* Insertion sort sorted[] by hilbert, then build the internal tree and
- * (if provided) the bucket directory. O(N) on near-sorted input. */
+/* 4-pass LSD radix sort of sorted[] by 30-bit hilbert (O(N)), then build
+ * the internal tree and (if provided) the bucket directory. The radix
+ * passes reuse t->internals[] as a pbvh_node_id_t scratch buffer — its
+ * contents are overwritten immediately after by pbvh_build_internal_, and
+ * sizeof(pbvh_internal_t) >= sizeof(pbvh_node_id_t) with internal_capacity
+ * >= count so the aliasing is in-bounds. Four passes is even, so the sorted
+ * result lands back in t->sorted[] without a final copy. */
 static inline void pbvh_tree_build(pbvh_tree_t *t) {
 	uint32_t k = 0;
 	for (uint32_t i = 0; i < t->count; i++) {
@@ -892,15 +897,44 @@ static inline void pbvh_tree_build(pbvh_tree_t *t) {
 		}
 	}
 	t->sorted_count = k;
-	for (uint32_t i = 1; i < k; i++) {
-		pbvh_node_id_t cur = t->sorted[i];
-		uint32_t cur_h = t->nodes[cur].hilbert;
-		uint32_t j = i;
-		while (j > 0 && t->nodes[t->sorted[j - 1]].hilbert > cur_h) {
-			t->sorted[j] = t->sorted[j - 1];
-			j--;
+	if (k > 1u && t->internals != NULL && t->internal_capacity >= k) {
+		pbvh_node_id_t *scratch = (pbvh_node_id_t *)t->internals;
+		pbvh_node_id_t *src = t->sorted;
+		pbvh_node_id_t *dst = scratch;
+		for (uint32_t pass = 0u; pass < 4u; pass++) {
+			uint32_t count_bin[256];
+			for (uint32_t b = 0u; b < 256u; b++) { count_bin[b] = 0u; }
+			const uint32_t shift = pass * 8u;
+			for (uint32_t i = 0u; i < k; i++) {
+				uint32_t b = (t->nodes[src[i]].hilbert >> shift) & 0xFFu;
+				count_bin[b]++;
+			}
+			uint32_t sum = 0u;
+			for (uint32_t b = 0u; b < 256u; b++) {
+				uint32_t c = count_bin[b];
+				count_bin[b] = sum;
+				sum += c;
+			}
+			for (uint32_t i = 0u; i < k; i++) {
+				uint32_t b = (t->nodes[src[i]].hilbert >> shift) & 0xFFu;
+				dst[count_bin[b]++] = src[i];
+			}
+			pbvh_node_id_t *tmp = src; src = dst; dst = tmp;
 		}
-		t->sorted[j] = cur;
+	} else if (k > 1u) {
+		/* Fallback insertion sort when no internals scratch is attached.
+		 * Production paths always supply internals; this branch exists for
+		 * tiny harnesses that skip the allocation. */
+		for (uint32_t i = 1u; i < k; i++) {
+			pbvh_node_id_t cur = t->sorted[i];
+			uint32_t cur_h = t->nodes[cur].hilbert;
+			uint32_t j = i;
+			while (j > 0u && t->nodes[t->sorted[j - 1u]].hilbert > cur_h) {
+				t->sorted[j] = t->sorted[j - 1u];
+				j--;
+			}
+			t->sorted[j] = cur;
+		}
 	}
 	t->internal_count = 0u;
 	t->internal_root = PBVH_NULL_NODE;
