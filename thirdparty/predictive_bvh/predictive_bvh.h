@@ -166,42 +166,6 @@ static inline T pbvh_plane_corner_val(T nx, T ny, T nz, T d, T x, T y, T z) {
     return t5;
 }
 
-/* Sign bit of R128 (d.hi's high bit) packed as R128-encoded 0 or 1.
-   Used by the Z<->GF(2) bridge to turn comparisons into ring ops. */
-static inline R128 r128_sign_bit(R128 d) {
-    R128 r; r.hi = ((uint64_t)d.hi >> 63) & 1; r.lo = 0; return r;
-}
-
-/* Branchless min via Z<->GF(2) bridge. sign = sign_bit(b-a). */
-template <typename T>
-static inline T ring_min_r128(T a, T b, T sign) {
-    T t0 = (T(-1) * a);
-    T t1 = (b + t0);
-    T t2 = (sign * t1);
-    T t3 = (a + t2);
-    return t3;
-}
-
-/* Branchless max via Z<->GF(2) bridge. sign = sign_bit(b-a). */
-template <typename T>
-static inline T ring_max_r128(T a, T b, T sign) {
-    T t0 = (T(-1) * a);
-    T t1 = (b + t0);
-    T t2 = (sign * t1);
-    T t3 = (T(-1) * t2);
-    T t4 = (b + t3);
-    return t4;
-}
-
-/* Two-arg min/max wrappers: compute sign inline, delegate to ring form. */
-static inline R128 pbvh_r128_min(R128 a, R128 b) {
-    return ring_min_r128(a, b, r128_sign_bit(r128_sub(b, a)));
-}
-
-static inline R128 pbvh_r128_max(R128 a, R128 b) {
-    return ring_max_r128(a, b, r128_sign_bit(r128_sub(b, a)));
-}
-
 /* Source: Types.lean:28 Proved: unionBounds_contains_left/right */
 template <typename T>
 struct AabbT {
@@ -210,19 +174,6 @@ struct AabbT {
     T min_z, max_z;
 };
 using Aabb = AabbT<R128>;
-
-/* Aabb union — hot-path short-circuit form (called per refit). Proved
-   equivalent to ring_min_r128 / ring_max_r128 via Z<->GF(2) bridge. */
-static inline Aabb aabb_union(const Aabb *a, const Aabb *o) {
-    Aabb r;
-    r.min_x = r128_le(a->min_x, o->min_x) ? a->min_x : o->min_x;
-    r.max_x = r128_le(a->max_x, o->max_x) ? o->max_x : a->max_x;
-    r.min_y = r128_le(a->min_y, o->min_y) ? a->min_y : o->min_y;
-    r.max_y = r128_le(a->max_y, o->max_y) ? o->max_y : a->max_y;
-    r.min_z = r128_le(a->min_z, o->min_z) ? a->min_z : o->min_z;
-    r.max_z = r128_le(a->max_z, o->max_z) ? o->max_z : a->max_z;
-    return r;
-}
 
 /* Ring-polynomial provenance export: Π (1 - sign_bit(dᵢ)) over 6 axis diffs.
    Proved equivalent to short-circuit r128_le chains below via bitDecompose;
@@ -249,158 +200,23 @@ static inline T aabb_overlaps_ring(T a_min_x, T a_max_x, T a_min_y, T a_max_y, T
     return t16;
 }
 
-/* Fast-path predicates: short-circuit r128_le chains. Proved equivalent to
-   aabb_overlaps_ring via the Z<->GF(2) bridge — see Lean HilbertBroadphase. */
-static inline bool aabb_overlaps(const Aabb *a, const Aabb *o) {
-    return r128_le(a->min_x, o->max_x) && r128_le(o->min_x, a->max_x)
-        && r128_le(a->min_y, o->max_y) && r128_le(o->min_y, a->max_y)
-        && r128_le(a->min_z, o->max_z) && r128_le(o->min_z, a->max_z);
-}
-
-static inline bool aabb_contains(const Aabb *a, const Aabb *inner) {
-    return r128_le(a->min_x, inner->min_x) && r128_le(inner->max_x, a->max_x)
-        && r128_le(a->min_y, inner->min_y) && r128_le(inner->max_y, a->max_y)
-        && r128_le(a->min_z, inner->min_z) && r128_le(inner->max_z, a->max_z);
-}
-
-static inline bool aabb_contains_point(const Aabb *a, R128 x, R128 y, R128 z) {
-    return r128_le(a->min_x, x) && r128_le(x, a->max_x)
-        && r128_le(a->min_y, y) && r128_le(y, a->max_y)
-        && r128_le(a->min_z, z) && r128_le(z, a->max_z);
-}
-
-/* Source: Build.lean:193 (clz30) */
-static inline uint32_t clz30(uint32_t x) {
-    return x == 0 ? 30 : 29 - (31 - _pbvh_clz(x));
-}
-
-/* R128 arithmetic right shift by 1 (divide by 2, preserving sign) */
-static inline R128 r128_half(R128 v) {
-    R128 r;
-    r.hi = v.hi >> 1;
-    r.lo = (v.lo >> 1) | ((uint64_t)v.hi << 63);
-    return r;
-}
-
-/* Source: Build.lean (hilbert3D) — Skilling (2004) 3D Hilbert curve.
-   O(b) bit manipulation; better locality than Morton for volume partitioning.
-   Bader (2013) Ch.7: cluster diameter O(n^{1/3}) vs Morton O(n^{2/3}). */
-static inline uint32_t hilbert3d(uint32_t x, uint32_t y, uint32_t z) {
-    const uint32_t order = 10;
-    const uint32_t mask = (1u << order) - 1u;
-    x &= mask; y &= mask; z &= mask;
-    /* Step 1: inverse undo (MSB down to bit 1) */
-    for (uint32_t i = 0; i < order - 1; i++) {
-        uint32_t q = 1u << (order - 1 - i);
-        uint32_t p = q - 1;
-        if (z & q) { x ^= p; } else { uint32_t t = (x ^ z) & p; x ^= t; z ^= t; }
-        if (y & q) { x ^= p; } else { uint32_t t = (x ^ y) & p; x ^= t; y ^= t; }
-    }
-    /* Step 2: Gray encode */
-    y ^= x; z ^= y;
-    /* Step 3: fixup — propagate gray parity */
-    uint32_t t = 0;
-    for (uint32_t i = 0; i < order - 1; i++) {
-        uint32_t q = 1u << (order - 1 - i);
-        if (z & q) t ^= (q - 1);
-    }
-    x ^= t; y ^= t; z ^= t;
-    x &= mask; y &= mask; z &= mask;
-    /* Step 4: transpose to 30-bit index (MSB-first, z-y-x per triple) */
-    uint32_t h = 0;
-    for (int b = (int)order - 1; b >= 0; b--) {
-        h = (h << 1) | ((z >> b) & 1);
-        h = (h << 1) | ((y >> b) & 1);
-        h = (h << 1) | ((x >> b) & 1);
-    }
-    return h;
-}
-
-static inline void hilbert3d_inverse(uint32_t h, uint32_t *ox, uint32_t *oy, uint32_t *oz);
-
-/* Source: Build.lean (leafHilbert) — R128 Aabb, returns uint32 Hilbert code */
-static inline uint32_t hilbert_of_aabb(const Aabb *b, const Aabb *scene) {
-    R128 sw = r128_sub(scene->max_x, scene->min_x);
-    R128 sh = r128_sub(scene->max_y, scene->min_y);
-    R128 sd = r128_sub(scene->max_z, scene->min_z);
-    R128 one = r128_from_int(1LL);
-    if (r128_le(sw, R128_ZERO)) sw = one;
-    if (r128_le(sh, R128_ZERO)) sh = one;
-    if (r128_le(sd, R128_ZERO)) sd = one;
-    R128 k1024 = r128_from_int(1024LL);
-    R128 cx = r128_half(r128_add(b->min_x, b->max_x));
-    R128 cy = r128_half(r128_add(b->min_y, b->max_y));
-    R128 cz = r128_half(r128_add(b->min_z, b->max_z));
-    int64_t swi = r128_to_int(sw), shi = r128_to_int(sh), sdi = r128_to_int(sd);
-    if (swi == 0) swi = 1; if (shi == 0) shi = 1; if (sdi == 0) sdi = 1;
-    int64_t nxi = r128_to_int(r128_mul(r128_sub(cx, scene->min_x), k1024)) / swi;
-    int64_t nyi = r128_to_int(r128_mul(r128_sub(cy, scene->min_y), k1024)) / shi;
-    int64_t nzi = r128_to_int(r128_mul(r128_sub(cz, scene->min_z), k1024)) / sdi;
-    uint32_t nx = (uint32_t)(nxi < 0 ? 0 : nxi > 1023 ? 1023 : nxi);
-    uint32_t ny = (uint32_t)(nyi < 0 ? 0 : nyi > 1023 ? 1023 : nyi);
-    uint32_t nz = (uint32_t)(nzi < 0 ? 0 : nzi > 1023 ? 1023 : nzi);
-    uint32_t h = hilbert3d(nx, ny, nz);
-    /* Witness check: inverse(forward(x,y,z)) == (x,y,z) */
-    uint32_t rx, ry, rz;
-    hilbert3d_inverse(h, &rx, &ry, &rz);
-    CRASH_COND(rx != nx || ry != ny || rz != nz);
-    return h;
-}
-
-/* Hilbert3D inverse: 30-bit code → (x, y, z) 10-bit coordinates.
-   Skilling transposeToAxes. Verified by roundtrip in Lean. */
-static inline void hilbert3d_inverse(uint32_t h, uint32_t *ox, uint32_t *oy, uint32_t *oz) {
-    const uint32_t order = 10;
-    const uint32_t mask = (1u << order) - 1u;
-    uint32_t x = 0, y = 0, z = 0;
-    for (uint32_t b = 0; b < order; b++) {
-        uint32_t s = 3 * b;
-        x |= ((h >> s) & 1) << b;
-        y |= ((h >> (s + 1)) & 1) << b;
-        z |= ((h >> (s + 2)) & 1) << b;
-    }
-    /* Undo fixup: progressive decode */
-    uint32_t t = 0;
-    for (uint32_t i = 0; i < order - 1; i++) {
-        uint32_t q = 1u << (order - 1 - i);
-        if ((z ^ t) & q) t ^= (q - 1);
-    }
-    x ^= t; y ^= t; z ^= t;
-    /* Undo Gray: z ^= y, then y ^= x */
-    z ^= y; y ^= x;
-    /* Undo main loop: Q from 2 to MSB, y then z */
-    for (uint32_t q = 2; q < (1u << order); q <<= 1) {
-        uint32_t p = q - 1;
-        if (y & q) { x ^= p; } else { uint32_t ty = (x ^ y) & p; x ^= ty; y ^= ty; }
-        if (z & q) { x ^= p; } else { uint32_t tz = (x ^ z) & p; x ^= tz; z ^= tz; }
-    }
-    *ox = x & mask; *oy = y & mask; *oz = z & mask;
-    /* Witness check: forward(inverse(h)) == h */
-    CRASH_COND(hilbert3d(*ox, *oy, *oz) != h);
-}
-
-/* Hilbert-cell-of: AABB from Hilbert code + prefix depth + scene bounds (R128). */
-static inline Aabb hilbert_cell_of(uint32_t code, uint32_t prefix_depth, const Aabb *scene) {
-    uint32_t cx, cy, cz;
-    hilbert3d_inverse(code, &cx, &cy, &cz);
-    int64_t sw = r128_to_int(r128_sub(scene->max_x, scene->min_x));
-    int64_t sh = r128_to_int(r128_sub(scene->max_y, scene->min_y));
-    int64_t sd = r128_to_int(r128_sub(scene->max_z, scene->min_z));
-    if (sw <= 0) sw = 1; if (sh <= 0) sh = 1; if (sd <= 0) sd = 1;
-    uint32_t shift = (prefix_depth < 10) ? 10 - prefix_depth : 0;
-    int64_t cell = 1LL << shift;
-    uint32_t x0 = (cx >> shift) << shift;
-    uint32_t y0 = (cy >> shift) << shift;
-    uint32_t z0 = (cz >> shift) << shift;
-    Aabb result;
-    result.min_x = r128_add(scene->min_x, r128_div(r128_mul(r128_from_int((int64_t)x0), r128_sub(scene->max_x, scene->min_x)), r128_from_int(1024LL)));
-    result.max_x = r128_add(scene->min_x, r128_div(r128_mul(r128_from_int((int64_t)x0 + cell), r128_sub(scene->max_x, scene->min_x)), r128_from_int(1024LL)));
-    result.min_y = r128_add(scene->min_y, r128_div(r128_mul(r128_from_int((int64_t)y0), r128_sub(scene->max_y, scene->min_y)), r128_from_int(1024LL)));
-    result.max_y = r128_add(scene->min_y, r128_div(r128_mul(r128_from_int((int64_t)y0 + cell), r128_sub(scene->max_y, scene->min_y)), r128_from_int(1024LL)));
-    result.min_z = r128_add(scene->min_z, r128_div(r128_mul(r128_from_int((int64_t)z0), r128_sub(scene->max_z, scene->min_z)), r128_from_int(1024LL)));
-    result.max_z = r128_add(scene->min_z, r128_div(r128_mul(r128_from_int((int64_t)z0 + cell), r128_sub(scene->max_z, scene->min_z)), r128_from_int(1024LL)));
-    return result;
-}
+/* ── Adapter-provided non-polynomial helpers (defined in predictive_bvh_adapter.h)
+   Forward-declared here so generated tree code can call them at parse time.
+   DO NOT define these in this file; definitions live in the adapter. */
+extern R128 r128_sign_bit(R128 d);
+extern R128 pbvh_r128_min(R128 a, R128 b);
+extern R128 pbvh_r128_max(R128 a, R128 b);
+extern Aabb aabb_union(const Aabb *a, const Aabb *o);
+extern bool aabb_overlaps(const Aabb *a, const Aabb *o);
+extern bool aabb_contains(const Aabb *a, const Aabb *inner);
+extern bool aabb_contains_point(const Aabb *a, R128 x, R128 y, R128 z);
+extern uint32_t clz30(uint32_t x);
+extern R128 r128_half(R128 v);
+extern uint32_t hilbert3d(uint32_t x, uint32_t y, uint32_t z);
+extern void hilbert3d_inverse(uint32_t h, uint32_t *ox, uint32_t *oy, uint32_t *oz);
+extern uint32_t hilbert_of_aabb(const Aabb *b, const Aabb *scene);
+extern Aabb hilbert_cell_of(uint32_t code, uint32_t prefix_depth, const Aabb *scene);
+extern uint32_t per_entity_delta_poly(R128 v, R128 a_half);
 
 /* ── Lean-derived tick-rate-parametric formulas ──────────────────────────
    PBVH_SIM_TICK_HZ is the DEFAULT value (what the Lean proofs were
@@ -628,25 +444,6 @@ static inline T delta_cost_120(T v, T a_half) {
     T t1 = (T(14400) * a_half);
     T t2 = (t0 + t1);
     return t2;
-}
-
-/* Per-entity delta: largest candidate where v*d + ah*d^2 <= R.
-   Polynomial cost evaluation via E-graph; selection is non-ring postprocessing.
-   Source of truth: perEntityDelta (Sim.lean:407) */
-static inline uint32_t per_entity_delta_poly(R128 v, R128 a_half) {
-    if (r128_le(delta_cost_120(v, a_half), r128_from_int(5000000LL))) { return 120; }
-    if (r128_le(delta_cost_100(v, a_half), r128_from_int(5000000LL))) { return 100; }
-    if (r128_le(delta_cost_80(v, a_half), r128_from_int(5000000LL))) { return 80; }
-    if (r128_le(delta_cost_64(v, a_half), r128_from_int(5000000LL))) { return 64; }
-    if (r128_le(delta_cost_48(v, a_half), r128_from_int(5000000LL))) { return 48; }
-    if (r128_le(delta_cost_32(v, a_half), r128_from_int(5000000LL))) { return 32; }
-    if (r128_le(delta_cost_24(v, a_half), r128_from_int(5000000LL))) { return 24; }
-    if (r128_le(delta_cost_16(v, a_half), r128_from_int(5000000LL))) { return 16; }
-    if (r128_le(delta_cost_8(v, a_half), r128_from_int(5000000LL))) { return 8; }
-    if (r128_le(delta_cost_4(v, a_half), r128_from_int(5000000LL))) { return 4; }
-    if (r128_le(delta_cost_2(v, a_half), r128_from_int(5000000LL))) { return 2; }
-    if (r128_le(delta_cost_1(v, a_half), r128_from_int(5000000LL))) { return 1; }
-    return 1;
 }
 
 /* Quintic Hermite spline basis functions (C3 continuity).

@@ -956,36 +956,18 @@ private def planeCornerValC : String :=
   "   Pure ring polynomial, EGraph-CSE'd. Used by pbvh_half_space_keeps_. */\n" ++
   genC "pbvh_plane_corner_val" ["nx","ny","nz","d","x","y","z"] planeCornerValExpr
 
--- ── C: Z↔GF(2) branchless min/max (mirrors minRingRs / maxRingRs) ───────────
--- The ring polynomials `minExpr = a + sign*(b-a)` and `maxExpr = b - sign*(b-a)`
--- emit identically to Rust via genC. Add a sign-bit extractor and two-arg
--- wrappers so aabbC can call pbvh_r128_min / pbvh_r128_max instead of
--- inlining r128_le ternaries.
-
-private def ringMinMaxC : String :=
-  "/* Sign bit of R128 (d.hi's high bit) packed as R128-encoded 0 or 1.\n" ++
-  "   Used by the Z<->GF(2) bridge to turn comparisons into ring ops. */\n" ++
-  "static inline R128 r128_sign_bit(R128 d) {\n" ++
-  "    R128 r; r.hi = ((uint64_t)d.hi >> 63) & 1; r.lo = 0; return r;\n" ++
-  "}\n\n" ++
-  "/* Branchless min via Z<->GF(2) bridge. sign = sign_bit(b-a). */\n" ++
-  genC "ring_min_r128" ["a","b","sign"] minExpr ++ "\n\n" ++
-  "/* Branchless max via Z<->GF(2) bridge. sign = sign_bit(b-a). */\n" ++
-  genC "ring_max_r128" ["a","b","sign"] maxExpr ++ "\n\n" ++
-  "/* Two-arg min/max wrappers: compute sign inline, delegate to ring form. */\n" ++
-  "static inline R128 pbvh_r128_min(R128 a, R128 b) {\n" ++
-  "    return ring_min_r128(a, b, r128_sign_bit(r128_sub(b, a)));\n" ++
-  "}\n\n" ++
-  "static inline R128 pbvh_r128_max(R128 a, R128 b) {\n" ++
-  "    return ring_max_r128(a, b, r128_sign_bit(r128_sub(b, a)));\n" ++
-  "}"
+-- ringMinMaxC removed: r128_sign_bit, ring_min/max_r128, pbvh_r128_min/max
+-- now live in core/math/predictive_bvh_adapter.h alongside the other
+-- non-polynomial R128 helpers (utilC, hilbertC, deltaSelectC).
 
 private def deltaCostFnsC : String :=
   let costFns := deltaCandidates.map fun dk =>
     genC s!"delta_cost_{dk}" ["v", "a_half"] (deltaCostExpr dk)
   String.intercalate "\n\n" costFns
 
-private def deltaSelectC : String :=
+-- deltaSelectC removed: per_entity_delta_poly control-flow wrapper
+-- now in core/math/predictive_bvh_adapter.h (non-polynomial, R128 backend)
+private def _deltaSelectC_was_here : String :=
   let lbrace := "{"
   let rbrace := "}"
   let selectBody := deltaCandidates.reverse.foldl (fun acc dk =>
@@ -1014,6 +996,10 @@ private def quinticHermiteC : String :=
 
 -- ── C: Spatial primitives (non-polynomial, direct translation) ──────────────
 
+-- aabbC: only emits AabbT<T> struct template and the E-graph polynomial
+-- aabb_overlaps_ring. All non-polynomial fast-path predicates (aabb_union,
+-- aabb_overlaps, aabb_contains, aabb_contains_point) and the R128 bridge
+-- helpers now live in core/math/predictive_bvh_adapter.h.
 private def aabbC : String :=
   "/* Source: Types.lean:28 Proved: unionBounds_contains_left/right */\n" ++
   "template <typename T>\nstruct AabbT {\n" ++
@@ -1022,17 +1008,6 @@ private def aabbC : String :=
   "    T min_z, max_z;\n" ++
   "};\n" ++
   "using Aabb = AabbT<R128>;\n\n" ++
-  "/* Aabb union — hot-path short-circuit form (called per refit). Proved\n" ++
-  "   equivalent to ring_min_r128 / ring_max_r128 via Z<->GF(2) bridge. */\n" ++
-  "static inline Aabb aabb_union(const Aabb *a, const Aabb *o) {\n" ++
-  "    Aabb r;\n" ++
-  "    r.min_x = r128_le(a->min_x, o->min_x) ? a->min_x : o->min_x;\n" ++
-  "    r.max_x = r128_le(a->max_x, o->max_x) ? o->max_x : a->max_x;\n" ++
-  "    r.min_y = r128_le(a->min_y, o->min_y) ? a->min_y : o->min_y;\n" ++
-  "    r.max_y = r128_le(a->max_y, o->max_y) ? o->max_y : a->max_y;\n" ++
-  "    r.min_z = r128_le(a->min_z, o->min_z) ? a->min_z : o->min_z;\n" ++
-  "    r.max_z = r128_le(a->max_z, o->max_z) ? o->max_z : a->max_z;\n" ++
-  "    return r;\n}\n\n" ++
   "/* Ring-polynomial provenance export: Π (1 - sign_bit(dᵢ)) over 6 axis diffs.\n" ++
   "   Proved equivalent to short-circuit r128_le chains below via bitDecompose;\n" ++
   "   see aabbOverlapsExpr in Codegen/CodeGen.lean + HilbertBroadphase.lean. */\n" ++
@@ -1040,37 +1015,15 @@ private def aabbC : String :=
     ["a_min_x","a_max_x","a_min_y","a_max_y","a_min_z","a_max_z",
      "b_min_x","b_max_x","b_min_y","b_max_y","b_min_z","b_max_z",
      "s0","s1","s2","s3","s4","s5"]
-    aabbOverlapsExpr ++ "\n\n" ++
-  "/* Fast-path predicates: short-circuit r128_le chains. Proved equivalent to\n" ++
-  "   aabb_overlaps_ring via the Z<->GF(2) bridge — see Lean HilbertBroadphase. */\n" ++
-  "static inline bool aabb_overlaps(const Aabb *a, const Aabb *o) {\n" ++
-  "    return r128_le(a->min_x, o->max_x) && r128_le(o->min_x, a->max_x)\n" ++
-  "        && r128_le(a->min_y, o->max_y) && r128_le(o->min_y, a->max_y)\n" ++
-  "        && r128_le(a->min_z, o->max_z) && r128_le(o->min_z, a->max_z);\n" ++
-  "}\n\n" ++
-  "static inline bool aabb_contains(const Aabb *a, const Aabb *inner) {\n" ++
-  "    return r128_le(a->min_x, inner->min_x) && r128_le(inner->max_x, a->max_x)\n" ++
-  "        && r128_le(a->min_y, inner->min_y) && r128_le(inner->max_y, a->max_y)\n" ++
-  "        && r128_le(a->min_z, inner->min_z) && r128_le(inner->max_z, a->max_z);\n" ++
-  "}\n\n" ++
-  "static inline bool aabb_contains_point(const Aabb *a, R128 x, R128 y, R128 z) {\n" ++
-  "    return r128_le(a->min_x, x) && r128_le(x, a->max_x)\n" ++
-  "        && r128_le(a->min_y, y) && r128_le(y, a->max_y)\n" ++
-  "        && r128_le(a->min_z, z) && r128_le(z, a->max_z);\n" ++
-  "}"
+    aabbOverlapsExpr
 
-private def utilC : String :=
-  "/* Source: Build.lean:193 (clz30) */\n" ++
-  "static inline uint32_t clz30(uint32_t x) {\n" ++
-  "    return x == 0 ? 30 : 29 - (31 - _pbvh_clz(x));\n}\n\n" ++
-  "/* R128 arithmetic right shift by 1 (divide by 2, preserving sign) */\n" ++
-  "static inline R128 r128_half(R128 v) {\n" ++
-  "    R128 r;\n" ++
-  "    r.hi = v.hi >> 1;\n" ++
-  "    r.lo = (v.lo >> 1) | ((uint64_t)v.hi << 63);\n" ++
-  "    return r;\n}"
+-- utilC removed: clz30, r128_half now in core/math/predictive_bvh_adapter.h
 
-private def hilbertC : String :=
+-- hilbertC removed: hilbert3d, hilbert3d_inverse, hilbert_of_aabb,
+-- hilbert_cell_of now in core/math/predictive_bvh_adapter.h
+private def _removedHilbertC_placeholder : Unit := ()
+
+private def _hilbertC_was_here : String :=
   "/* Source: Build.lean (hilbert3D) — Skilling (2004) 3D Hilbert curve.\n" ++
   "   O(b) bit manipulation; better locality than Morton for volume partitioning.\n" ++
   "   Bader (2013) Ch.7: cluster diameter O(n^{1/3}) vs Morton O(n^{2/3}). */\n" ++
@@ -1183,6 +1136,31 @@ private def hilbertC : String :=
   "    result.max_z = r128_add(scene->min_z, r128_div(r128_mul(r128_from_int((int64_t)z0 + cell), r128_sub(scene->max_z, scene->min_z)), r128_from_int(1024LL)));\n" ++
   "    return result;\n}"
 
+-- ── C: extern forward-declarations for adapter-provided helpers ─────────────
+-- These functions are defined in core/math/predictive_bvh_adapter.h (which
+-- includes this generated header). Forward-declaring them here lets the
+-- TreeC-generated inline bodies call them without knowing about the adapter.
+-- All are non-template R128 helpers (ring_min/max are templates in the adapter
+-- and are never called directly from generated tree code).
+private def adapterFwdDeclC : String :=
+  "/* ── Adapter-provided non-polynomial helpers (defined in predictive_bvh_adapter.h)\n" ++
+  "   Forward-declared here so generated tree code can call them at parse time.\n" ++
+  "   DO NOT define these in this file; definitions live in the adapter. */\n" ++
+  "extern R128 r128_sign_bit(R128 d);\n" ++
+  "extern R128 pbvh_r128_min(R128 a, R128 b);\n" ++
+  "extern R128 pbvh_r128_max(R128 a, R128 b);\n" ++
+  "extern Aabb aabb_union(const Aabb *a, const Aabb *o);\n" ++
+  "extern bool aabb_overlaps(const Aabb *a, const Aabb *o);\n" ++
+  "extern bool aabb_contains(const Aabb *a, const Aabb *inner);\n" ++
+  "extern bool aabb_contains_point(const Aabb *a, R128 x, R128 y, R128 z);\n" ++
+  "extern uint32_t clz30(uint32_t x);\n" ++
+  "extern R128 r128_half(R128 v);\n" ++
+  "extern uint32_t hilbert3d(uint32_t x, uint32_t y, uint32_t z);\n" ++
+  "extern void hilbert3d_inverse(uint32_t h, uint32_t *ox, uint32_t *oy, uint32_t *oz);\n" ++
+  "extern uint32_t hilbert_of_aabb(const Aabb *b, const Aabb *scene);\n" ++
+  "extern Aabb hilbert_cell_of(uint32_t code, uint32_t prefix_depth, const Aabb *scene);\n" ++
+  "extern uint32_t per_entity_delta_poly(R128 v, R128 a_half);"
+
 -- ── C: Constants ────────────────────────────────────────────────────────────
 
 open PredictiveBVH.Resources in
@@ -1263,17 +1241,15 @@ private def cFile : String :=
   surfaceAreaC ++ "\n\n" ++
   ghostAabbC ++ "\n\n" ++
   planeCornerValC ++ "\n\n" ++
-  ringMinMaxC ++ "\n\n" ++
   aabbC ++ "\n\n" ++
-  utilC ++ "\n\n" ++
-  hilbertC ++ "\n\n" ++
+  adapterFwdDeclC ++ "\n\n" ++
   constantsC ++ "\n\n" ++
   emlC ++ "\n\n" ++
   "/* ══════════════════════════════════════════════════════════════════════════\n" ++
   "   AMOLEAN E-GRAPH OPTIMIZED KERNELS (R128)\n" ++
   "   ══════════════════════════════════════════════════════════════════════════ */\n\n" ++
   scalarFnC ++ "\n\n" ++
-  deltaSelectC ++ "\n\n" ++
+  deltaCostFnsC ++ "\n\n" ++
   quinticHermiteC ++ "\n\n" ++
   PredictiveBVH.Codegen.TreeC.treeC ++ "\n\n" ++
   "#endif /* PREDICTIVE_BVH_H */\n"
