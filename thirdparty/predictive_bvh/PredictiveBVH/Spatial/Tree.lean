@@ -815,6 +815,78 @@ theorem buildSubtree_root_contains_leaf
     rw [← hj_rewrite] at hl
     exact windowBounds_contains_step_slot leaves sorted lo hi hlo j hj_lt l hl
 
+-- ── Tier 3 preparatory lemmas (query soundness predicate is stable) ─────────
+
+/-- The soundness witness for one eclass `e`: a live leaf whose bounds
+    overlap the query and whose eclass equals `e`. -/
+def querySoundOf (t : PbvhTree) (q : BoundingBox) (e : EClassId) : Prop :=
+  ∃ (idx : LeafId) (h : idx < t.leaves.size),
+    t.leaves[idx].alive = true ∧
+    t.leaves[idx].eclass = e ∧
+    aabbOverlapsDec t.leaves[idx].bounds q = true
+
+/-- The leaf-block fold inside `aabbQueryN.go` preserves the "every emitted
+    eclass has a sound witness" invariant. The fold's body is the ONLY site
+    where eclasses are emitted into the accumulator, and it emits `l.eclass`
+    only under `l.alive ∧ aabbOverlapsDec l.bounds q` — exactly the witness. -/
+theorem aabbQueryN_leaf_fold_preserves_sound (t : PbvhTree) (q : BoundingBox)
+    (offset span : Nat) (acc : List EClassId)
+    (hacc : ∀ e ∈ acc, querySoundOf t q e) :
+    ∀ e ∈ (List.range span).foldl (fun acc j =>
+            let lid := t.sorted[offset + j]!
+            match t.leaves[lid]? with
+            | some l =>
+              if l.alive && aabbOverlapsDec l.bounds q then
+                l.eclass :: acc else acc
+            | none => acc) acc,
+      querySoundOf t q e := by
+  apply foldl_invariant
+    (P := fun (acc : List EClassId) => ∀ e ∈ acc, querySoundOf t q e)
+    (f := fun acc j =>
+      let lid := t.sorted[offset + j]!
+      match t.leaves[lid]? with
+      | some l =>
+        if l.alive && aabbOverlapsDec l.bounds q then
+          l.eclass :: acc else acc
+      | none => acc)
+    (List.range span) acc hacc
+  intro acc' j hacc'
+  -- Case split on the leaf lookup and the emission guard.
+  set lid := t.sorted[offset + j]!
+  cases hlk : t.leaves[lid]? with
+  | none => simpa [hlk] using hacc'
+  | some l =>
+    by_cases hg : l.alive ∧ aabbOverlapsDec l.bounds q = true
+    · -- Guarded emission: new head is `l.eclass`, witness is `lid`.
+      obtain ⟨halive, hov⟩ := hg
+      have hlid_lt : lid < t.leaves.size := by
+        rcases Array.getElem?_eq_some_iff.mp hlk with ⟨h, _⟩
+        exact h
+      have hleq : t.leaves[lid]'hlid_lt = l := by
+        rw [← Array.getElem?_eq_getElem hlid_lt] at hlk
+        exact Option.some.inj hlk
+      simp only [hlk, halive, hov, Bool.and_self, and_self, if_true]
+      intro e he
+      simp only [List.mem_cons] at he
+      rcases he with heq | htail
+      · refine ⟨lid, hlid_lt, ?_, ?_, ?_⟩
+        · rw [hleq]; exact halive
+        · rw [hleq]; exact heq.symm
+        · rw [hleq]; exact hov
+      · exact hacc' e htail
+    · -- Guard fails: no emission.
+      push_neg at hg
+      by_cases halive : l.alive
+      · have hov : aabbOverlapsDec l.bounds q = false := by
+          have := hg halive
+          cases hov' : aabbOverlapsDec l.bounds q
+          · rfl
+          · rw [hov'] at this; exact absurd rfl this
+        simp only [hlk, halive, hov, Bool.and_false, if_false]
+        exact hacc'
+      · simp only [hlk, halive, Bool.false_and, if_false]
+        exact hacc'
+
 /-- Root-level skip monotonicity: the root node returned by `buildSubtree`
     has `root < skip[root] ≤ result.size`. Direct composition of
     `buildSubtree_root`, `buildSubtree_root_lt_size`, and
