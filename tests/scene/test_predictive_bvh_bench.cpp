@@ -618,6 +618,219 @@ TEST_CASE("[PredictiveBVH][Refit] pbvh_tree_refit agrees with full rebuild for i
 			vformat("refit must be no slower than full build: refit=%d us build=%d us", (int)t_refit, (int)t_build));
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Phase 2c adversarial gate. Each case below covers exactly one behaviour
+// that a misbehaving or naive caller could exercise. The full cross-product
+// sweep (N=65536 × 120 frames × 5 fractions) is deferred to a bench-only
+// build; these minimal cases are what we run in CI to catch regressions.
+// ──────────────────────────────────────────────────────────────────────────
+
+// Small helper: build a pbvh tree ready for tick, with a 2 m bucket grid.
+namespace tick_harness {
+struct Harness {
+	Vector<FloatLeaf> floats;
+	Vector<R128Leaf> r128s;
+	Vector<pbvh_node_t> storage;
+	Vector<pbvh_node_id_t> sorted;
+	Vector<pbvh_internal_t> internals;
+	Vector<uint32_t> bucket_dir;
+	pbvh_tree_t tree = {};
+	Aabb scene;
+
+	void init(uint32_t n, uint64_t seed) {
+		generate_dataset(n, seed, floats, r128s);
+		scene = aabb_from_floats(-BENCH_BOUND, BENCH_BOUND,
+				-BENCH_BOUND, BENCH_BOUND, -BENCH_BOUND, BENCH_BOUND);
+		storage.resize(n + 16);
+		sorted.resize(n + 16);
+		internals.resize(2 * (n + 16));
+		bucket_dir.resize(2u * (1u << HILBERT_PREFIX_BITS));
+		tree.nodes = storage.ptrw();
+		tree.capacity = storage.size();
+		tree.root = PBVH_NULL_NODE;
+		tree.free_head = PBVH_NULL_NODE;
+		tree.sorted = sorted.ptrw();
+		tree.internals = internals.ptrw();
+		tree.internal_capacity = internals.size();
+		tree.internal_root = PBVH_NULL_NODE;
+		tree.bucket_dir = bucket_dir.ptrw();
+		tree.bucket_bits = HILBERT_PREFIX_BITS;
+		for (uint32_t i = 0; i < n; i++) {
+			pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i,
+					r128s[i].box, r128s[i].hilbert);
+		}
+		pbvh_tree_build(&tree);
+	}
+
+	bool query_hits(uint32_t eclass) {
+		struct C { uint32_t target = 0; bool found = false; };
+		C c; c.target = eclass;
+		pbvh_tree_aabb_query_n(&tree, &r128s[eclass].box,
+				[](pbvh_eclass_id_t id, void *ud) {
+					C *cc = (C *)ud;
+					if ((uint32_t)id == cc->target) { cc->found = true; }
+					return 0;
+				}, &c);
+		return c.found;
+	}
+};
+} // namespace tick_harness
+
+// Case 1 — defensive: NULL arguments must not crash and must leave the tree
+// untouched. A caller that hands us `(NULL, 0)` or `(NULL_tree, anything)`
+// has a bug, but we can't segfault the process.
+TEST_CASE("[PredictiveBVH][Tick] null pointer inputs are safe") {
+	pbvh_tree_tick(nullptr, nullptr, 0u);
+	pbvh_tree_tick(nullptr, nullptr, 7u);
+	pbvh_tree_t empty = {};
+	pbvh_tree_tick(&empty, nullptr, 4u); // nodes == NULL
+	CHECK(true); // reaching here means no crash
+}
+
+// Case 2 — insert-since-build: the main adversarial case. A caller inserts
+// a leaf after the last build and hands tick a dirty list that omits the
+// new leaf. Without the `t->count > t->sorted_count` guard, refit would
+// leave the new leaf unreachable from queries.
+TEST_CASE("[PredictiveBVH][Tick] insert since last build forces full rebuild") {
+	tick_harness::Harness h;
+	h.init(64, 0x11111111ull);
+
+	// Insert a brand-new leaf that overlaps a known location.
+	Aabb fresh = aabb_from_floats(0.0f, 0.1f, 0.0f, 0.1f, 0.0f, 0.1f);
+	const uint32_t fresh_h = hilbert_of_aabb(&fresh, &h.scene);
+	pbvh_node_id_t fresh_id = pbvh_tree_insert_h(&h.tree,
+			(pbvh_eclass_id_t)999, fresh, fresh_h);
+	REQUIRE(h.tree.count > h.tree.sorted_count);
+
+	// Hand tick a dirty list covering ONLY an existing leaf — the new one
+	// is "hidden" from the caller's perspective.
+	pbvh_dirty_leaf_t dirty = { 0u, h.r128s[0].hilbert };
+	pbvh_tree_tick(&h.tree, &dirty, 1u);
+
+	// Post-tick: a query at the fresh leaf's position must still find it.
+	struct C { bool found = false; } c;
+	pbvh_tree_aabb_query_n(&h.tree, &fresh,
+			[](pbvh_eclass_id_t id, void *ud) {
+				if ((uint32_t)id == 999u) { ((C *)ud)->found = true; }
+				return 0;
+			}, &c);
+	CHECK_MESSAGE(c.found, "insert-since-build must trigger full rebuild");
+	CHECK_MESSAGE(h.tree.sorted_count >= h.tree.count,
+			"sorted_count must catch up to count after fallback build");
+	(void)fresh_id;
+}
+
+// Case 3 — removed leaf in dirty list: caller reports a leaf that has been
+// pbvh_tree_remove'd. Refit would leave its stale bounds in the internals,
+// but more importantly, the topology-changed signal must trigger a build
+// so later insertions reuse the slot correctly.
+TEST_CASE("[PredictiveBVH][Tick] removed leaf in dirty list forces full rebuild") {
+	tick_harness::Harness h;
+	h.init(64, 0x22222222ull);
+
+	pbvh_tree_remove(&h.tree, (pbvh_node_id_t)5);
+	pbvh_dirty_leaf_t dirty = { 5u, h.r128s[5].hilbert };
+	pbvh_tree_tick(&h.tree, &dirty, 1u);
+
+	// The removed leaf must NOT appear in queries at its old location.
+	struct C { bool found = false; } c;
+	pbvh_tree_aabb_query_n(&h.tree, &h.r128s[5].box,
+			[](pbvh_eclass_id_t id, void *ud) {
+				if ((uint32_t)id == 5u) { ((C *)ud)->found = true; }
+				return 0;
+			}, &c);
+	CHECK_MESSAGE(!c.found, "removed leaf must be invisible after tick");
+}
+
+// Case 4 — bucket-boundary crossing: a dirty leaf whose new Hilbert code
+// lands in a different bucket prefix from old_hilbert. Refit would keep
+// the leaf in the WRONG sorted[] window; only a full rebuild re-sorts.
+TEST_CASE("[PredictiveBVH][Tick] bucket crossing forces full rebuild") {
+	tick_harness::Harness h;
+	h.init(64, 0x33333333ull);
+
+	// Move leaf 0 from one corner to the opposite corner: guaranteed to
+	// change its Hilbert prefix at 6-bit resolution.
+	const uint32_t old_h = h.r128s[0].hilbert;
+	AABB far_box(Vector3(BENCH_BOUND - 1.0f, BENCH_BOUND - 1.0f, BENCH_BOUND - 1.0f),
+			Vector3(0.1f, 0.1f, 0.1f));
+	Aabb far_r = aabb_from_floats(
+			far_box.position.x, far_box.position.x + far_box.size.x,
+			far_box.position.y, far_box.position.y + far_box.size.y,
+			far_box.position.z, far_box.position.z + far_box.size.z);
+	const uint32_t new_h = hilbert_of_aabb(&far_r, &h.scene);
+	REQUIRE((old_h >> (30u - HILBERT_PREFIX_BITS)) !=
+			(new_h >> (30u - HILBERT_PREFIX_BITS)));
+	h.floats.write[0].box = far_box;
+	h.r128s.write[0].box = far_r;
+	h.r128s.write[0].hilbert = new_h;
+	pbvh_tree_update_h(&h.tree, 0u, far_r, new_h);
+
+	pbvh_dirty_leaf_t dirty = { 0u, old_h };
+	pbvh_tree_tick(&h.tree, &dirty, 1u);
+
+	// Query at the new location must find leaf 0.
+	CHECK_MESSAGE(h.query_hits(0), "bucket-crossing leaf must be queryable at new pos");
+}
+
+// Case 5 — happy path: every dirty leaf stayed in its bucket. Refit fires,
+// queries still return correct results, and wall time is no worse than a
+// full build. Minimal N=1024 here — the sweeping N=65536 bench lives in
+// a dev-only target to keep CI runtime bounded.
+TEST_CASE("[PredictiveBVH][Tick] in-bucket perturbation takes refit fast path") {
+	tick_harness::Harness h;
+	h.init(1024, 0x44444444ull);
+
+	XorShift rng(0x55555555ull);
+	LocalVector<pbvh_dirty_leaf_t> dirty;
+	dirty.resize(64);
+	for (uint32_t k = 0; k < 64; k++) {
+		const uint32_t i = rng.next_u32() % 1024u;
+		const float dx = rng.uniform(-0.01f, 0.01f);
+		const float dy = rng.uniform(-0.01f, 0.01f);
+		const float dz = rng.uniform(-0.01f, 0.01f);
+		AABB moved = h.floats[i].box;
+		moved.position += Vector3(dx, dy, dz);
+		h.floats.write[i].box = moved;
+		Aabb rb = aabb_from_floats(
+				moved.position.x, moved.position.x + moved.size.x,
+				moved.position.y, moved.position.y + moved.size.y,
+				moved.position.z, moved.position.z + moved.size.z);
+		const uint32_t old_h = h.r128s[i].hilbert;
+		const uint32_t new_h = hilbert_of_aabb(&rb, &h.scene);
+		h.r128s.write[i].box = rb;
+		h.r128s.write[i].hilbert = new_h;
+		pbvh_tree_update_h(&h.tree, (pbvh_node_id_t)i, rb, new_h);
+		dirty[k].leaf_id = (pbvh_node_id_t)i;
+		dirty[k].old_hilbert = old_h;
+	}
+
+	const uint64_t t_tick0 = OS::get_singleton()->get_ticks_usec();
+	pbvh_tree_tick(&h.tree, dirty.ptr(), dirty.size());
+	const uint64_t t_tick = OS::get_singleton()->get_ticks_usec() - t_tick0;
+
+	// Every perturbed leaf must still be queryable.
+	for (uint32_t k = 0; k < 64; k++) {
+		const uint32_t i = dirty[k].leaf_id;
+		CHECK_MESSAGE(h.query_hits(i),
+				vformat("post-tick query lost leaf i=%d", i));
+	}
+
+	// Compare vs a full build on a fresh tree.
+	tick_harness::Harness gold;
+	gold.init(1024, 0x44444444ull);
+	const uint64_t t_build0 = OS::get_singleton()->get_ticks_usec();
+	pbvh_tree_build(&gold.tree);
+	const uint64_t t_build = OS::get_singleton()->get_ticks_usec() - t_build0;
+
+	print_line(vformat("[tick N=1024 dirty=64] tick=%d us  full build=%d us",
+			(int)t_tick, (int)t_build));
+	CHECK_MESSAGE(t_tick <= t_build + 20,
+			vformat("in-bucket tick should not exceed full build: tick=%d build=%d",
+					(int)t_tick, (int)t_build));
+}
+
+
 } // namespace TestPredictiveBVHBench
 
 #endif // MODULE_MULTIPLAYER_FABRIC_ENABLED

@@ -607,35 +607,78 @@ typedef struct pbvh_dirty_leaf {
 /* Per-frame rebalance. When every dirty leaf kept its Hilbert-prefix bucket
  * (so sorted[] order and internals[] topology are still valid), we can skip
  * the O(N) sort+build and just re-union bounds bottom-up via pbvh_tree_refit
- * — O(internal_count) sequential reads. Any leaf that crossed a bucket
- * boundary, or a zero bucket_bits config, forces a full pbvh_tree_build.
+ * — O(internal_count) sequential reads. Any condition that could leave
+ * sorted[] / internals[] out of sync with the current leaf set forces a
+ * full pbvh_tree_build. The conditions are enumerated in order of cost:
+ *
+ *   (1) trivial: empty dirty list, NULL dirty pointer, or bucket_bits out
+ *       of range (0 or >30). Cheap to check; same cost as a full build.
+ *   (2) structural: NULL t or t->nodes. Defensive; refit would crash.
+ *   (3) insert since build: t->count > t->sorted_count means at least one
+ *       leaf was allocated in nodes[] after the last build and is therefore
+ *       NOT indexed in sorted[]. Refit cannot reach it and queries would
+ *       silently miss it. This is the main adversarial-caller footgun we
+ *       harden against: a consumer that does insert() → tick() without an
+ *       intermediate build() would lose the inserted leaf without this
+ *       check.
+ *   (4) empty internals: nothing built yet; refit is a no-op that leaves
+ *       internal_root == PBVH_NULL_NODE, queries return empty. A build
+ *       from scratch is the correct recovery.
+ *   (5) per-leaf: each dirty entry must name a live leaf within sorted[]'s
+ *       address range and must not have crossed its Hilbert prefix bucket.
+ *       Out-of-range leaf_id is silently skipped (caller may have stale
+ *       IDs); is_leaf=0 or bucket crossing forces a build. Callers that
+ *       lie about old_hilbert are not a correctness risk — refit unions
+ *       the current bounds, so inflated internal AABBs over-emit rather
+ *       than under-emit.
+ *
  * Passing (dirty=NULL, dirty_count=0) is an explicit \"reset internals
  * from current leaves\" request and behaves as pbvh_tree_build. */
 static inline void pbvh_tree_tick(pbvh_tree_t *t,
 \t\tconst pbvh_dirty_leaf_t *dirty, uint32_t dirty_count) {
+\t/* (2) Defensive NULL guard. */
+\tif (t == NULL || t->nodes == NULL) {
+\t\treturn;
+\t}
+\t/* (1) Trivial fallback. */
 \tif (dirty_count == 0u || dirty == NULL || t->bucket_bits == 0u ||
 \t\t\tt->bucket_bits > 30u) {
+\t\tpbvh_tree_build(t);
+\t\treturn;
+\t}
+\t/* (3) Inserts since last build are invisible to sorted[]/internals[];
+\t * only a full rebuild can pick them up. */
+\tif (t->count > t->sorted_count) {
+\t\tpbvh_tree_build(t);
+\t\treturn;
+\t}
+\t/* (4) No internals yet → nothing to refit; build instead. */
+\tif (t->internal_count == 0u || t->internal_root == PBVH_NULL_NODE) {
 \t\tpbvh_tree_build(t);
 \t\treturn;
 \t}
 \tconst uint32_t shift = 30u - t->bucket_bits;
 \tfor (uint32_t i = 0; i < dirty_count; i++) {
 \t\tconst pbvh_dirty_leaf_t *d = &dirty[i];
+\t\t/* (5a) Stale/out-of-range leaf_id: caller may hold ids past remove;
+\t\t * skipping is safe because the slot contributes nothing to queries. */
 \t\tif (d->leaf_id >= t->count) {
 \t\t\tcontinue;
 \t\t}
 \t\tconst pbvh_node_t *n = &t->nodes[d->leaf_id];
+\t\t/* (5b) Dead slot → topology changed. */
 \t\tif (!n->is_leaf) {
-\t\t\t/* Dead / removed → topology changed; fall back. */
 \t\t\tpbvh_tree_build(t);
 \t\t\treturn;
 \t\t}
+\t\t/* (5c) Bucket boundary crossed → sorted[] order is stale. */
 \t\tif ((n->hilbert >> shift) != (d->old_hilbert >> shift)) {
 \t\t\tpbvh_tree_build(t);
 \t\t\treturn;
 \t\t}
 \t}
-\t/* All dirty leaves stayed in their bucket: bounds-only refit suffices. */
+\t/* All dirty leaves stayed in their bucket and every precondition holds:
+\t * bounds-only refit suffices. */
 \tpbvh_tree_refit(t);
 }
 
