@@ -161,6 +161,40 @@ static inline R128 pbvh_plane_corner_val(R128 nx, R128 ny, R128 nz, R128 d, R128
     return t5;
 }
 
+/* Sign bit of R128 (d.hi's high bit) packed as R128-encoded 0 or 1.
+   Used by the Z<->GF(2) bridge to turn comparisons into ring ops. */
+static inline R128 r128_sign_bit(R128 d) {
+    R128 r; r.hi = ((uint64_t)d.hi >> 63) & 1; r.lo = 0; return r;
+}
+
+/* Branchless min via Z<->GF(2) bridge. sign = sign_bit(b-a). */
+static inline R128 ring_min_r128(R128 a, R128 b, R128 sign) {
+    R128 t0 = r128_mul(r128_neg(R128_ONE), a);
+    R128 t1 = r128_add(b, t0);
+    R128 t2 = r128_mul(sign, t1);
+    R128 t3 = r128_add(a, t2);
+    return t3;
+}
+
+/* Branchless max via Z<->GF(2) bridge. sign = sign_bit(b-a). */
+static inline R128 ring_max_r128(R128 a, R128 b, R128 sign) {
+    R128 t0 = r128_mul(r128_neg(R128_ONE), a);
+    R128 t1 = r128_add(b, t0);
+    R128 t2 = r128_mul(sign, t1);
+    R128 t3 = r128_mul(r128_neg(R128_ONE), t2);
+    R128 t4 = r128_add(b, t3);
+    return t4;
+}
+
+/* Two-arg min/max wrappers: compute sign inline, delegate to ring form. */
+static inline R128 pbvh_r128_min(R128 a, R128 b) {
+    return ring_min_r128(a, b, r128_sign_bit(r128_sub(b, a)));
+}
+
+static inline R128 pbvh_r128_max(R128 a, R128 b) {
+    return ring_max_r128(a, b, r128_sign_bit(r128_sub(b, a)));
+}
+
 /* Source: Types.lean:28 Proved: unionBounds_contains_left/right */
 typedef struct Aabb {
     R128 min_x, max_x;
@@ -175,14 +209,16 @@ static inline Aabb aabb_from_floats(float x0, float x1, float y0, float y1, floa
     return a;
 }
 
+/* Aabb union via the Z<->GF(2) bridge: six branchless ring min/max ops.
+   Mirrors the Rust aabb_union_bridge path — same polynomial, same provenance. */
 static inline Aabb aabb_union(const Aabb *a, const Aabb *o) {
     Aabb r;
-    r.min_x = r128_le(a->min_x, o->min_x) ? a->min_x : o->min_x;
-    r.max_x = r128_le(o->max_x, a->max_x) ? a->max_x : o->max_x;
-    r.min_y = r128_le(a->min_y, o->min_y) ? a->min_y : o->min_y;
-    r.max_y = r128_le(o->max_y, a->max_y) ? a->max_y : o->max_y;
-    r.min_z = r128_le(a->min_z, o->min_z) ? a->min_z : o->min_z;
-    r.max_z = r128_le(o->max_z, a->max_z) ? a->max_z : o->max_z;
+    r.min_x = pbvh_r128_min(a->min_x, o->min_x);
+    r.max_x = pbvh_r128_max(a->max_x, o->max_x);
+    r.min_y = pbvh_r128_min(a->min_y, o->min_y);
+    r.max_y = pbvh_r128_max(a->max_y, o->max_y);
+    r.min_z = pbvh_r128_min(a->min_z, o->min_z);
+    r.max_z = pbvh_r128_max(a->max_z, o->max_z);
     return r;
 }
 
@@ -1367,16 +1403,18 @@ typedef struct pbvh_plane {
 } pbvh_plane_t;
 
 /* Build the segment-AABB of a ray segment from (ox,oy,oz) to (tx,ty,tz).
- * Conservative broadphase: a segment hits `b` only if its AABB overlaps `b`. */
+ * Conservative broadphase: a segment hits `b` only if its AABB overlaps `b`.
+ * Per-axis min/max routed through pbvh_r128_min / pbvh_r128_max (Z<->GF(2)
+ * branchless ring form) — no r128_le ternaries inline. */
 static inline Aabb pbvh_segment_aabb_(R128 ox, R128 oy, R128 oz,
 		R128 tx, R128 ty, R128 tz) {
 	Aabb s;
-	s.min_x = r128_le(ox, tx) ? ox : tx;
-	s.max_x = r128_le(ox, tx) ? tx : ox;
-	s.min_y = r128_le(oy, ty) ? oy : ty;
-	s.max_y = r128_le(oy, ty) ? ty : oy;
-	s.min_z = r128_le(oz, tz) ? oz : tz;
-	s.max_z = r128_le(oz, tz) ? tz : oz;
+	s.min_x = pbvh_r128_min(ox, tx);
+	s.max_x = pbvh_r128_max(ox, tx);
+	s.min_y = pbvh_r128_min(oy, ty);
+	s.max_y = pbvh_r128_max(oy, ty);
+	s.min_z = pbvh_r128_min(oz, tz);
+	s.max_z = pbvh_r128_max(oz, tz);
 	return s;
 }
 

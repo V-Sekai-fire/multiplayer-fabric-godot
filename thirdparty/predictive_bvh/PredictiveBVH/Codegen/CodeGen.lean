@@ -960,6 +960,30 @@ private def planeCornerValC : String :=
   "   Pure ring polynomial, EGraph-CSE'd. Used by pbvh_half_space_keeps_. */\n" ++
   genC "pbvh_plane_corner_val" ["nx","ny","nz","d","x","y","z"] planeCornerValExpr
 
+-- ── C: Z↔GF(2) branchless min/max (mirrors minRingRs / maxRingRs) ───────────
+-- The ring polynomials `minExpr = a + sign*(b-a)` and `maxExpr = b - sign*(b-a)`
+-- emit identically to Rust via genC. Add a sign-bit extractor and two-arg
+-- wrappers so aabbC can call pbvh_r128_min / pbvh_r128_max instead of
+-- inlining r128_le ternaries.
+
+private def ringMinMaxC : String :=
+  "/* Sign bit of R128 (d.hi's high bit) packed as R128-encoded 0 or 1.\n" ++
+  "   Used by the Z<->GF(2) bridge to turn comparisons into ring ops. */\n" ++
+  "static inline R128 r128_sign_bit(R128 d) {\n" ++
+  "    R128 r; r.hi = ((uint64_t)d.hi >> 63) & 1; r.lo = 0; return r;\n" ++
+  "}\n\n" ++
+  "/* Branchless min via Z<->GF(2) bridge. sign = sign_bit(b-a). */\n" ++
+  genC "ring_min_r128" ["a","b","sign"] minExpr ++ "\n\n" ++
+  "/* Branchless max via Z<->GF(2) bridge. sign = sign_bit(b-a). */\n" ++
+  genC "ring_max_r128" ["a","b","sign"] maxExpr ++ "\n\n" ++
+  "/* Two-arg min/max wrappers: compute sign inline, delegate to ring form. */\n" ++
+  "static inline R128 pbvh_r128_min(R128 a, R128 b) {\n" ++
+  "    return ring_min_r128(a, b, r128_sign_bit(r128_sub(b, a)));\n" ++
+  "}\n\n" ++
+  "static inline R128 pbvh_r128_max(R128 a, R128 b) {\n" ++
+  "    return ring_max_r128(a, b, r128_sign_bit(r128_sub(b, a)));\n" ++
+  "}"
+
 private def deltaCostFnsC : String :=
   let costFns := deltaCandidates.map fun dk =>
     genC s!"delta_cost_{dk}" ["v", "a_half"] (deltaCostExpr dk)
@@ -1006,14 +1030,16 @@ private def aabbC : String :=
   "    a.min_y = r128_from_int((int64_t)(y0*1000000.0f)); a.max_y = r128_from_int((int64_t)(y1*1000000.0f));\n" ++
   "    a.min_z = r128_from_int((int64_t)(z0*1000000.0f)); a.max_z = r128_from_int((int64_t)(z1*1000000.0f));\n" ++
   "    return a;\n}\n\n" ++
+  "/* Aabb union via the Z<->GF(2) bridge: six branchless ring min/max ops.\n" ++
+  "   Mirrors the Rust aabb_union_bridge path — same polynomial, same provenance. */\n" ++
   "static inline Aabb aabb_union(const Aabb *a, const Aabb *o) {\n" ++
   "    Aabb r;\n" ++
-  "    r.min_x = r128_le(a->min_x, o->min_x) ? a->min_x : o->min_x;\n" ++
-  "    r.max_x = r128_le(o->max_x, a->max_x) ? a->max_x : o->max_x;\n" ++
-  "    r.min_y = r128_le(a->min_y, o->min_y) ? a->min_y : o->min_y;\n" ++
-  "    r.max_y = r128_le(o->max_y, a->max_y) ? a->max_y : o->max_y;\n" ++
-  "    r.min_z = r128_le(a->min_z, o->min_z) ? a->min_z : o->min_z;\n" ++
-  "    r.max_z = r128_le(o->max_z, a->max_z) ? a->max_z : o->max_z;\n" ++
+  "    r.min_x = pbvh_r128_min(a->min_x, o->min_x);\n" ++
+  "    r.max_x = pbvh_r128_max(a->max_x, o->max_x);\n" ++
+  "    r.min_y = pbvh_r128_min(a->min_y, o->min_y);\n" ++
+  "    r.max_y = pbvh_r128_max(a->max_y, o->max_y);\n" ++
+  "    r.min_z = pbvh_r128_min(a->min_z, o->min_z);\n" ++
+  "    r.max_z = pbvh_r128_max(a->max_z, o->max_z);\n" ++
   "    return r;\n}\n\n" ++
   "static inline bool aabb_overlaps(const Aabb *a, const Aabb *o) {\n" ++
   "    return r128_le(a->min_x, o->max_x) && r128_le(o->min_x, a->max_x)\n" ++
@@ -1231,6 +1257,7 @@ private def cFile : String :=
   surfaceAreaC ++ "\n\n" ++
   ghostAabbC ++ "\n\n" ++
   planeCornerValC ++ "\n\n" ++
+  ringMinMaxC ++ "\n\n" ++
   aabbC ++ "\n\n" ++
   utilC ++ "\n\n" ++
   hilbertC ++ "\n\n" ++
