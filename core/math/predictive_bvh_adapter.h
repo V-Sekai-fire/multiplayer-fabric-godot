@@ -177,27 +177,27 @@ inline R128 pbvh_r128_max(R128 a, R128 b) {
    equivalent to ring_min_r128 / ring_max_r128 via Z<->GF(2) bridge. */
 inline Aabb aabb_union(const Aabb *a, const Aabb *o) {
 	Aabb r;
-	r.min_x = r128_le(a->min_x, o->min_x) ? a->min_x : o->min_x;
-	r.max_x = r128_le(a->max_x, o->max_x) ? o->max_x : a->max_x;
-	r.min_y = r128_le(a->min_y, o->min_y) ? a->min_y : o->min_y;
-	r.max_y = r128_le(a->max_y, o->max_y) ? o->max_y : a->max_y;
-	r.min_z = r128_le(a->min_z, o->min_z) ? a->min_z : o->min_z;
-	r.max_z = r128_le(a->max_z, o->max_z) ? o->max_z : a->max_z;
+	r.min_x = a->min_x <= o->min_x ? a->min_x : o->min_x;
+	r.max_x = a->max_x <= o->max_x ? o->max_x : a->max_x;
+	r.min_y = a->min_y <= o->min_y ? a->min_y : o->min_y;
+	r.max_y = a->max_y <= o->max_y ? o->max_y : a->max_y;
+	r.min_z = a->min_z <= o->min_z ? a->min_z : o->min_z;
+	r.max_z = a->max_z <= o->max_z ? o->max_z : a->max_z;
 	return r;
 }
 
 /* Fast-path predicates: short-circuit r128_le chains. Proved equivalent to
    aabb_overlaps_ring via the Z<->GF(2) bridge — see Lean HilbertBroadphase. */
 inline bool aabb_overlaps(const Aabb *a, const Aabb *o) {
-	return r128_le(a->min_x, o->max_x) && r128_le(o->min_x, a->max_x) && r128_le(a->min_y, o->max_y) && r128_le(o->min_y, a->max_y) && r128_le(a->min_z, o->max_z) && r128_le(o->min_z, a->max_z);
+	return a->min_x <= o->max_x && o->min_x <= a->max_x && a->min_y <= o->max_y && o->min_y <= a->max_y && a->min_z <= o->max_z && o->min_z <= a->max_z;
 }
 
 inline bool aabb_contains(const Aabb *a, const Aabb *inner) {
-	return r128_le(a->min_x, inner->min_x) && r128_le(inner->max_x, a->max_x) && r128_le(a->min_y, inner->min_y) && r128_le(inner->max_y, a->max_y) && r128_le(a->min_z, inner->min_z) && r128_le(inner->max_z, a->max_z);
+	return a->min_x <= inner->min_x && inner->max_x <= a->max_x && a->min_y <= inner->min_y && inner->max_y <= a->max_y && a->min_z <= inner->min_z && inner->max_z <= a->max_z;
 }
 
-inline bool aabb_contains_point(const Aabb *a, R128 x, R128 y, R128 z) {
-	return r128_le(a->min_x, x) && r128_le(x, a->max_x) && r128_le(a->min_y, y) && r128_le(y, a->max_y) && r128_le(a->min_z, z) && r128_le(z, a->max_z);
+inline bool aabb_contains_point(const Aabb *a, int64_t x, int64_t y, int64_t z) {
+	return a->min_x <= x && x <= a->max_x && a->min_y <= y && y <= a->max_y && a->min_z <= z && z <= a->max_z;
 }
 
 /* Source: Build.lean:193 (clz30) */
@@ -271,38 +271,20 @@ inline uint32_t hilbert3d(uint32_t x, uint32_t y, uint32_t z) {
 /* Forward declaration required by hilbert_of_aabb before the definition below. */
 inline void hilbert3d_inverse(uint32_t h, uint32_t *ox, uint32_t *oy, uint32_t *oz);
 
-/* Source: Build.lean (leafHilbert) — R128 Aabb, returns uint32 Hilbert code */
+/* Source: Build.lean (leafHilbert) — int64_t Aabb coords in µm, returns uint32 Hilbert code */
 inline uint32_t hilbert_of_aabb(const Aabb *b, const Aabb *scene) {
-	R128 sw = r128_sub(scene->max_x, scene->min_x);
-	R128 sh = r128_sub(scene->max_y, scene->min_y);
-	R128 sd = r128_sub(scene->max_z, scene->min_z);
-	R128 one = r128_from_int(1LL);
-	if (r128_le(sw, R128_ZERO)) {
-		sw = one;
-	}
-	if (r128_le(sh, R128_ZERO)) {
-		sh = one;
-	}
-	if (r128_le(sd, R128_ZERO)) {
-		sd = one;
-	}
-	R128 k1024 = r128_from_int(1024LL);
-	R128 cx = r128_half(r128_add(b->min_x, b->max_x));
-	R128 cy = r128_half(r128_add(b->min_y, b->max_y));
-	R128 cz = r128_half(r128_add(b->min_z, b->max_z));
-	int64_t swi = r128_to_int(sw), shi = r128_to_int(sh), sdi = r128_to_int(sd);
-	if (swi == 0) {
-		swi = 1;
-	}
-	if (shi == 0) {
-		shi = 1;
-	}
-	if (sdi == 0) {
-		sdi = 1;
-	}
-	int64_t nxi = r128_to_int(r128_mul(r128_sub(cx, scene->min_x), k1024)) / swi;
-	int64_t nyi = r128_to_int(r128_mul(r128_sub(cy, scene->min_y), k1024)) / shi;
-	int64_t nzi = r128_to_int(r128_mul(r128_sub(cz, scene->min_z), k1024)) / sdi;
+	int64_t sw = scene->max_x - scene->min_x;
+	int64_t sh = scene->max_y - scene->min_y;
+	int64_t sd = scene->max_z - scene->min_z;
+	if (sw <= 0) { sw = 1; }
+	if (sh <= 0) { sh = 1; }
+	if (sd <= 0) { sd = 1; }
+	int64_t cx = (b->min_x + b->max_x) / 2;
+	int64_t cy = (b->min_y + b->max_y) / 2;
+	int64_t cz = (b->min_z + b->max_z) / 2;
+	int64_t nxi = (cx - scene->min_x) * 1024 / sw;
+	int64_t nyi = (cy - scene->min_y) * 1024 / sh;
+	int64_t nzi = (cz - scene->min_z) * 1024 / sd;
 	uint32_t nx = (uint32_t)(nxi < 0 ? 0 : nxi > 1023 ? 1023 : nxi);
 	uint32_t ny = (uint32_t)(nyi < 0 ? 0 : nyi > 1023 ? 1023 : nyi);
 	uint32_t nz = (uint32_t)(nzi < 0 ? 0 : nzi > 1023 ? 1023 : nzi);
@@ -365,34 +347,28 @@ inline void hilbert3d_inverse(uint32_t h, uint32_t *ox, uint32_t *oy, uint32_t *
 	CRASH_COND(hilbert3d(*ox, *oy, *oz) != h);
 }
 
-/* Hilbert-cell-of: AABB from Hilbert code + prefix depth + scene bounds (R128). */
+/* Hilbert-cell-of: AABB from Hilbert code + prefix depth + scene bounds (int64_t µm). */
 inline Aabb hilbert_cell_of(uint32_t code, uint32_t prefix_depth, const Aabb *scene) {
 	uint32_t cx, cy, cz;
 	hilbert3d_inverse(code, &cx, &cy, &cz);
-	int64_t sw = r128_to_int(r128_sub(scene->max_x, scene->min_x));
-	int64_t sh = r128_to_int(r128_sub(scene->max_y, scene->min_y));
-	int64_t sd = r128_to_int(r128_sub(scene->max_z, scene->min_z));
-	if (sw <= 0) {
-		sw = 1;
-	}
-	if (sh <= 0) {
-		sh = 1;
-	}
-	if (sd <= 0) {
-		sd = 1;
-	}
+	int64_t sw = scene->max_x - scene->min_x;
+	int64_t sh = scene->max_y - scene->min_y;
+	int64_t sd = scene->max_z - scene->min_z;
+	if (sw <= 0) { sw = 1; }
+	if (sh <= 0) { sh = 1; }
+	if (sd <= 0) { sd = 1; }
 	uint32_t shift = (prefix_depth < 10) ? 10 - prefix_depth : 0;
 	int64_t cell = 1LL << shift;
 	uint32_t x0 = (cx >> shift) << shift;
 	uint32_t y0 = (cy >> shift) << shift;
 	uint32_t z0 = (cz >> shift) << shift;
 	Aabb result;
-	result.min_x = r128_add(scene->min_x, r128_div(r128_mul(r128_from_int((int64_t)x0), r128_sub(scene->max_x, scene->min_x)), r128_from_int(1024LL)));
-	result.max_x = r128_add(scene->min_x, r128_div(r128_mul(r128_from_int((int64_t)x0 + cell), r128_sub(scene->max_x, scene->min_x)), r128_from_int(1024LL)));
-	result.min_y = r128_add(scene->min_y, r128_div(r128_mul(r128_from_int((int64_t)y0), r128_sub(scene->max_y, scene->min_y)), r128_from_int(1024LL)));
-	result.max_y = r128_add(scene->min_y, r128_div(r128_mul(r128_from_int((int64_t)y0 + cell), r128_sub(scene->max_y, scene->min_y)), r128_from_int(1024LL)));
-	result.min_z = r128_add(scene->min_z, r128_div(r128_mul(r128_from_int((int64_t)z0), r128_sub(scene->max_z, scene->min_z)), r128_from_int(1024LL)));
-	result.max_z = r128_add(scene->min_z, r128_div(r128_mul(r128_from_int((int64_t)z0 + cell), r128_sub(scene->max_z, scene->min_z)), r128_from_int(1024LL)));
+	result.min_x = scene->min_x + (int64_t)x0 * sw / 1024;
+	result.max_x = scene->min_x + ((int64_t)x0 + cell) * sw / 1024;
+	result.min_y = scene->min_y + (int64_t)y0 * sh / 1024;
+	result.max_y = scene->min_y + ((int64_t)y0 + cell) * sh / 1024;
+	result.min_z = scene->min_z + (int64_t)z0 * sd / 1024;
+	result.max_z = scene->min_z + ((int64_t)z0 + cell) * sd / 1024;
 	return result;
 }
 
@@ -1028,15 +1004,15 @@ typedef struct pbvh_plane {
  * Conservative broadphase: a segment hits `b` only if its AABB overlaps `b`.
  * Hot-path short-circuit form; proved equivalent to pbvh_r128_min/max
  * (Z<->GF(2) branchless ring form) via bitDecompose. */
-inline Aabb pbvh_segment_aabb_(R128 ox, R128 oy, R128 oz,
-		R128 tx, R128 ty, R128 tz) {
+inline Aabb pbvh_segment_aabb_(int64_t ox, int64_t oy, int64_t oz,
+		int64_t tx, int64_t ty, int64_t tz) {
 	Aabb s;
-	s.min_x = r128_le(ox, tx) ? ox : tx;
-	s.max_x = r128_le(ox, tx) ? tx : ox;
-	s.min_y = r128_le(oy, ty) ? oy : ty;
-	s.max_y = r128_le(oy, ty) ? ty : oy;
-	s.min_z = r128_le(oz, tz) ? oz : tz;
-	s.max_z = r128_le(oz, tz) ? tz : oz;
+	s.min_x = ox <= tx ? ox : tx;
+	s.max_x = ox <= tx ? tx : ox;
+	s.min_y = oy <= ty ? oy : ty;
+	s.max_y = oy <= ty ? ty : oy;
+	s.min_z = oz <= tz ? oz : tz;
+	s.max_z = oz <= tz ? tz : oz;
 	return s;
 }
 
@@ -1046,7 +1022,7 @@ inline Aabb pbvh_segment_aabb_(R128 ox, R128 oy, R128 oz,
  * exactly; only the prune predicate changes. Emitted from Spatial/Tree.lean
  * `rayQueryN`; soundness of a tight slab test is deferred to Phase 2b'. */
 inline void pbvh_tree_ray_query(pbvh_tree_t *t,
-		R128 ox, R128 oy, R128 oz, R128 tx, R128 ty, R128 tz,
+		int64_t ox, int64_t oy, int64_t oz, int64_t tx, int64_t ty, int64_t tz,
 		int (*cb)(pbvh_eclass_id_t, void *), void *ud) {
 	if (t->internal_root == PBVH_NULL_NODE) {
 		return;
@@ -1089,9 +1065,9 @@ inline void pbvh_tree_ray_query(pbvh_tree_t *t,
  * comparison (not a ring op). */
 inline bool pbvh_half_space_keeps_(const pbvh_plane_t *p, const Aabb *b) {
 	const R128 zero = r128_from_int(0);
-	R128 xs[2]; xs[0] = b->min_x; xs[1] = b->max_x;
-	R128 ys[2]; ys[0] = b->min_y; ys[1] = b->max_y;
-	R128 zs[2]; zs[0] = b->min_z; zs[1] = b->max_z;
+	R128 xs[2]; xs[0] = r128_from_int(b->min_x); xs[1] = r128_from_int(b->max_x);
+	R128 ys[2]; ys[0] = r128_from_int(b->min_y); ys[1] = r128_from_int(b->max_y);
+	R128 zs[2]; zs[0] = r128_from_int(b->min_z); zs[1] = r128_from_int(b->max_z);
 	for (int ix = 0; ix < 2; ix++) {
 		for (int iy = 0; iy < 2; iy++) {
 			for (int iz = 0; iz < 2; iz++) {
@@ -1336,18 +1312,23 @@ private:
 	// Scale by 1e6 (micrometres) to preserve sub-meter precision; keep the
 	// multiply in double regardless of real_t so open-world consumers
 	// (renderer, physics) don't lose precision through a float intermediate.
+	_FORCE_INLINE_ static int64_t _scalar_to_i64(real_t v) {
+		return (int64_t)((double)v * 1000000.0);
+	}
+
+	// Kept for plane conversion (pbvh_plane_t still uses R128 for the normal dot).
 	_FORCE_INLINE_ static R128 _scalar_to_r128(real_t v) {
 		return r128_from_int((int64_t)((double)v * 1000000.0));
 	}
 
-	_FORCE_INLINE_ static Aabb _aabb_to_r128(const AABB &b) {
+	_FORCE_INLINE_ static Aabb _aabb_to_i64(const AABB &b) {
 		Aabb a;
-		a.min_x = _scalar_to_r128(b.position.x);
-		a.max_x = _scalar_to_r128(b.position.x + b.size.x);
-		a.min_y = _scalar_to_r128(b.position.y);
-		a.max_y = _scalar_to_r128(b.position.y + b.size.y);
-		a.min_z = _scalar_to_r128(b.position.z);
-		a.max_z = _scalar_to_r128(b.position.z + b.size.z);
+		a.min_x = _scalar_to_i64(b.position.x);
+		a.max_x = _scalar_to_i64(b.position.x + b.size.x);
+		a.min_y = _scalar_to_i64(b.position.y);
+		a.max_y = _scalar_to_i64(b.position.y + b.size.y);
+		a.min_z = _scalar_to_i64(b.position.z);
+		a.max_z = _scalar_to_i64(b.position.z + b.size.z);
 		return a;
 	}
 
@@ -1402,7 +1383,7 @@ public:
 
 	ID insert(const AABB &p_box, void *p_userdata) {
 		_ensure_capacity(tree.count + 1u);
-		const Aabb r = _aabb_to_r128(p_box);
+		const Aabb r = _aabb_to_i64(p_box);
 		pbvh_node_id_t id = pbvh_tree_insert(&tree, (pbvh_eclass_id_t)tree.count, r);
 		if (id >= userdata.size()) {
 			userdata.resize(id + 1u);
@@ -1418,7 +1399,7 @@ public:
 		if (!p_id.is_valid() || p_id.id >= tree.capacity) {
 			return false;
 		}
-		const Aabb r = _aabb_to_r128(p_box);
+		const Aabb r = _aabb_to_i64(p_box);
 		pbvh_tree_update(&tree, p_id.id, r);
 		dirty = true;
 		return true;
@@ -1476,7 +1457,7 @@ public:
 			return;
 		}
 		Ctx<QueryResult> ctx = { this, &r_result };
-		const Aabb q = _aabb_to_r128(p_box);
+		const Aabb q = _aabb_to_i64(p_box);
 		pbvh_tree_aabb_query_n(&tree, &q, &_aabb_cb<QueryResult>, &ctx);
 	}
 
@@ -1488,8 +1469,8 @@ public:
 		}
 		Ctx<QueryResult> ctx = { this, &r_result };
 		pbvh_tree_ray_query(&tree,
-				_scalar_to_r128(p_from.x), _scalar_to_r128(p_from.y), _scalar_to_r128(p_from.z),
-				_scalar_to_r128(p_to.x), _scalar_to_r128(p_to.y), _scalar_to_r128(p_to.z),
+				_scalar_to_i64(p_from.x), _scalar_to_i64(p_from.y), _scalar_to_i64(p_from.z),
+				_scalar_to_i64(p_to.x), _scalar_to_i64(p_to.y), _scalar_to_i64(p_to.z),
 				&_aabb_cb<QueryResult>, &ctx);
 	}
 

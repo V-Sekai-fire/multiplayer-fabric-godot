@@ -30,7 +30,7 @@ struct pbvh_node {
 \tuint32_t is_leaf;
 \tuint32_t hilbert; /* 30-bit Hilbert code; sort key */
 };
-using pbvh_node_t = pbvh_node<R128>;
+using pbvh_node_t = pbvh_node<int64_t>;
 
 /* Hilbert-radix internal node over sorted[]. Stored in pre-order DFS, so the
  * array itself is a nested set: the subtree rooted at internals[i] occupies
@@ -45,7 +45,7 @@ struct pbvh_internal {
 \tpbvh_internal_id_t left; /* PBVH_NULL_NODE when this is a leaf-range node */
 \tpbvh_internal_id_t right; /* PBVH_NULL_NODE when this is a leaf-range node */
 };
-using pbvh_internal_t = pbvh_internal<R128>;
+using pbvh_internal_t = pbvh_internal<int64_t>;
 
 typedef struct pbvh_dirty_leaf {
 \tpbvh_node_id_t leaf_id;
@@ -92,7 +92,7 @@ struct pbvh_tree {
 \t * leaving a strict O(K + n_marked) refit bound. */
 \tuint64_t *touched_meta_bits; /* size ((internal_capacity + 63)/64 + 63)/64, caller-owned */
 };
-using pbvh_tree_t = pbvh_tree<R128>;
+using pbvh_tree_t = pbvh_tree<int64_t>;
 
 /* ============================================================================
  * BUCKET AUTO-TUNE (Phase 2e)

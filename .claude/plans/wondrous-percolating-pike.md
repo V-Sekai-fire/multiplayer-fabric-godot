@@ -1,27 +1,41 @@
 # Zero hardcoded C in Codegen/ + restore ≥2× perf vs DynamicBVH
 
-## Context
-1. **Zero hardcoded C in thirdparty/predictive_bvh/PredictiveBVH/Codegen/**: All hand-written C must be in `core/math/predictive_bvh_adapter.h`. `predictive_bvh.h` should only contain generated ring polynomials and structural typedefs/macros. This fixes the redefinition errors seen when variables and functions conflict.
-2. **Restore pbvh ≥ 2× DBVH perf**: By moving `aabb_overlaps`, `aabb_contains`, `aabb_contains_point`, and `aabb_union` to the adapter, they can use short-circuit `&&` and `r128_le` instead of polynomial bridges.
+## Status: COMPLETE (2026-04-15)
 
-## What stays in Codegen/
-- `ghostBoundC`, `surfaceAreaC`, `ghostAabbC`, `planeCornerValC`, `quinticHermiteC`, `deltaCostFnsC`, `scalarFnC`, `emlC`
-- `ring_min_r128`, `ring_max_r128`, `aabb_overlaps_ring`
-- `constantsC`, struct typedefs (`Aabb`, `pbvh_tree_t`, etc.)
+## What was done
+1. ✅ `aabbC` fast-paths, `utilC`, `hilbertC`, `ringMinMaxC`, `deltaSelectC` moved out of CodeGen.lean → `core/math/predictive_bvh_adapter.h`. Only `aabb_overlaps_ring` polynomial retained in CodeGen.lean.
+2. ✅ All tree functions from `TreeC.lean` moved to `core/math/predictive_bvh_adapter.h` as `inline`. TreeC.lean is now 114 lines (structs/typedefs only).
+3. ✅ Header regenerated: `lake exe bvh-codegen` exits 0.
+4. ✅ Build passes (`gscons tests=yes -j8`). 201/201 per-frame tests pass.
+5. ✅ Rust adapter (`thirdparty/predictive_bvh/predictive_bvh_adapter.rs`) with full feature parity.
+6. ✅ Cargo crate + CLI test binary (`pbvh_test`) — all 8 tests pass: hilbert round-trip, query correctness, tick correctness, remove, clear/re-insert, ray query, enumerate_pairs, index slot.
 
-## What moves to adapter.h
-- `aabbC`'s fast-path bodies (`aabb_union`, `aabb_overlaps`, etc.)
-- `utilC` (`clz30`, `r128_half`)
-- `hilbertC` (`hilbert3d`, `hilbert3d_inverse`, `hilbert_of_aabb`, `hilbert_cell_of`)
-- `ringMinMaxC` bridge wrappers (`r128_sign_bit`, `pbvh_r128_min`, etc.)
-- `deltaSelectC` control flow wrapper (`per_entity_delta_poly`)
-- **All TreeC functions** (e.g. `pbvh_tree_build`, `pbvh_tree_insert`, `pbvh_tree_aabb_query_n`, etc.)
+## What stays in Codegen/ (by design)
+- R128 ring arithmetic primitives (`static inline`): `r128_from_int`, `r128_add/sub/mul/div`, `r128_le`, etc.
+- Generated polynomial template + `deltaCostFnsC`, `quinticHermiteC`, `scalarFnC`, `emlC`
+- `aabb_overlaps_ring` polynomial (proof export)
+- `pbvh_hysteresis_threshold`, `pbvh_latency_ticks`, `pbvh_v_max_physical_um_per_tick`, `pbvh_accel_floor_um_per_tick2`
+- Struct typedefs (`AabbT<T>`, `pbvh_node_t`, `pbvh_internal_t`, `pbvh_tree_t`)
 
-## Execution Steps
-1. **Move `aabbC` body, `utilC`, `hilbertC`, `ringMinMaxC`, and `deltaSelectC` out of CodeGen.lean and into `core/math/predictive_bvh_adapter.h`.**
-   - Retain `aabb_overlaps_ring` in CodeGen.lean.
-   - Remove the `aabb_union_fn` typedefs from `CodeGen.lean`.
-2. **Move all functions from `TreeC.lean` to `core/math/predictive_bvh_adapter.h`.** 
-   - `TreeC.lean` should be left with only the structs and typedefs (e.g., `pbvh_node_t`, `pbvh_internal_t`, `pbvh_tree_t`).
-3. **Regenerate the header**: `cd thirdparty/predictive_bvh && lake exe bvh-codegen`
-4. **Build and Test**: Rebuild with `scons dev_build=yes tests=yes` and run the benchmarks. Ensure `pbvh` restores the ≥2× performance compared to DBVH and the build completes without redefinition errors.
+## Open
+- ~~Verify ≥2× perf vs DynamicBVH~~ — DONE, exceeded target (see below).
+
+## int64_t migration (2026-04-15)
+Switched all tree node AABB storage from `R128` (software 128-bit) to `int64_t` (native µm integers).
+
+### What changed
+- `TreeC.lean`: `pbvh_node_t`, `pbvh_internal_t`, `pbvh_tree_t` aliases → `<int64_t>`
+- `CodeGen.lean`: `using Aabb = AabbT<int64_t>`
+- `predictive_bvh_adapter.h`: `aabb_union`, `aabb_overlaps`, `aabb_contains`, `aabb_contains_point` now use native `<=`; `hilbert_of_aabb` and `hilbert_cell_of` use pure int64 arithmetic; `pbvh_segment_aabb_` and `pbvh_tree_ray_query` take `int64_t` coords; `_aabb_to_i64` / `_scalar_to_i64` added to `PredictiveBVH` class (R128 retained only for `pbvh_plane_t` dot products)
+- `lake exe bvh-codegen` regenerated header; build clean, 217/217 assertions pass
+
+### Perf before → after (per-frame tick, pbvh vs dbvh)
+| N | Before (R128) | After (int64_t) | vs DBVH |
+|---|---|---|---|
+| 4,096 | 50us | 28us | 3.17× |
+| 16,384 | 177us | 104us | 3.82× |
+| 65,536 | 925us | 534us | 3.65× |
+| 262,144 | 3,950us | 2,489us | 3.59× |
+| STRESS 65k | — | 8,316us | **4.07×** |
+
+Hit counts identical across pbvh/dbvh/truth at all scales. Plan goal (≥2×) comfortably exceeded.

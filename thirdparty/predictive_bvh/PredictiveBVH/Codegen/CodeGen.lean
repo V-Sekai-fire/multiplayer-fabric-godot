@@ -990,7 +990,7 @@ private def aabbC : String :=
   "    T min_y, max_y;\n" ++
   "    T min_z, max_z;\n" ++
   "};\n" ++
-  "using Aabb = AabbT<R128>;\n\n" ++
+  "using Aabb = AabbT<int64_t>;\n\n" ++
   "/* Ring-polynomial provenance export: Π (1 - sign_bit(dᵢ)) over 6 axis diffs.\n" ++
   "   Proved equivalent to short-circuit r128_le chains below via bitDecompose;\n" ++
   "   see aabbOverlapsExpr in Codegen/CodeGen.lean + HilbertBroadphase.lean. */\n" ++
