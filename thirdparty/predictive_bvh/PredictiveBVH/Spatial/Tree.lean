@@ -224,47 +224,48 @@ def build (t : PbvhTree) : PbvhTree :=
 
 -- ── Queries ──────────────────────────────────────────────────────────────────
 
+/-- Top-level recursive worker for `aabbQueryN`. Extracted from its former
+    `let rec` body so that its recursion principle (and thus soundness /
+    completeness proofs) is directly accessible at module scope. Terminates
+    on `end_ - i`: each step either advances `i` by one or jumps forward via
+    the skip pointer. A defensive clamp on `next` guarantees `next > i ∧
+    next ≤ end_`, so the measure decreases even before `skip_equals_dfs_next`
+    is proved. -/
+def aabbQueryNGo (t : PbvhTree) (query : BoundingBox)
+    (i : Nat) (acc : List EClassId) : List EClassId :=
+  let end_ := t.internals.size
+  if hlt : i ≥ end_ then acc.reverse
+  else
+    let n := t.internals[i]!
+    let next : Nat := if h : i < n.skip ∧ n.skip ≤ end_ then n.skip else i + 1
+    have hnext_lt : end_ - next < end_ - i := by
+      have hi : i < end_ := by omega
+      show end_ - (if _ : i < n.skip ∧ n.skip ≤ end_ then n.skip else i + 1) < end_ - i
+      split <;> rename_i h <;> omega
+    if ¬ aabbOverlapsDec n.bounds query then
+      aabbQueryNGo t query next acc
+    else if n.left.isNone && n.right.isNone then
+      -- Leaf block: scan the (offset, span) window in `sorted`.
+      let acc := (List.range n.span).foldl (fun acc j =>
+        let lid := t.sorted[n.offset + j]!
+        match t.leaves[lid]? with
+        | some l =>
+          if l.alive && aabbOverlapsDec l.bounds query then
+            l.eclass :: acc else acc
+        | none => acc) acc
+      aabbQueryNGo t query next acc
+    else
+      have hinc : end_ - (i + 1) < end_ - i := by
+        have hi : i < end_ := by omega
+        omega
+      aabbQueryNGo t query (i + 1) acc
+  termination_by t.internals.size - i
+
 /-- Iterative skip-pointer descent. Returns every live leaf eclass whose
-    bounds overlap `query`. Emits in pre-order DFS order. Terminates on
-    `end_ - i`: each step either advances `i` by one or jumps forward via
-    the skip pointer. A defensive clamp `clampedNext` guarantees the next
-    index is strictly greater than `i` and at most `end_`, so the measure
-    decreases even before `skip_equals_dfs_next` is proved. -/
+    bounds overlap `query`. Emits in pre-order DFS order. -/
 def aabbQueryN (t : PbvhTree) (query : BoundingBox) : List EClassId :=
   if t.internals.isEmpty then []
-  else
-    let end_ := t.internals.size
-    -- Ensure `next > i ∧ next ≤ end_` so `end_ - next < end_ - i`.
-    let clampedNext (i skip : Nat) : Nat :=
-      if h : i < skip ∧ skip ≤ end_ then skip else i + 1
-    let rec go (i : Nat) (acc : List EClassId) : List EClassId :=
-      if hlt : i ≥ end_ then acc.reverse
-      else
-        let n := t.internals[i]!
-        let next := clampedNext i n.skip
-        have hnext_lt : end_ - next < end_ - i := by
-          have hi : i < end_ := by omega
-          show end_ - (if _ : i < n.skip ∧ n.skip ≤ end_ then n.skip else i + 1) < end_ - i
-          split <;> rename_i h <;> omega
-        if ¬ aabbOverlapsDec n.bounds query then
-          go next acc
-        else if n.left.isNone && n.right.isNone then
-          -- Leaf block: scan the (offset, span) window in `sorted`.
-          let acc := (List.range n.span).foldl (fun acc j =>
-            let lid := t.sorted[n.offset + j]!
-            match t.leaves[lid]? with
-            | some l =>
-              if l.alive && aabbOverlapsDec l.bounds query then
-                l.eclass :: acc else acc
-            | none => acc) acc
-          go next acc
-        else
-          have hinc : end_ - (i + 1) < end_ - i := by
-            have hi : i < end_ := by omega
-            omega
-          go (i + 1) acc
-    termination_by t.internals.size - i
-    go (t.internalRoot.getD 0) []
+  else aabbQueryNGo t query (t.internalRoot.getD 0) []
 
 /-- Enumerate all overlapping live-leaf pairs as `(a, b)` with `a < b` by
     EClassId. Eclass-style broadphase: no pointers, no per-slot callback. -/
@@ -886,6 +887,62 @@ theorem aabbQueryN_leaf_fold_preserves_sound (t : PbvhTree) (q : BoundingBox)
         exact hacc'
       · simp only [hlk, halive, Bool.false_and, if_false]
         exact hacc'
+
+/-- Soundness invariant for `aabbQueryNGo`: if every eclass already in `acc`
+    has a sound witness, so does every eclass in the result. Proved by strong
+    induction on the termination measure `t.internals.size - i`. At each
+    step the only accumulator extension is the leaf-block fold, whose
+    preservation is handled by `aabbQueryN_leaf_fold_preserves_sound`. -/
+theorem aabbQueryNGo_preserves_sound (t : PbvhTree) (q : BoundingBox) :
+    ∀ (m : Nat) (i : Nat) (acc : List EClassId),
+      t.internals.size - i = m →
+      (∀ e ∈ acc, querySoundOf t q e) →
+      ∀ e ∈ aabbQueryNGo t q i acc, querySoundOf t q e := by
+  intro m
+  induction m using Nat.strongRecOn with
+  | _ m ih =>
+    intro i acc hm hacc e he
+    rw [aabbQueryNGo] at he
+    dsimp only at he
+    split at he
+    · -- i ≥ end_: result = acc.reverse.
+      rw [List.mem_reverse] at he
+      exact hacc e he
+    · -- i < end_: three sub-cases (prune, leaf block, descend).
+      rename_i hlt
+      have hi_lt : i < t.internals.size := by omega
+      set n := t.internals[i]! with hn_def
+      set next : Nat :=
+        if _ : i < n.skip ∧ n.skip ≤ t.internals.size then n.skip else i + 1
+        with hnext_def
+      have hnext_gt : next > i := by
+        rw [hnext_def]; split <;> rename_i h <;> omega
+      have hnext_le : next ≤ t.internals.size := by
+        rw [hnext_def]; split <;> rename_i h <;> omega
+      have hnext_measure : t.internals.size - next < m := by omega
+      split at he
+      · -- Prune: recurse with `next acc`.
+        exact ih _ hnext_measure next acc rfl hacc e he
+      · split at he
+        · -- Leaf block: fold then recurse with `next acc'`.
+          have hfold := aabbQueryN_leaf_fold_preserves_sound t q n.offset n.span acc hacc
+          exact ih _ hnext_measure next _ rfl hfold e he
+        · -- Descend: recurse with `(i+1) acc`.
+          have hi1_measure : t.internals.size - (i + 1) < m := by omega
+          exact ih _ hi1_measure (i + 1) acc rfl hacc e he
+
+/-- **Tier 3 — aabbQueryN_sound.** Every eclass returned by `aabbQueryN`
+    has a live leaf in the tree whose bounds overlap the query and whose
+    eclass equals the returned value. Directly composes
+    `aabbQueryNGo_preserves_sound` starting from `acc = []`. -/
+theorem aabbQueryN_sound (t : PbvhTree) (q : BoundingBox) :
+    ∀ e ∈ aabbQueryN t q, querySoundOf t q e := by
+  intro e he
+  unfold aabbQueryN at he
+  split at he
+  · exact absurd he List.not_mem_nil
+  · exact aabbQueryNGo_preserves_sound t q _ _ [] rfl
+      (fun _ h => absurd h List.not_mem_nil) e he
 
 /-- Root-level skip monotonicity: the root node returned by `buildSubtree`
     has `root < skip[root] ≤ result.size`. Direct composition of
