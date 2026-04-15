@@ -324,13 +324,17 @@ static inline void pbvh_tree_refit_incremental_(pbvh_tree_t *t,
 \t\t\t * bounds are a superset of its subtree leaves) and transitivity,
 \t\t\t * all ancestors above this node also remain valid — no mark, no
 \t\t\t * refit, walk terminates in O(1) for shrinking / in-place leaves.
-\t\t\t * Soundness license: Lean theorem aabbQueryN_complete_from_invariants
-\t\t\t * only requires internals' bounds to cover their descendant leaves;
-\t\t\t * over-conservative bounds are permitted. */
+\t\t\t * Soundness: aabbQueryN_complete_from_invariants requires only
+\t\t\t * bounds ⊇ descendant leaves; over-conservative bounds are permitted.
+\t\t\t * NO DEDUP-BREAK: stopping when a node is already marked is unsound
+\t\t\t * combined with the containment early-out above. Leaf A may
+\t\t\t * containment-break at ancestor P (not marking P); leaf B then
+\t\t\t * reaches P's child I (already marked by A) and would dedup-break,
+\t\t\t * silently skipping P even though B's bounds exceed P's. Spec:
+\t\t\t * RefitIncremental.lean markAncestors / refitIncrementalSpec. */
 \t\t\tif (aabb_contains(&t->internals[i].bounds, &new_leaf)) { break; }
 \t\t\tconst uint32_t w = i >> 6;
 \t\t\tconst uint64_t mask = 1ull << (i & 63u);
-\t\t\tif ((t->touched_bits[w] & mask) != 0ull) { break; }
 \t\t\tt->touched_bits[w] |= mask;
 \t\t\tconst uint32_t mw = w >> 6;
 \t\t\tt->touched_meta_bits[mw] |= 1ull << (w & 63u);

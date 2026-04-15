@@ -208,35 +208,179 @@ theorem refitOne_establishes_local_cover_at_i (t : PbvhTree) (i : InternalId)
         · simp [hl, hr]
 
 -- ============================================================================
--- FOLLOW-UP WORK (tracked for the next Lean-codegen session)
+-- Part II — refitFull: post-order full refit
+-- ============================================================================
+
+/-- Post-order refit of every internal.
+    `List.range n` = [0, 1, …, n-1]; `foldr` processes right-to-left, so
+    the effective application order is n-1, n-2, …, 0 — children (higher
+    index in pre-order DFS) before parents (lower index). -/
+def refitFull (t : PbvhTree) : PbvhTree :=
+  (List.range t.internals.size).foldr refitOne t
+
+/-- `refitFull` preserves the internals array size. -/
+theorem refitFull_preserves_size (t : PbvhTree) :
+    (refitFull t).internals.size = t.internals.size := by
+  unfold refitFull
+  induction List.range t.internals.size with
+  | nil => simp
+  | cons k ks ih =>
+    simp only [List.foldr_cons]
+    rw [refitOne_preserves_size]
+    exact ih
+
+/-- `refitFull` establishes the global cover invariant.
+    PROOF SKETCH (for future mechanisation):
+    Let n = t.internals.size.  Define:
+      step k t₀ := (List.range k).foldr refitOne t₀   (processes k-1 … 0)
+    We prove by induction on k (downward from n to 0):
+      ∀ j < k, localCoverAt (step k t₀) j.
+    Base (k = 0): vacuous.
+    Step (k → k+1):
+      step (k+1) t₀ = refitOne k (step k t₀).
+      (a) j = k: refitOne_establishes_local_cover_at_i gives localCoverAt. ✓
+      (b) j < k (IH): refitOne at k only modifies node k's bounds.
+          Node j's children have index > j.  Two sub-cases:
+          • child index > k: those bounds are unchanged by refitOne k
+            (by refitOne_preserves_other_internals), so j's localCoverAt
+            is preserved from the IH directly.
+          • child index ≤ k (= k itself, since j < k ≤ child): child k was
+            just refit; j's bounds may now be too tight.  But j is
+            processed at step j < k, so step j+1 … refitOne j … reads
+            the correct, already-updated child bounds at that later point.
+            Because step (k+1) = refitOne k ∘ step k, and j < k, j's
+            refitOne fires *after* k's.  At the time refitOne j fires it
+            reads k's final (correct) bounds.  After that, no refitOne at
+            any index ≠ j changes j's bounds.  So j's final bounds are
+            correct.
+    The argument for the full fold is: at the very end, every node i had
+    refitOne i applied *after* all its children's refitOne applications,
+    and no later refitOne changes i's bounds. -/
+theorem refitFull_establishes_cover (t : PbvhTree) :
+    coverInvariant (refitFull t) := by
+  sorry
+
+-- ============================================================================
+-- Part III — markAncestors / refitIncrementalSpec
+-- ============================================================================
+
+/-- Walk the parent chain from internal `i`, marking each visited node in
+    `marked`. `fuel` bounds the recursion; any positive value ≥ tree height
+    (which is ≤ internals.size) is sufficient for completeness.
+    NO dedup-break: every ancestor is marked unconditionally, even if it was
+    already set by a previous leaf's walk.  The soundness obligation (D in
+    the original plan) requires marking ALL ancestors; a dedup-break that
+    stops early when an ancestor is already marked is unsound when combined
+    with a containment early-out, because it can silently skip ancestors
+    whose bounds need to grow. -/
+private def walkAndMark
+    (parentOf : InternalId → Option InternalId)
+    (fuel : Nat) (marked : Array Bool) (i : InternalId) : Array Bool :=
+  match fuel with
+  | 0 => marked
+  | fuel + 1 =>
+    let marked' := if h : i < marked.size then marked.set i true h else marked
+    match parentOf i with
+    | none   => marked'
+    | some p => walkAndMark parentOf fuel marked' p
+
+/-- Mark every ancestor of every dirty leaf.
+    `leafToInternal leaf_id` = the enclosing leaf-range internal for that
+    leaf (the bottom of its ancestor chain).
+    `parentOf i` = the parent internal of `i` (`none` at the root).
+    Returns a `Bool` array of length `t.internals.size`; entry `i` is `true`
+    iff internal `i` is an ancestor of at least one dirty leaf. -/
+def markAncestors
+    (t : PbvhTree) (dirtyLeafIds : List LeafId)
+    (leafToInternal : LeafId → Option InternalId)
+    (parentOf : InternalId → Option InternalId) : Array Bool :=
+  dirtyLeafIds.foldl (fun marked leafId =>
+    match leafToInternal leafId with
+    | none       => marked
+    | some start => walkAndMark parentOf t.internals.size marked start
+  ) (Array.mkArray t.internals.size false)
+
+/-- Incremental refit: apply `refitOne` only to marked internals, in
+    descending index order (children before parents, same as `refitFull`). -/
+def refitIncrementalSpec
+    (t : PbvhTree) (marked : Array Bool) : PbvhTree :=
+  (List.range t.internals.size).foldr (fun i t' =>
+    if marked.getD i false then refitOne t' i else t'
+  ) t
+
+-- ============================================================================
+-- Part IV — soundness of refitIncrementalSpec
+-- ============================================================================
+
+/-- Every ancestor of every dirty leaf is marked by `markAncestors`.
+    PROOF SKETCH: by induction on the dirty leaf list and fuel-induction on
+    `walkAndMark`: each call sets entry `i` to `true` then recurses to the
+    parent, so every node on the path from `start` to the root is marked
+    after `walkAndMark` completes (provided fuel ≥ path length, which is
+    guaranteed by fuel = internals.size ≥ tree height). -/
+theorem markAncestors_covers_all_ancestors
+    (t : PbvhTree) (dirtyLeafIds : List LeafId)
+    (leafToInternal : LeafId → Option InternalId)
+    (parentOf : InternalId → Option InternalId)
+    (leaf : LeafId) (h_leaf : leaf ∈ dirtyLeafIds)
+    (i : InternalId) (hi : i < t.internals.size)
+    (h_anc : ∃ start, leafToInternal leaf = some start ∧
+        ∃ fuel, walkAndMark parentOf fuel (Array.mkArray t.internals.size false) start
+                  |>.getD i false = true) :
+    (markAncestors t dirtyLeafIds leafToInternal parentOf).getD i false = true := by
+  sorry
+
+/-- `refitIncrementalSpec` with a fully-marked array equals `refitFull`.
+    When every internal is marked, the `if` guard is always `true` and the
+    two folds are definitionally equal. -/
+theorem refitIncrementalSpec_allMarked_eq_refitFull (t : PbvhTree) :
+    let allMarked := Array.mkArray t.internals.size true
+    refitIncrementalSpec t allMarked = refitFull t := by
+  simp only [refitIncrementalSpec, refitFull]
+  congr 1
+  funext i
+  simp [Array.getD, Array.mkArray]
+
+/-- Main soundness theorem: when `marked` covers all ancestors of all dirty
+    leaves AND the unmarked internals' existing bounds already satisfy
+    `localCoverAt` in `t` (i.e., they were untouched by the dirty leaves),
+    `refitIncrementalSpec t marked` satisfies `coverInvariant`.
+    PROOF SKETCH: The marked nodes are a superset of all ancestors of dirty
+    leaves.  By `markAncestors_covers_all_ancestors`, all such ancestors are
+    refit.  For the unmarked nodes: their children bounds are unchanged
+    (dirty leaves only moved bounds within marked subtrees; unmarked nodes
+    have no dirty-leaf descendants by the marking invariant), so their
+    pre-existing `localCoverAt` is preserved by
+    `refitOne_preserves_other_internals`.  The argument for the marked nodes
+    is analogous to `refitFull_establishes_cover` restricted to the marked
+    subgraph. -/
+theorem refitIncrementalSpec_establishes_cover
+    (t : PbvhTree) (marked : Array Bool)
+    (h_marked_covers : ∀ i, i < t.internals.size →
+        ¬ marked.getD i false →
+        localCoverAt t i) :
+    coverInvariant (refitIncrementalSpec t marked) := by
+  sorry
+
+-- ============================================================================
+-- REMAINING WORK
 --
--- (A) `refitOne_preserves_local_cover_elsewhere`:
---     refitting at `i` does not disturb `localCoverAt` at `j ≠ i`, EXCEPT
---     when `j`'s children include `i` — in that case, `j`'s bounds may no
---     longer cover its children's new bounds. The global refit must
---     re-refit such parents *after* the child.
+-- (E) Prove refitFull_establishes_cover mechanically (removes sorry above).
+--     The sketch in the docstring gives the induction; the key lemma is
+--     `refitOne_preserves_localCover_at_lower`:
+--       ∀ j < k, localCoverAt t j → localCoverAt (refitOne t k) j
+--     which follows because j's children have indices > j, and if those
+--     indices are also > k then they are unmodified by refitOne k
+--     (refitOne_preserves_other_internals).  The case child_index = k is the
+--     subtle one: j's bounds may now be stale w.r.t. k's new bounds, but j
+--     is re-refit at step j (which comes after k in the descending fold),
+--     so the invariant only needs to hold AT THE END of the full fold.
 --
--- (B) `refitFull (t : PbvhTree) : PbvhTree` — post-order iteration via
---     `(List.range t.internals.size).foldr refitOne t`. Since pre-order
---     DFS places parent < child, foldr with ascending range processes
---     children (high index) before parents (low index) — exactly the
---     bottom-up order required.
+-- (F) Prove markAncestors_covers_all_ancestors mechanically.
+--     The walkAndMark induction is on fuel; the key step shows that
+--     walkAndMark sets entry i and recurses to the parent.
 --
--- (C) `refitFull_establishes_cover : ∀ t, coverInvariant (refitFull t)`.
---     The induction hypothesis: "after processing indices [k, size), every
---     internal at index ≥ k satisfies localCoverAt". Proven by downward
---     induction on k, using (A) and `refitOne_establishes_local_cover_at_i`.
---
--- (D) Mark-based spec `refitIncrementalSpec`: mark every ancestor of every
---     dirty leaf (NO dedup-break), refit only marked nodes in post-order.
---     Soundness reduces to (C) plus an equivalence theorem:
---     `refitIncrementalSpec t dirty = refitFull t'` where `t'` has
---     unmarked internals' bounds *already* covering their (possibly new)
---     subtree. This is where the current C's dedup-break + containment
---     early-out combination fails — the proof obligation is undischargeable
---     without walking past the marked node.
---
--- (E) Emit refitIncrementalSpec from a small imperative IR in
+-- (G) Emit refitIncrementalSpec from a small imperative IR in
 --     PredictiveBVH.Codegen.IR, with TranslationValidation against the
 --     AmoLean.EGraph.Verified pipeline. Replaces the TreeC.lean string
 --     template for this function.
