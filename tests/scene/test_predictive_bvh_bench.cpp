@@ -1016,6 +1016,33 @@ TEST_CASE("[PredictiveBVH][Bench] per-frame 1%-dirty + Q-queries steady-state") 
 		}
 		pbvh_tree_build(&tree);
 
+		// Bench gate: measure bucket occupancy under the current HILBERT_PREFIX_BITS.
+		// max/p99 drive whether Phase 2e auto-tune is sufficient or whether a
+		// leaf-split op is needed.
+		{
+			const uint32_t num_buckets = 1u << HILBERT_PREFIX_BITS;
+			uint32_t bmax = 0;
+			uint32_t non_empty = 0;
+			uint64_t sum_sq = 0;
+			for (uint32_t b = 0; b < num_buckets; b++) {
+				const uint32_t lo = tree.bucket_dir[2u * b];
+				const uint32_t hi = tree.bucket_dir[2u * b + 1u];
+				const uint32_t sz = hi - lo;
+				if (sz > bmax) {
+					bmax = sz;
+				}
+				if (sz > 0) {
+					non_empty++;
+				}
+				sum_sq += (uint64_t)sz * (uint64_t)sz;
+			}
+			const double mean = (double)N / (double)num_buckets;
+			const double rms = std::sqrt((double)sum_sq / (double)num_buckets);
+			print_line(vformat("  [BUCKET N=%d bits=%d buckets=%d nonempty=%d] max=%d mean=%.1f rms=%.1f max/mean=%.2f",
+					(int)N, (int)HILBERT_PREFIX_BITS, (int)num_buckets, (int)non_empty,
+					(int)bmax, mean, rms, (double)bmax / mean));
+		}
+
 		DynamicBVH dtree;
 		LocalVector<DynamicBVH::ID> dids; dids.resize(N);
 		for (uint32_t i = 0; i < N; i++) {
