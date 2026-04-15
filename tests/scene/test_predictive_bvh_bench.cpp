@@ -839,7 +839,7 @@ TEST_CASE("[PredictiveBVH][Tick] in-bucket perturbation takes refit fast path") 
 // fits inside a CI build slot; extrapolate to 65k at whatever growth
 // exponent the table shows.
 TEST_CASE("[PredictiveBVH][Bench] growth rate of insert+tick vs DynamicBVH") {
-	constexpr uint32_t Ns[] = { 1024u, 2048u, 4096u, 8192u, 16384u };
+	constexpr uint32_t Ns[] = { 1024u, 4096u, 16384u, 65536u, 262144u };
 	constexpr uint32_t kSweeps = sizeof(Ns) / sizeof(Ns[0]);
 
 	uint64_t pbvh_totals[kSweeps] = {};
@@ -951,6 +951,106 @@ TEST_CASE("[PredictiveBVH][Bench] growth rate of insert+tick vs DynamicBVH") {
 	for (uint32_t s = 0; s < kSweeps; s++) {
 		CHECK(pbvh_totals[s] > 0);
 		CHECK(dbvh_totals[s] > 0);
+	}
+}
+
+// Per-frame steady-state cost at dirty_fraction=1% (production workload —
+// open-world scene, ~1% of instances move per frame). Initial build is NOT
+// counted; only the hot loop each frame pays. pbvh_tree_tick takes the
+// refit path when leaves stay in bucket (linear in dirty count + constant
+// per-bucket refit), DynamicBVH must still walk update() for each dirty
+// ID plus an optimize_incremental pass. This is where pbvh should win.
+TEST_CASE("[PredictiveBVH][Bench] per-frame 1%-dirty steady-state") {
+	constexpr uint32_t Ns[] = { 4096u, 16384u, 65536u, 262144u };
+	constexpr uint32_t kSweeps = sizeof(Ns) / sizeof(Ns[0]);
+	constexpr double kDirtyFrac = 0.01;
+	constexpr uint32_t kFrames = 16u;
+
+	Aabb scene = aabb_from_floats(-BENCH_BOUND, BENCH_BOUND,
+			-BENCH_BOUND, BENCH_BOUND, -BENCH_BOUND, BENCH_BOUND);
+
+	for (uint32_t s = 0; s < kSweeps; s++) {
+		const uint32_t N = Ns[s];
+		const uint32_t dirty_n = MAX((uint32_t)1, (uint32_t)((double)N * kDirtyFrac));
+
+		Vector<FloatLeaf> floats;
+		Vector<R128Leaf> r128s;
+		generate_dataset(N, 0xFEED1234ull ^ (uint64_t)N, floats, r128s);
+
+		Vector<pbvh_node_t> storage; storage.resize(N + 16);
+		Vector<pbvh_node_id_t> sorted_buf; sorted_buf.resize(N + 16);
+		Vector<pbvh_internal_t> internals; internals.resize(2 * (N + 16));
+		Vector<uint32_t> bucket_dir; bucket_dir.resize(2u * (1u << HILBERT_PREFIX_BITS));
+
+		pbvh_tree_t tree = {};
+		tree.nodes = storage.ptrw(); tree.capacity = storage.size();
+		tree.root = PBVH_NULL_NODE; tree.free_head = PBVH_NULL_NODE;
+		tree.sorted = sorted_buf.ptrw();
+		tree.internals = internals.ptrw(); tree.internal_capacity = internals.size();
+		tree.internal_root = PBVH_NULL_NODE;
+		tree.bucket_dir = bucket_dir.ptrw();
+		tree.bucket_bits = HILBERT_PREFIX_BITS;
+
+		for (uint32_t i = 0; i < N; i++) {
+			pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i, r128s[i].box, r128s[i].hilbert);
+		}
+		pbvh_tree_build(&tree);
+
+		DynamicBVH dtree;
+		LocalVector<DynamicBVH::ID> dids; dids.resize(N);
+		for (uint32_t i = 0; i < N; i++) {
+			dids[i] = dtree.insert(floats[i].box, (void *)(uintptr_t)i);
+		}
+
+		XorShift rng(0x1234ull ^ (uint64_t)N);
+		uint64_t t_pbvh_frames = 0, t_dbvh_frames = 0;
+
+		for (uint32_t f = 0; f < kFrames; f++) {
+			LocalVector<pbvh_dirty_leaf_t> dirty;
+			dirty.resize(dirty_n);
+			LocalVector<uint32_t> dirty_ids; dirty_ids.resize(dirty_n);
+			for (uint32_t d = 0; d < dirty_n; d++) {
+				uint32_t id = rng.next_u32() % N;
+				dirty_ids[d] = id;
+				AABB moved = floats[id].box;
+				moved.position += Vector3(rng.uniform(-0.001f, 0.001f),
+						rng.uniform(-0.001f, 0.001f), rng.uniform(-0.001f, 0.001f));
+				floats.write[id].box = moved;
+				Aabb rb = aabb_from_floats(
+						moved.position.x, moved.position.x + moved.size.x,
+						moved.position.y, moved.position.y + moved.size.y,
+						moved.position.z, moved.position.z + moved.size.z);
+				const uint32_t new_h = hilbert_of_aabb(&rb, &scene);
+				dirty[d].leaf_id = (pbvh_node_id_t)id;
+				dirty[d].old_hilbert = r128s[id].hilbert;
+				r128s.write[id].box = rb;
+				r128s.write[id].hilbert = new_h;
+			}
+
+			const uint64_t t_p0 = OS::get_singleton()->get_ticks_usec();
+			for (uint32_t d = 0; d < dirty_n; d++) {
+				pbvh_tree_update_h(&tree, dirty[d].leaf_id,
+						r128s[dirty_ids[d]].box, r128s[dirty_ids[d]].hilbert);
+			}
+			pbvh_tree_tick(&tree, dirty.ptr(), dirty_n);
+			t_pbvh_frames += OS::get_singleton()->get_ticks_usec() - t_p0;
+
+			const uint64_t t_d0 = OS::get_singleton()->get_ticks_usec();
+			for (uint32_t d = 0; d < dirty_n; d++) {
+				dtree.update(dids[dirty_ids[d]], floats[dirty_ids[d]].box);
+			}
+			dtree.optimize_incremental(1);
+			t_dbvh_frames += OS::get_singleton()->get_ticks_usec() - t_d0;
+		}
+
+		const double p_per = (double)t_pbvh_frames / (double)kFrames;
+		const double d_per = (double)t_dbvh_frames / (double)kFrames;
+		const double speedup = p_per > 0.0 ? d_per / p_per : 0.0;
+		print_line(vformat("[N=%6d dirty=%5d/frame] pbvh %.1f us/frame  dbvh %.1f us/frame  speedup x%.2f",
+				(int)N, (int)dirty_n, p_per, d_per, speedup));
+
+		CHECK(t_pbvh_frames > 0);
+		CHECK(t_dbvh_frames > 0);
 	}
 }
 
