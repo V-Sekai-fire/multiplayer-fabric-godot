@@ -45,6 +45,7 @@ private:
 	LocalVector<uint32_t> parent_of_internal_storage;
 	LocalVector<uint32_t> leaf_to_internal_storage;
 	LocalVector<uint64_t> touched_bits_storage;
+	LocalVector<uint64_t> touched_meta_bits_storage;
 	uint32_t index_slot = 0;
 	bool dirty = false; // true if insert/update/remove happened since last build
 
@@ -63,7 +64,9 @@ private:
 		userdata.resize(new_cap);
 		parent_of_internal_storage.resize(internal_cap);
 		leaf_to_internal_storage.resize(new_cap);
-		touched_bits_storage.resize((internal_cap + 63u) / 64u);
+		const uint32_t touched_words = (internal_cap + 63u) / 64u;
+		touched_bits_storage.resize(touched_words);
+		touched_meta_bits_storage.resize((touched_words + 63u) / 64u);
 		tree.nodes = node_storage.ptr();
 		tree.sorted = sorted_storage.ptr();
 		tree.internals = internal_storage.ptr();
@@ -72,6 +75,7 @@ private:
 		tree.parent_of_internal = parent_of_internal_storage.ptr();
 		tree.leaf_to_internal = leaf_to_internal_storage.ptr();
 		tree.touched_bits = touched_bits_storage.ptr();
+		tree.touched_meta_bits = touched_meta_bits_storage.ptr();
 	}
 
 	// Scale by 1e6 (micrometres) to preserve sub-meter precision; keep the

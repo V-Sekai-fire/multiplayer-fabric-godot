@@ -984,7 +984,9 @@ TEST_CASE("[PredictiveBVH][Bench] per-frame 1%-dirty steady-state") {
 		Vector<uint32_t> bucket_dir; bucket_dir.resize(2u * (1u << HILBERT_PREFIX_BITS));
 		Vector<uint32_t> parent_of; parent_of.resize(internal_cap);
 		Vector<uint32_t> leaf_to; leaf_to.resize(N + 16);
-		Vector<uint64_t> touched_bits; touched_bits.resize((internal_cap + 63u) / 64u);
+		const uint32_t touched_words = (internal_cap + 63u) / 64u;
+		Vector<uint64_t> touched_bits; touched_bits.resize(touched_words);
+		Vector<uint64_t> touched_meta_bits; touched_meta_bits.resize((touched_words + 63u) / 64u);
 
 		pbvh_tree_t tree = {};
 		tree.nodes = storage.ptrw(); tree.capacity = storage.size();
@@ -997,6 +999,7 @@ TEST_CASE("[PredictiveBVH][Bench] per-frame 1%-dirty steady-state") {
 		tree.parent_of_internal = parent_of.ptrw();
 		tree.leaf_to_internal = leaf_to.ptrw();
 		tree.touched_bits = touched_bits.ptrw();
+		tree.touched_meta_bits = touched_meta_bits.ptrw();
 
 		for (uint32_t i = 0; i < N; i++) {
 			pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i, r128s[i].box, r128s[i].hilbert);

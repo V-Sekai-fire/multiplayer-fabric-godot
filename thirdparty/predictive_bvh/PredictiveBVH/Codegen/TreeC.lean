@@ -80,6 +80,12 @@ typedef struct pbvh_tree {
 \tuint32_t *parent_of_internal; /* size internal_capacity, caller-owned */
 \tuint32_t *leaf_to_internal; /* size capacity, caller-owned, indexed by node id */
 \tuint64_t *touched_bits; /* size (internal_capacity + 63) / 64, caller-owned */
+\t/* Meta-bitmap over touched_bits: bit i in touched_meta_bits is set iff
+\t * touched_bits[i] has any set bits. Lets the refit scan skip empty
+\t * words in O(1) via __builtin_clzll instead of iterating the whole
+\t * [min_word..max_word] range. Kills the N/64 term in the scan phase,
+\t * leaving a strict O(K + n_marked) refit bound. */
+\tuint64_t *touched_meta_bits; /* size ((internal_capacity + 63)/64 + 63)/64, caller-owned */
 } pbvh_tree_t;
 
 static inline pbvh_node_id_t pbvh_tree_insert_h(pbvh_tree_t *t, pbvh_eclass_id_t ec,
@@ -293,18 +299,19 @@ static inline void pbvh_tree_refit_incremental_(pbvh_tree_t *t,
 \tif (t->internal_count == 0u) { return; }
 \tif (dirty == NULL || dirty_count == 0u ||
 \t\t\tt->parent_of_internal == NULL || t->leaf_to_internal == NULL ||
-\t\t\tt->touched_bits == NULL) {
+\t\t\tt->touched_bits == NULL || t->touched_meta_bits == NULL) {
 \t\tpbvh_tree_refit(t);
 \t\treturn;
 \t}
-\t/* Mark phase: walk ancestors, setting bits in touched_bits. Track the
-\t * narrow [min_word..max_word] range so the refit scan visits only
-\t * words containing set bits. Bits are self-clearing during the refit
-\t * pass, so the caller never needs to zero the bitmap between ticks —
-\t * the invariant is: bitmap is all-zero on entry; bitmap is all-zero
-\t * on exit. */
-\tuint32_t min_word = t->internal_count; /* sentinel: > any real word */
-\tuint32_t max_word = 0u;
+\t/* Mark phase: walk ancestors, setting bits in touched_bits AND in the
+\t * meta-bitmap (one bit per touched_bits word). Track [min_meta..max_meta]
+\t * instead of a word-level range, so the scan phase iterates only the
+\t * coarser meta-words. Every set touched_bits word has its meta-bit set,
+\t * giving an O(1) probe to find the next non-empty word via clzll.
+\t * Bits self-clear during refit; both bitmaps are all-zero on entry and
+\t * all-zero on exit. */
+\tuint32_t min_meta = UINT32_MAX;
+\tuint32_t max_meta = 0u;
 \tfor (uint32_t d = 0u; d < dirty_count; d++) {
 \t\tconst pbvh_node_id_t leaf_id = dirty[d].leaf_id;
 \t\tif (leaf_id >= t->count) { continue; }
@@ -325,45 +332,57 @@ static inline void pbvh_tree_refit_incremental_(pbvh_tree_t *t,
 \t\t\tconst uint64_t mask = 1ull << (i & 63u);
 \t\t\tif ((t->touched_bits[w] & mask) != 0ull) { break; }
 \t\t\tt->touched_bits[w] |= mask;
-\t\t\tif (w < min_word) { min_word = w; }
-\t\t\tif (w > max_word) { max_word = w; }
+\t\t\tconst uint32_t mw = w >> 6;
+\t\t\tt->touched_meta_bits[mw] |= 1ull << (w & 63u);
+\t\t\tif (mw < min_meta) { min_meta = mw; }
+\t\t\tif (mw > max_meta) { max_meta = mw; }
 \t\t\ti = t->parent_of_internal[i];
 \t\t}
 \t}
-\tif (min_word > max_word) { return; }
-\t/* Refit phase: iterate words from max_word down to min_word. Within
-\t * each word, pop set bits highest-to-lowest via __builtin_clzll. This
-\t * yields indices in strictly descending order — pre-order DFS gives
-\t * parent < child, so children are visited before their parents and
-\t * every union reads already-refit children. No sort step. Bits are
-\t * cleared as they are consumed; at loop exit the bitmap is zero. */
-\tfor (uint32_t w = max_word + 1u; w > min_word; ) {
-\t\tw--;
-\t\tuint64_t bits = t->touched_bits[w];
-\t\twhile (bits != 0ull) {
-\t\t\tconst uint32_t b = 63u - (uint32_t)__builtin_clzll(bits);
-\t\t\tbits &= ~(1ull << b);
-\t\t\tconst uint32_t idx = (w << 6) | b;
-\t\t\tpbvh_internal_t *n = &t->internals[idx];
-\t\t\tif (n->left == PBVH_NULL_NODE && n->right == PBVH_NULL_NODE) {
-\t\t\t\tconst uint32_t o = n->offset;
-\t\t\t\tconst uint32_t s = n->span;
-\t\t\t\tif (s == 0u) { continue; }
-\t\t\t\tAabb acc = t->nodes[t->sorted[o]].bounds;
-\t\t\t\tfor (uint32_t j = o + 1u; j < o + s; j++) {
-\t\t\t\t\tacc = aabb_union(&acc, &t->nodes[t->sorted[j]].bounds);
+\tif (min_meta > max_meta) { return; }
+\t/* Refit phase: iterate meta-words from max_meta down to min_meta, and
+\t * within each, pop set bits highest-to-lowest via clzll to get the
+\t * (also-descending) indices of non-empty touched_bits words. Within
+\t * each such word, pop bits highest-to-lowest again to get descending
+\t * internal ids. Pre-order DFS gives parent < child, so this strict
+\t * descending-id walk visits children before parents and every union
+\t * reads already-refit children. Zero sort steps, zero wasted probes —
+\t * empty touched_bits words are never even loaded. Bits self-clear
+\t * as consumed. */
+\tfor (uint32_t mw = max_meta + 1u; mw > min_meta; ) {
+\t\tmw--;
+\t\tuint64_t meta = t->touched_meta_bits[mw];
+\t\twhile (meta != 0ull) {
+\t\t\tconst uint32_t mb = 63u - (uint32_t)__builtin_clzll(meta);
+\t\t\tmeta &= ~(1ull << mb);
+\t\t\tconst uint32_t w = (mw << 6) | mb;
+\t\t\tuint64_t bits = t->touched_bits[w];
+\t\t\twhile (bits != 0ull) {
+\t\t\t\tconst uint32_t b = 63u - (uint32_t)__builtin_clzll(bits);
+\t\t\t\tbits &= ~(1ull << b);
+\t\t\t\tconst uint32_t idx = (w << 6) | b;
+\t\t\t\tpbvh_internal_t *n = &t->internals[idx];
+\t\t\t\tif (n->left == PBVH_NULL_NODE && n->right == PBVH_NULL_NODE) {
+\t\t\t\t\tconst uint32_t o = n->offset;
+\t\t\t\t\tconst uint32_t s = n->span;
+\t\t\t\t\tif (s == 0u) { continue; }
+\t\t\t\t\tAabb acc = t->nodes[t->sorted[o]].bounds;
+\t\t\t\t\tfor (uint32_t j = o + 1u; j < o + s; j++) {
+\t\t\t\t\t\tacc = aabb_union(&acc, &t->nodes[t->sorted[j]].bounds);
+\t\t\t\t\t}
+\t\t\t\t\tn->bounds = acc;
+\t\t\t\t} else if (n->left != PBVH_NULL_NODE && n->right != PBVH_NULL_NODE) {
+\t\t\t\t\tn->bounds = aabb_union(&t->internals[n->left].bounds,
+\t\t\t\t\t\t\t&t->internals[n->right].bounds);
+\t\t\t\t} else {
+\t\t\t\t\tconst pbvh_internal_id_t only =
+\t\t\t\t\t\t\t(n->left != PBVH_NULL_NODE) ? n->left : n->right;
+\t\t\t\t\tn->bounds = t->internals[only].bounds;
 \t\t\t\t}
-\t\t\t\tn->bounds = acc;
-\t\t\t} else if (n->left != PBVH_NULL_NODE && n->right != PBVH_NULL_NODE) {
-\t\t\t\tn->bounds = aabb_union(&t->internals[n->left].bounds,
-\t\t\t\t\t\t&t->internals[n->right].bounds);
-\t\t\t} else {
-\t\t\t\tconst pbvh_internal_id_t only =
-\t\t\t\t\t\t(n->left != PBVH_NULL_NODE) ? n->left : n->right;
-\t\t\t\tn->bounds = t->internals[only].bounds;
 \t\t\t}
+\t\t\tt->touched_bits[w] = 0ull;
 \t\t}
-\t\tt->touched_bits[w] = 0ull;
+\t\tt->touched_meta_bits[mw] = 0ull;
 \t}
 }
 
