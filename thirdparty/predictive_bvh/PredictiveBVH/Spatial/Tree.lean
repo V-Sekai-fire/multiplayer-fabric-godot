@@ -612,6 +612,62 @@ theorem buildSubtree_preserves_prefix (leaves : Array PbvhLeaf)
         rw [Array.getElem_set_ne (h := hne)]
         exact hbridge
 
+-- ── Tier 2 helpers (aabbContains algebra) ──────────────────────────────────
+
+/-- `aabbContains` is reflexive. -/
+theorem aabbContains_refl (a : BoundingBox) : aabbContains a a := by
+  simp [aabbContains]
+
+/-- `aabbContains` is transitive: outer ⊇ mid ⊇ inner ⟹ outer ⊇ inner. -/
+theorem aabbContains_trans {a b c : BoundingBox}
+    (hab : aabbContains a b) (hbc : aabbContains b c) : aabbContains a c := by
+  simp only [aabbContains] at *
+  obtain ⟨h1, h2, h3, h4, h5, h6⟩ := hab
+  obtain ⟨k1, k2, k3, k4, k5, k6⟩ := hbc
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩ <;> omega
+
+/-- Containment is preserved by unioning more on the outer. Direct from
+    reflexivity + `unionBounds_contains_left` + transitivity. -/
+theorem aabbContains_unionBounds_mono_left (a b x : BoundingBox)
+    (h : aabbContains a x) : aabbContains (unionBounds a b) x :=
+  aabbContains_trans (unionBounds_contains_left a b) h
+
+/-- A `foldl` of `unionBounds` contains its initial accumulator. -/
+theorem foldl_unionBounds_contains_init (f : Nat → BoundingBox) :
+    ∀ (l : List Nat) (init : BoundingBox),
+      aabbContains (l.foldl (fun acc j => unionBounds acc (f j)) init) init := by
+  intro l
+  induction l with
+  | nil => intro init; exact aabbContains_refl init
+  | cons x xs ih =>
+    intro init
+    -- step extends init by `unionBounds init (f x)`, which contains init by left,
+    -- then IH on the tail.
+    have hstep : aabbContains (unionBounds init (f x)) init :=
+      unionBounds_contains_left _ _
+    have := ih (unionBounds init (f x))
+    exact aabbContains_trans this hstep
+
+/-- A `foldl` of `unionBounds` contains every element `f j` for `j ∈ l`. -/
+theorem foldl_unionBounds_contains_item (f : Nat → BoundingBox) :
+    ∀ (l : List Nat) (init : BoundingBox) (j : Nat), j ∈ l →
+      aabbContains (l.foldl (fun acc k => unionBounds acc (f k)) init) (f j) := by
+  intro l
+  induction l with
+  | nil => intro _ _ hj; exact absurd hj List.not_mem_nil
+  | cons x xs ih =>
+    intro init j hj
+    simp only [List.mem_cons] at hj
+    rcases hj with heq | htail
+    · -- j = x: after one step, acc = unionBounds init (f x) ⊇ f x; foldl preserves.
+      subst heq
+      have hone : aabbContains (unionBounds init (f j)) (f j) :=
+        unionBounds_contains_right _ _
+      have hrest := foldl_unionBounds_contains_init f xs (unionBounds init (f j))
+      exact aabbContains_trans hrest hone
+    · -- j ∈ xs: recurse.
+      exact ih (unionBounds init (f x)) j htail
+
 /-- Root-level skip monotonicity: the root node returned by `buildSubtree`
     has `root < skip[root] ≤ result.size`. Direct composition of
     `buildSubtree_root`, `buildSubtree_root_lt_size`, and
