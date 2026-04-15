@@ -22,34 +22,39 @@ typedef uint32_t pbvh_internal_id_t;
 
 #define PBVH_NULL_NODE ((pbvh_node_id_t)0xFFFFFFFFu)
 
-typedef struct pbvh_node {
-\tAabb bounds; /* 96 B (R128 × 6) */
+template <typename T>
+struct pbvh_node {
+\tAabbT<T> bounds; /* 96 B (T × 6) */
 \tpbvh_eclass_id_t eclass;
 \tpbvh_node_id_t next_free; /* PBVH_NULL_NODE when live */
 \tuint32_t is_leaf;
 \tuint32_t hilbert; /* 30-bit Hilbert code; sort key */
-} pbvh_node_t;
+};
+using pbvh_node_t = pbvh_node<R128>;
 
 /* Hilbert-radix internal node over sorted[]. Stored in pre-order DFS, so the
  * array itself is a nested set: the subtree rooted at internals[i] occupies
  * contiguous indices [i, skip). On each node, (offset, span) is the
  * corresponding range inside t->sorted[] — the leaf-side nested set. */
-typedef struct pbvh_internal {
-\tAabb bounds; /* union of every leaf AABB in [offset, offset+span) */
+template <typename T>
+struct pbvh_internal {
+\tAabbT<T> bounds; /* union of every leaf AABB in [offset, offset+span) */
 \tuint32_t offset; /* start index into t->sorted[] */
 \tuint32_t span; /* leaf count in this subtree */
 \tpbvh_internal_id_t skip; /* next DFS index after this subtree ends */
 \tpbvh_internal_id_t left; /* PBVH_NULL_NODE when this is a leaf-range node */
 \tpbvh_internal_id_t right; /* PBVH_NULL_NODE when this is a leaf-range node */
-} pbvh_internal_t;
+};
+using pbvh_internal_t = pbvh_internal<R128>;
 
 typedef struct pbvh_dirty_leaf {
 \tpbvh_node_id_t leaf_id;
 \tuint32_t old_hilbert;
 } pbvh_dirty_leaf_t;
 
-typedef struct pbvh_tree {
-\tpbvh_node_t *nodes;
+template <typename T>
+struct pbvh_tree {
+\tpbvh_node<T> *nodes;
 \tuint32_t capacity;
 \tuint32_t count;
 \tpbvh_node_id_t root;
@@ -60,7 +65,7 @@ typedef struct pbvh_tree {
 \tuint32_t last_visits; /* debug: # of leaves AABB-tested in the last query */
 \t/* Hilbert-radix internal tree over sorted[]. Mandatory for _n and _b
 \t * queries. Caller-owned; size at least 2*capacity covers any split shape. */
-\tpbvh_internal_t *internals;
+\tpbvh_internal<T> *internals;
 \tuint32_t internal_capacity;
 \tuint32_t internal_count;
 \tpbvh_internal_id_t internal_root;
@@ -86,7 +91,8 @@ typedef struct pbvh_tree {
 \t * [min_word..max_word] range. Kills the N/64 term in the scan phase,
 \t * leaving a strict O(K + n_marked) refit bound. */
 \tuint64_t *touched_meta_bits; /* size ((internal_capacity + 63)/64 + 63)/64, caller-owned */
-} pbvh_tree_t;
+};
+using pbvh_tree_t = pbvh_tree<R128>;
 
 /* ============================================================================
  * BUCKET AUTO-TUNE (Phase 2e)

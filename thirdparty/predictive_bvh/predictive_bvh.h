@@ -106,58 +106,63 @@ static inline float r128_to_float(R128 a) {
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* Ghost expansion v*d + a_half*d^2. Proved: expansion_covers_k_ticks */
-static inline R128 ghost_bound(R128 v, R128 a_half, R128 ticks_ahead) {
-    R128 t0 = r128_mul(v, ticks_ahead);
-    R128 t1 = r128_mul(a_half, ticks_ahead);
-    R128 t2 = r128_mul(t1, ticks_ahead);
-    R128 t3 = r128_add(t0, t2);
+template <typename T>
+static inline T ghost_bound(T v, T a_half, T ticks_ahead) {
+    T t0 = (v * ticks_ahead);
+    T t1 = (a_half * ticks_ahead);
+    T t2 = (t1 * ticks_ahead);
+    T t3 = (t0 + t2);
     return t3;
 }
 
 /* Surface area 2(wh+hd+wd). Proved: surfaceArea_nonneg */
-static inline R128 surface_area(R128 w, R128 h, R128 d) {
-    R128 t0 = r128_mul(w, h);
-    R128 t1 = r128_mul(h, d);
-    R128 t2 = r128_add(t0, t1);
-    R128 t3 = r128_mul(w, d);
-    R128 t4 = r128_add(t2, t3);
-    R128 t5 = r128_mul(r128_from_int(2LL), t4);
+template <typename T>
+static inline T surface_area(T w, T h, T d) {
+    T t0 = (w * h);
+    T t1 = (h * d);
+    T t2 = (t0 + t1);
+    T t3 = (w * d);
+    T t4 = (t2 + t3);
+    T t5 = (T(2) * t4);
     return t5;
 }
 
 /* Ghost AABB min bound per axis. Proved: expansion_covers_k_ticks */
-static inline R128 ghost_aabb_min(R128 center, R128 ext, R128 v, R128 a_half, R128 tau) {
-    R128 t0 = r128_mul(r128_neg(R128_ONE), ext);
-    R128 t1 = r128_add(center, t0);
-    R128 t2 = r128_mul(v, tau);
-    R128 t3 = r128_mul(a_half, tau);
-    R128 t4 = r128_mul(t3, tau);
-    R128 t5 = r128_add(t2, t4);
-    R128 t6 = r128_mul(r128_neg(R128_ONE), t5);
-    R128 t7 = r128_add(t1, t6);
+template <typename T>
+static inline T ghost_aabb_min(T center, T ext, T v, T a_half, T tau) {
+    T t0 = (T(-1) * ext);
+    T t1 = (center + t0);
+    T t2 = (v * tau);
+    T t3 = (a_half * tau);
+    T t4 = (t3 * tau);
+    T t5 = (t2 + t4);
+    T t6 = (T(-1) * t5);
+    T t7 = (t1 + t6);
     return t7;
 }
 
 /* Ghost AABB max bound per axis. Proved: expansion_covers_k_ticks */
-static inline R128 ghost_aabb_max(R128 center, R128 ext, R128 v, R128 a_half, R128 tau) {
-    R128 t0 = r128_add(center, ext);
-    R128 t1 = r128_mul(v, tau);
-    R128 t2 = r128_mul(a_half, tau);
-    R128 t3 = r128_mul(t2, tau);
-    R128 t4 = r128_add(t1, t3);
-    R128 t5 = r128_add(t0, t4);
+template <typename T>
+static inline T ghost_aabb_max(T center, T ext, T v, T a_half, T tau) {
+    T t0 = (center + ext);
+    T t1 = (v * tau);
+    T t2 = (a_half * tau);
+    T t3 = (t2 * tau);
+    T t4 = (t1 + t3);
+    T t5 = (t0 + t4);
     return t5;
 }
 
 /* Plane corner valuation: nx*x + ny*y + nz*z + d.
    Pure ring polynomial, EGraph-CSE'd. Used by pbvh_half_space_keeps_. */
-static inline R128 pbvh_plane_corner_val(R128 nx, R128 ny, R128 nz, R128 d, R128 x, R128 y, R128 z) {
-    R128 t0 = r128_mul(nx, x);
-    R128 t1 = r128_mul(ny, y);
-    R128 t2 = r128_add(t0, t1);
-    R128 t3 = r128_mul(nz, z);
-    R128 t4 = r128_add(t2, t3);
-    R128 t5 = r128_add(t4, d);
+template <typename T>
+static inline T pbvh_plane_corner_val(T nx, T ny, T nz, T d, T x, T y, T z) {
+    T t0 = (nx * x);
+    T t1 = (ny * y);
+    T t2 = (t0 + t1);
+    T t3 = (nz * z);
+    T t4 = (t2 + t3);
+    T t5 = (t4 + d);
     return t5;
 }
 
@@ -168,21 +173,23 @@ static inline R128 r128_sign_bit(R128 d) {
 }
 
 /* Branchless min via Z<->GF(2) bridge. sign = sign_bit(b-a). */
-static inline R128 ring_min_r128(R128 a, R128 b, R128 sign) {
-    R128 t0 = r128_mul(r128_neg(R128_ONE), a);
-    R128 t1 = r128_add(b, t0);
-    R128 t2 = r128_mul(sign, t1);
-    R128 t3 = r128_add(a, t2);
+template <typename T>
+static inline T ring_min_r128(T a, T b, T sign) {
+    T t0 = (T(-1) * a);
+    T t1 = (b + t0);
+    T t2 = (sign * t1);
+    T t3 = (a + t2);
     return t3;
 }
 
 /* Branchless max via Z<->GF(2) bridge. sign = sign_bit(b-a). */
-static inline R128 ring_max_r128(R128 a, R128 b, R128 sign) {
-    R128 t0 = r128_mul(r128_neg(R128_ONE), a);
-    R128 t1 = r128_add(b, t0);
-    R128 t2 = r128_mul(sign, t1);
-    R128 t3 = r128_mul(r128_neg(R128_ONE), t2);
-    R128 t4 = r128_add(b, t3);
+template <typename T>
+static inline T ring_max_r128(T a, T b, T sign) {
+    T t0 = (T(-1) * a);
+    T t1 = (b + t0);
+    T t2 = (sign * t1);
+    T t3 = (T(-1) * t2);
+    T t4 = (b + t3);
     return t4;
 }
 
@@ -196,11 +203,13 @@ static inline R128 pbvh_r128_max(R128 a, R128 b) {
 }
 
 /* Source: Types.lean:28 Proved: unionBounds_contains_left/right */
-typedef struct Aabb {
-    R128 min_x, max_x;
-    R128 min_y, max_y;
-    R128 min_z, max_z;
-} Aabb;
+template <typename T>
+struct AabbT {
+    T min_x, max_x;
+    T min_y, max_y;
+    T min_z, max_z;
+};
+using Aabb = AabbT<R128>;
 
 /* Aabb union — hot-path short-circuit form (called per refit). Proved
    equivalent to ring_min_r128 / ring_max_r128 via Z<->GF(2) bridge. */
@@ -218,24 +227,25 @@ static inline Aabb aabb_union(const Aabb *a, const Aabb *o) {
 /* Ring-polynomial provenance export: Π (1 - sign_bit(dᵢ)) over 6 axis diffs.
    Proved equivalent to short-circuit r128_le chains below via bitDecompose;
    see aabbOverlapsExpr in Codegen/CodeGen.lean + HilbertBroadphase.lean. */
-static inline R128 aabb_overlaps_ring(R128 a_min_x, R128 a_max_x, R128 a_min_y, R128 a_max_y, R128 a_min_z, R128 a_max_z, R128 b_min_x, R128 b_max_x, R128 b_min_y, R128 b_max_y, R128 b_min_z, R128 b_max_z, R128 s0, R128 s1, R128 s2, R128 s3, R128 s4, R128 s5) {
-    R128 t0 = r128_mul(r128_neg(R128_ONE), s0);
-    R128 t1 = r128_add(R128_ONE, t0);
-    R128 t2 = r128_mul(r128_neg(R128_ONE), s1);
-    R128 t3 = r128_add(R128_ONE, t2);
-    R128 t4 = r128_mul(t1, t3);
-    R128 t5 = r128_mul(r128_neg(R128_ONE), s2);
-    R128 t6 = r128_add(R128_ONE, t5);
-    R128 t7 = r128_mul(t4, t6);
-    R128 t8 = r128_mul(r128_neg(R128_ONE), s3);
-    R128 t9 = r128_add(R128_ONE, t8);
-    R128 t10 = r128_mul(t7, t9);
-    R128 t11 = r128_mul(r128_neg(R128_ONE), s4);
-    R128 t12 = r128_add(R128_ONE, t11);
-    R128 t13 = r128_mul(t10, t12);
-    R128 t14 = r128_mul(r128_neg(R128_ONE), s5);
-    R128 t15 = r128_add(R128_ONE, t14);
-    R128 t16 = r128_mul(t13, t15);
+template <typename T>
+static inline T aabb_overlaps_ring(T a_min_x, T a_max_x, T a_min_y, T a_max_y, T a_min_z, T a_max_z, T b_min_x, T b_max_x, T b_min_y, T b_max_y, T b_min_z, T b_max_z, T s0, T s1, T s2, T s3, T s4, T s5) {
+    T t0 = (T(-1) * s0);
+    T t1 = (T(1) + t0);
+    T t2 = (T(-1) * s1);
+    T t3 = (T(1) + t2);
+    T t4 = (t1 * t3);
+    T t5 = (T(-1) * s2);
+    T t6 = (T(1) + t5);
+    T t7 = (t4 * t6);
+    T t8 = (T(-1) * s3);
+    T t9 = (T(1) + t8);
+    T t10 = (t7 * t9);
+    T t11 = (T(-1) * s4);
+    T t12 = (T(1) + t11);
+    T t13 = (t10 * t12);
+    T t14 = (T(-1) * s5);
+    T t15 = (T(1) + t14);
+    T t16 = (t13 * t15);
     return t16;
 }
 
@@ -441,46 +451,53 @@ static inline uint64_t pbvh_accel_floor_um_per_tick2(uint32_t hz) {
    actual physics tick rate instead of the default baked into Types.lean.
    ══════════════════════════════════════════════════════════════════════════ */
 
-static inline R128 pbvh_eml_c1_velocity_injection_gap(R128 v_true, R128 v_max, R128 delta) {
-    R128 t0 = r128_mul(r128_neg(R128_ONE), v_max);
-    R128 t1 = r128_add(v_true, t0);
-    R128 t2 = r128_mul(t1, delta);
+template <typename T>
+static inline T pbvh_eml_c1_velocity_injection_gap(T v_true, T v_max, T delta) {
+    T t0 = (T(-1) * v_max);
+    T t1 = (v_true + t0);
+    T t2 = (t1 * delta);
     return t2;
 }
 
-static inline R128 pbvh_eml_c2_acceleration_underreport_gap(R128 accel_floor, R128 delta) {
-    R128 t0 = r128_mul(delta, delta);
-    R128 t1 = r128_mul(accel_floor, t0);
+template <typename T>
+static inline T pbvh_eml_c2_acceleration_underreport_gap(T accel_floor, T delta) {
+    T t0 = (delta * delta);
+    T t1 = (accel_floor * t0);
     return t1;
 }
 
-static inline R128 pbvh_eml_c3_portal_discontinuity_gap(R128 jump_um, R128 ghost_bound_um) {
-    R128 t0 = r128_mul(ghost_bound_um, r128_neg(R128_ONE));
-    R128 t1 = r128_add(jump_um, t0);
+template <typename T>
+static inline T pbvh_eml_c3_portal_discontinuity_gap(T jump_um, T ghost_bound_um) {
+    T t0 = (ghost_bound_um * T(-1));
+    T t1 = (jump_um + t0);
     return t1;
 }
 
-static inline R128 pbvh_eml_c4_lifecycle_gap_bound(R128 v, R128 latency_ticks) {
-    R128 t0 = r128_mul(v, latency_ticks);
+template <typename T>
+static inline T pbvh_eml_c4_lifecycle_gap_bound(T v, T latency_ticks) {
+    T t0 = (v * latency_ticks);
     return t0;
 }
 
-static inline R128 pbvh_eml_c5_satellite_rtt_gap(R128 v, R128 sat_delta, R128 local_delta) {
-    R128 t0 = r128_mul(r128_neg(R128_ONE), local_delta);
-    R128 t1 = r128_add(sat_delta, t0);
-    R128 t2 = r128_mul(v, t1);
+template <typename T>
+static inline T pbvh_eml_c5_satellite_rtt_gap(T v, T sat_delta, T local_delta) {
+    T t0 = (T(-1) * local_delta);
+    T t1 = (sat_delta + t0);
+    T t2 = (v * t1);
     return t2;
 }
 
-static inline R128 pbvh_eml_c6_coord_frame_offset_gap(R128 chunk_origin_offset_um) {
+template <typename T>
+static inline T pbvh_eml_c6_coord_frame_offset_gap(T chunk_origin_offset_um) {
 
     return chunk_origin_offset_um;
 }
 
-static inline R128 pbvh_eml_c7_segment_boundary_gap(R128 v_funnel, R128 v_max, R128 delta) {
-    R128 t0 = r128_mul(r128_neg(R128_ONE), v_max);
-    R128 t1 = r128_add(v_funnel, t0);
-    R128 t2 = r128_mul(t1, delta);
+template <typename T>
+static inline T pbvh_eml_c7_segment_boundary_gap(T v_funnel, T v_max, T delta) {
+    T t0 = (T(-1) * v_max);
+    T t1 = (v_funnel + t0);
+    T t2 = (t1 * delta);
     return t2;
 }
 
@@ -488,115 +505,128 @@ static inline R128 pbvh_eml_c7_segment_boundary_gap(R128 v_funnel, R128 v_max, R
    AMOLEAN E-GRAPH OPTIMIZED KERNELS (R128)
    ══════════════════════════════════════════════════════════════════════════ */
 
-static inline R128 predictive_cost(R128 min_x, R128 max_x, R128 min_y, R128 max_y, R128 min_z, R128 max_z, R128 vx, R128 vy, R128 vz, R128 ax, R128 ay, R128 az, R128 ticks_ahead) {
-    R128 t0 = r128_mul(r128_neg(R128_ONE), min_x);
-    R128 t1 = r128_add(max_x, t0);
-    R128 t2 = r128_mul(vx, ticks_ahead);
-    R128 t3 = r128_add(t1, t2);
-    R128 t4 = r128_mul(ticks_ahead, ticks_ahead);
-    R128 t5 = r128_mul(ax, t4);
-    R128 t6 = r128_add(t3, t5);
-    R128 t7 = r128_mul(r128_neg(R128_ONE), min_y);
-    R128 t8 = r128_add(max_y, t7);
-    R128 t9 = r128_mul(vy, ticks_ahead);
-    R128 t10 = r128_add(t8, t9);
-    R128 t11 = r128_mul(ay, t4);
-    R128 t12 = r128_add(t10, t11);
-    R128 t13 = r128_mul(t6, t12);
-    R128 t14 = r128_mul(r128_neg(R128_ONE), min_z);
-    R128 t15 = r128_add(max_z, t14);
-    R128 t16 = r128_mul(vz, ticks_ahead);
-    R128 t17 = r128_add(t15, t16);
-    R128 t18 = r128_mul(az, t4);
-    R128 t19 = r128_add(t17, t18);
-    R128 t20 = r128_mul(t12, t19);
-    R128 t21 = r128_add(t13, t20);
-    R128 t22 = r128_mul(t6, t19);
-    R128 t23 = r128_add(t21, t22);
-    R128 t24 = r128_mul(r128_from_int(2LL), t23);
-    R128 t25 = r128_add(t24, R128_ONE);
+template <typename T>
+static inline T predictive_cost(T min_x, T max_x, T min_y, T max_y, T min_z, T max_z, T vx, T vy, T vz, T ax, T ay, T az, T ticks_ahead) {
+    T t0 = (T(-1) * min_x);
+    T t1 = (max_x + t0);
+    T t2 = (vx * ticks_ahead);
+    T t3 = (t1 + t2);
+    T t4 = (ticks_ahead * ticks_ahead);
+    T t5 = (ax * t4);
+    T t6 = (t3 + t5);
+    T t7 = (T(-1) * min_y);
+    T t8 = (max_y + t7);
+    T t9 = (vy * ticks_ahead);
+    T t10 = (t8 + t9);
+    T t11 = (ay * t4);
+    T t12 = (t10 + t11);
+    T t13 = (t6 * t12);
+    T t14 = (T(-1) * min_z);
+    T t15 = (max_z + t14);
+    T t16 = (vz * ticks_ahead);
+    T t17 = (t15 + t16);
+    T t18 = (az * t4);
+    T t19 = (t17 + t18);
+    T t20 = (t12 * t19);
+    T t21 = (t13 + t20);
+    T t22 = (t6 * t19);
+    T t23 = (t21 + t22);
+    T t24 = (T(2) * t23);
+    T t25 = (t24 + T(1));
     return t25;
 }
 
-static inline R128 delta_cost_1(R128 v, R128 a_half) {
-    R128 t0 = r128_add(v, a_half);
+template <typename T>
+static inline T delta_cost_1(T v, T a_half) {
+    T t0 = (v + a_half);
     return t0;
 }
 
-static inline R128 delta_cost_2(R128 v, R128 a_half) {
-    R128 t0 = r128_mul(r128_from_int(2LL), v);
-    R128 t1 = r128_mul(r128_from_int(4LL), a_half);
-    R128 t2 = r128_add(t0, t1);
+template <typename T>
+static inline T delta_cost_2(T v, T a_half) {
+    T t0 = (T(2) * v);
+    T t1 = (T(4) * a_half);
+    T t2 = (t0 + t1);
     return t2;
 }
 
-static inline R128 delta_cost_4(R128 v, R128 a_half) {
-    R128 t0 = r128_mul(r128_from_int(4LL), v);
-    R128 t1 = r128_mul(r128_from_int(16LL), a_half);
-    R128 t2 = r128_add(t0, t1);
+template <typename T>
+static inline T delta_cost_4(T v, T a_half) {
+    T t0 = (T(4) * v);
+    T t1 = (T(16) * a_half);
+    T t2 = (t0 + t1);
     return t2;
 }
 
-static inline R128 delta_cost_8(R128 v, R128 a_half) {
-    R128 t0 = r128_mul(r128_from_int(8LL), v);
-    R128 t1 = r128_mul(r128_from_int(64LL), a_half);
-    R128 t2 = r128_add(t0, t1);
+template <typename T>
+static inline T delta_cost_8(T v, T a_half) {
+    T t0 = (T(8) * v);
+    T t1 = (T(64) * a_half);
+    T t2 = (t0 + t1);
     return t2;
 }
 
-static inline R128 delta_cost_16(R128 v, R128 a_half) {
-    R128 t0 = r128_mul(r128_from_int(16LL), v);
-    R128 t1 = r128_mul(r128_from_int(256LL), a_half);
-    R128 t2 = r128_add(t0, t1);
+template <typename T>
+static inline T delta_cost_16(T v, T a_half) {
+    T t0 = (T(16) * v);
+    T t1 = (T(256) * a_half);
+    T t2 = (t0 + t1);
     return t2;
 }
 
-static inline R128 delta_cost_24(R128 v, R128 a_half) {
-    R128 t0 = r128_mul(r128_from_int(24LL), v);
-    R128 t1 = r128_mul(r128_from_int(576LL), a_half);
-    R128 t2 = r128_add(t0, t1);
+template <typename T>
+static inline T delta_cost_24(T v, T a_half) {
+    T t0 = (T(24) * v);
+    T t1 = (T(576) * a_half);
+    T t2 = (t0 + t1);
     return t2;
 }
 
-static inline R128 delta_cost_32(R128 v, R128 a_half) {
-    R128 t0 = r128_mul(r128_from_int(32LL), v);
-    R128 t1 = r128_mul(r128_from_int(1024LL), a_half);
-    R128 t2 = r128_add(t0, t1);
+template <typename T>
+static inline T delta_cost_32(T v, T a_half) {
+    T t0 = (T(32) * v);
+    T t1 = (T(1024) * a_half);
+    T t2 = (t0 + t1);
     return t2;
 }
 
-static inline R128 delta_cost_48(R128 v, R128 a_half) {
-    R128 t0 = r128_mul(r128_from_int(48LL), v);
-    R128 t1 = r128_mul(r128_from_int(2304LL), a_half);
-    R128 t2 = r128_add(t0, t1);
+template <typename T>
+static inline T delta_cost_48(T v, T a_half) {
+    T t0 = (T(48) * v);
+    T t1 = (T(2304) * a_half);
+    T t2 = (t0 + t1);
     return t2;
 }
 
-static inline R128 delta_cost_64(R128 v, R128 a_half) {
-    R128 t0 = r128_mul(r128_from_int(64LL), v);
-    R128 t1 = r128_mul(r128_from_int(4096LL), a_half);
-    R128 t2 = r128_add(t0, t1);
+template <typename T>
+static inline T delta_cost_64(T v, T a_half) {
+    T t0 = (T(64) * v);
+    T t1 = (T(4096) * a_half);
+    T t2 = (t0 + t1);
     return t2;
 }
 
-static inline R128 delta_cost_80(R128 v, R128 a_half) {
-    R128 t0 = r128_mul(r128_from_int(80LL), v);
-    R128 t1 = r128_mul(r128_from_int(6400LL), a_half);
-    R128 t2 = r128_add(t0, t1);
+template <typename T>
+static inline T delta_cost_80(T v, T a_half) {
+    T t0 = (T(80) * v);
+    T t1 = (T(6400) * a_half);
+    T t2 = (t0 + t1);
     return t2;
 }
 
-static inline R128 delta_cost_100(R128 v, R128 a_half) {
-    R128 t0 = r128_mul(r128_from_int(100LL), v);
-    R128 t1 = r128_mul(r128_from_int(10000LL), a_half);
-    R128 t2 = r128_add(t0, t1);
+template <typename T>
+static inline T delta_cost_100(T v, T a_half) {
+    T t0 = (T(100) * v);
+    T t1 = (T(10000) * a_half);
+    T t2 = (t0 + t1);
     return t2;
 }
 
-static inline R128 delta_cost_120(R128 v, R128 a_half) {
-    R128 t0 = r128_mul(r128_from_int(120LL), v);
-    R128 t1 = r128_mul(r128_from_int(14400LL), a_half);
-    R128 t2 = r128_add(t0, t1);
+template <typename T>
+static inline T delta_cost_120(T v, T a_half) {
+    T t0 = (T(120) * v);
+    T t1 = (T(14400) * a_half);
+    T t2 = (t0 + t1);
     return t2;
 }
 
@@ -625,108 +655,114 @@ static inline uint32_t per_entity_delta_poly(R128 v, R128 a_half) {
      h00, h01, h10, h11 : divide result by denom^5
      h20, h21            : divide result by 2*denom^5
    Source of truth: PredictiveBVH.QuinticHermite (C3 proofs in Lean). */
-static inline R128 bvh_h00(R128 numer, R128 denom) {
-    R128 t0 = pow_int_r128(denom, 5);
-    R128 t1 = pow_int_r128(numer, 3);
-    R128 t2 = r128_mul(r128_from_int(10LL), t1);
-    R128 t3 = r128_mul(denom, denom);
-    R128 t4 = r128_mul(t2, t3);
-    R128 t5 = r128_mul(r128_neg(R128_ONE), t4);
-    R128 t6 = r128_add(t0, t5);
-    R128 t7 = pow_int_r128(numer, 4);
-    R128 t8 = r128_mul(r128_from_int(15LL), t7);
-    R128 t9 = r128_mul(t8, denom);
-    R128 t10 = r128_add(t6, t9);
-    R128 t11 = pow_int_r128(numer, 5);
-    R128 t12 = r128_mul(r128_from_int(6LL), t11);
-    R128 t13 = r128_mul(r128_neg(R128_ONE), t12);
-    R128 t14 = r128_add(t10, t13);
+template <typename T>
+static inline T bvh_h00(T numer, T denom) {
+    T t0 = pow_int_T(denom, 5);
+    T t1 = pow_int_T(numer, 3);
+    T t2 = (T(10) * t1);
+    T t3 = (denom * denom);
+    T t4 = (t2 * t3);
+    T t5 = (T(-1) * t4);
+    T t6 = (t0 + t5);
+    T t7 = pow_int_T(numer, 4);
+    T t8 = (T(15) * t7);
+    T t9 = (t8 * denom);
+    T t10 = (t6 + t9);
+    T t11 = pow_int_T(numer, 5);
+    T t12 = (T(6) * t11);
+    T t13 = (T(-1) * t12);
+    T t14 = (t10 + t13);
     return t14;
 }
 
-static inline R128 bvh_h01(R128 numer, R128 denom) {
-    R128 t0 = pow_int_r128(numer, 3);
-    R128 t1 = r128_mul(r128_from_int(10LL), t0);
-    R128 t2 = r128_mul(denom, denom);
-    R128 t3 = r128_mul(t1, t2);
-    R128 t4 = pow_int_r128(numer, 4);
-    R128 t5 = r128_mul(r128_from_int(15LL), t4);
-    R128 t6 = r128_mul(t5, denom);
-    R128 t7 = r128_mul(r128_neg(R128_ONE), t6);
-    R128 t8 = r128_add(t3, t7);
-    R128 t9 = pow_int_r128(numer, 5);
-    R128 t10 = r128_mul(r128_from_int(6LL), t9);
-    R128 t11 = r128_add(t8, t10);
+template <typename T>
+static inline T bvh_h01(T numer, T denom) {
+    T t0 = pow_int_T(numer, 3);
+    T t1 = (T(10) * t0);
+    T t2 = (denom * denom);
+    T t3 = (t1 * t2);
+    T t4 = pow_int_T(numer, 4);
+    T t5 = (T(15) * t4);
+    T t6 = (t5 * denom);
+    T t7 = (T(-1) * t6);
+    T t8 = (t3 + t7);
+    T t9 = pow_int_T(numer, 5);
+    T t10 = (T(6) * t9);
+    T t11 = (t8 + t10);
     return t11;
 }
 
-static inline R128 bvh_h10(R128 numer, R128 denom) {
-    R128 t0 = pow_int_r128(denom, 4);
-    R128 t1 = r128_mul(numer, t0);
-    R128 t2 = pow_int_r128(numer, 3);
-    R128 t3 = r128_mul(r128_from_int(6LL), t2);
-    R128 t4 = r128_mul(denom, denom);
-    R128 t5 = r128_mul(t3, t4);
-    R128 t6 = r128_mul(r128_neg(R128_ONE), t5);
-    R128 t7 = r128_add(t1, t6);
-    R128 t8 = pow_int_r128(numer, 4);
-    R128 t9 = r128_mul(r128_from_int(8LL), t8);
-    R128 t10 = r128_mul(t9, denom);
-    R128 t11 = r128_add(t7, t10);
-    R128 t12 = pow_int_r128(numer, 5);
-    R128 t13 = r128_mul(r128_from_int(3LL), t12);
-    R128 t14 = r128_mul(r128_neg(R128_ONE), t13);
-    R128 t15 = r128_add(t11, t14);
+template <typename T>
+static inline T bvh_h10(T numer, T denom) {
+    T t0 = pow_int_T(denom, 4);
+    T t1 = (numer * t0);
+    T t2 = pow_int_T(numer, 3);
+    T t3 = (T(6) * t2);
+    T t4 = (denom * denom);
+    T t5 = (t3 * t4);
+    T t6 = (T(-1) * t5);
+    T t7 = (t1 + t6);
+    T t8 = pow_int_T(numer, 4);
+    T t9 = (T(8) * t8);
+    T t10 = (t9 * denom);
+    T t11 = (t7 + t10);
+    T t12 = pow_int_T(numer, 5);
+    T t13 = (T(3) * t12);
+    T t14 = (T(-1) * t13);
+    T t15 = (t11 + t14);
     return t15;
 }
 
-static inline R128 bvh_h11(R128 numer, R128 denom) {
-    R128 t0 = pow_int_r128(numer, 3);
-    R128 t1 = r128_mul(r128_neg(r128_from_int(4LL)), t0);
-    R128 t2 = r128_mul(denom, denom);
-    R128 t3 = r128_mul(t1, t2);
-    R128 t4 = pow_int_r128(numer, 4);
-    R128 t5 = r128_mul(r128_from_int(7LL), t4);
-    R128 t6 = r128_mul(t5, denom);
-    R128 t7 = r128_add(t3, t6);
-    R128 t8 = pow_int_r128(numer, 5);
-    R128 t9 = r128_mul(r128_from_int(3LL), t8);
-    R128 t10 = r128_mul(r128_neg(R128_ONE), t9);
-    R128 t11 = r128_add(t7, t10);
+template <typename T>
+static inline T bvh_h11(T numer, T denom) {
+    T t0 = pow_int_T(numer, 3);
+    T t1 = (T(-4) * t0);
+    T t2 = (denom * denom);
+    T t3 = (t1 * t2);
+    T t4 = pow_int_T(numer, 4);
+    T t5 = (T(7) * t4);
+    T t6 = (t5 * denom);
+    T t7 = (t3 + t6);
+    T t8 = pow_int_T(numer, 5);
+    T t9 = (T(3) * t8);
+    T t10 = (T(-1) * t9);
+    T t11 = (t7 + t10);
     return t11;
 }
 
-static inline R128 bvh_h20(R128 numer, R128 denom) {
-    R128 t0 = r128_mul(numer, numer);
-    R128 t1 = pow_int_r128(denom, 3);
-    R128 t2 = r128_mul(t0, t1);
-    R128 t3 = pow_int_r128(numer, 3);
-    R128 t4 = r128_mul(r128_from_int(3LL), t3);
-    R128 t5 = r128_mul(denom, denom);
-    R128 t6 = r128_mul(t4, t5);
-    R128 t7 = r128_mul(r128_neg(R128_ONE), t6);
-    R128 t8 = r128_add(t2, t7);
-    R128 t9 = pow_int_r128(numer, 4);
-    R128 t10 = r128_mul(r128_from_int(3LL), t9);
-    R128 t11 = r128_mul(t10, denom);
-    R128 t12 = r128_add(t8, t11);
-    R128 t13 = pow_int_r128(numer, 5);
-    R128 t14 = r128_mul(r128_neg(R128_ONE), t13);
-    R128 t15 = r128_add(t12, t14);
+template <typename T>
+static inline T bvh_h20(T numer, T denom) {
+    T t0 = (numer * numer);
+    T t1 = pow_int_T(denom, 3);
+    T t2 = (t0 * t1);
+    T t3 = pow_int_T(numer, 3);
+    T t4 = (T(3) * t3);
+    T t5 = (denom * denom);
+    T t6 = (t4 * t5);
+    T t7 = (T(-1) * t6);
+    T t8 = (t2 + t7);
+    T t9 = pow_int_T(numer, 4);
+    T t10 = (T(3) * t9);
+    T t11 = (t10 * denom);
+    T t12 = (t8 + t11);
+    T t13 = pow_int_T(numer, 5);
+    T t14 = (T(-1) * t13);
+    T t15 = (t12 + t14);
     return t15;
 }
 
-static inline R128 bvh_h21(R128 numer, R128 denom) {
-    R128 t0 = pow_int_r128(numer, 3);
-    R128 t1 = r128_mul(denom, denom);
-    R128 t2 = r128_mul(t0, t1);
-    R128 t3 = pow_int_r128(numer, 4);
-    R128 t4 = r128_mul(r128_from_int(2LL), t3);
-    R128 t5 = r128_mul(t4, denom);
-    R128 t6 = r128_mul(r128_neg(R128_ONE), t5);
-    R128 t7 = r128_add(t2, t6);
-    R128 t8 = pow_int_r128(numer, 5);
-    R128 t9 = r128_add(t7, t8);
+template <typename T>
+static inline T bvh_h21(T numer, T denom) {
+    T t0 = pow_int_T(numer, 3);
+    T t1 = (denom * denom);
+    T t2 = (t0 * t1);
+    T t3 = pow_int_T(numer, 4);
+    T t4 = (T(2) * t3);
+    T t5 = (t4 * denom);
+    T t6 = (T(-1) * t5);
+    T t7 = (t2 + t6);
+    T t8 = pow_int_T(numer, 5);
+    T t9 = (t7 + t8);
     return t9;
 }
 
@@ -740,34 +776,39 @@ typedef uint32_t pbvh_internal_id_t;
 
 #define PBVH_NULL_NODE ((pbvh_node_id_t)0xFFFFFFFFu)
 
-typedef struct pbvh_node {
-	Aabb bounds; /* 96 B (R128 × 6) */
+template <typename T>
+struct pbvh_node {
+	AabbT<T> bounds; /* 96 B (T × 6) */
 	pbvh_eclass_id_t eclass;
 	pbvh_node_id_t next_free; /* PBVH_NULL_NODE when live */
 	uint32_t is_leaf;
 	uint32_t hilbert; /* 30-bit Hilbert code; sort key */
-} pbvh_node_t;
+};
+using pbvh_node_t = pbvh_node<R128>;
 
 /* Hilbert-radix internal node over sorted[]. Stored in pre-order DFS, so the
  * array itself is a nested set: the subtree rooted at internals[i] occupies
  * contiguous indices [i, skip). On each node, (offset, span) is the
  * corresponding range inside t->sorted[] — the leaf-side nested set. */
-typedef struct pbvh_internal {
-	Aabb bounds; /* union of every leaf AABB in [offset, offset+span) */
+template <typename T>
+struct pbvh_internal {
+	AabbT<T> bounds; /* union of every leaf AABB in [offset, offset+span) */
 	uint32_t offset; /* start index into t->sorted[] */
 	uint32_t span; /* leaf count in this subtree */
 	pbvh_internal_id_t skip; /* next DFS index after this subtree ends */
 	pbvh_internal_id_t left; /* PBVH_NULL_NODE when this is a leaf-range node */
 	pbvh_internal_id_t right; /* PBVH_NULL_NODE when this is a leaf-range node */
-} pbvh_internal_t;
+};
+using pbvh_internal_t = pbvh_internal<R128>;
 
 typedef struct pbvh_dirty_leaf {
 	pbvh_node_id_t leaf_id;
 	uint32_t old_hilbert;
 } pbvh_dirty_leaf_t;
 
-typedef struct pbvh_tree {
-	pbvh_node_t *nodes;
+template <typename T>
+struct pbvh_tree {
+	pbvh_node<T> *nodes;
 	uint32_t capacity;
 	uint32_t count;
 	pbvh_node_id_t root;
@@ -778,7 +819,7 @@ typedef struct pbvh_tree {
 	uint32_t last_visits; /* debug: # of leaves AABB-tested in the last query */
 	/* Hilbert-radix internal tree over sorted[]. Mandatory for _n and _b
 	 * queries. Caller-owned; size at least 2*capacity covers any split shape. */
-	pbvh_internal_t *internals;
+	pbvh_internal<T> *internals;
 	uint32_t internal_capacity;
 	uint32_t internal_count;
 	pbvh_internal_id_t internal_root;
@@ -804,7 +845,8 @@ typedef struct pbvh_tree {
 	 * [min_word..max_word] range. Kills the N/64 term in the scan phase,
 	 * leaving a strict O(K + n_marked) refit bound. */
 	uint64_t *touched_meta_bits; /* size ((internal_capacity + 63)/64 + 63)/64, caller-owned */
-} pbvh_tree_t;
+};
+using pbvh_tree_t = pbvh_tree<R128>;
 
 /* ============================================================================
  * BUCKET AUTO-TUNE (Phase 2e)

@@ -80,31 +80,27 @@ private def genRs (name : String) (params : List String) (e : Expr Int) : String
 -- Polynomial kernels operate on R128 values; non-polynomial code uses int64_t.
 
 private def llLitC (n : Int) : String :=
-  if n == 0 then "R128_ZERO"
-  else if n == 1 then "R128_ONE"
-  else if n == -1 then "r128_neg(R128_ONE)"
-  else if n >= 0 then s!"r128_from_int({n}LL)"
-  else s!"r128_neg(r128_from_int({-n}LL))"
+  s!"T({n})"
 
 private def llToC : LowLevelExpr → String
   | .litInt n    => llLitC n
   | .varRef name => name
-  | .binOp "+" l r => s!"r128_add({llToC l}, {llToC r})"
-  | .binOp "*" l r => s!"r128_mul({llToC l}, {llToC r})"
+  | .binOp "+" l r => s!"({llToC l} + {llToC r})"
+  | .binOp "*" l r => s!"({llToC l} * {llToC r})"
   | .binOp op l r => "(" ++ llToC l ++ " " ++ op ++ " " ++ llToC r ++ ")"
   | .funcCall "pow_int" [base, .litInt n] =>
-      s!"pow_int_r128({llToC base}, {n})"
+      s!"pow_int_T({llToC base}, {n})"
   | .funcCall "pow_int" args =>
-      "pow_int_r128(" ++ String.intercalate ", " (args.map llToC) ++ ")"
+      "pow_int_T(" ++ String.intercalate ", " (args.map llToC) ++ ")"
   | .funcCall fn args =>
       fn ++ "(" ++ String.intercalate ", " (args.map llToC) ++ ")"
 
 private def generateCFn (name : String) (params : List String)
     (body : LowLevelProgram) : String :=
-  let paramStr := String.intercalate ", " (params.map ("R128 " ++ ·))
+  let paramStr := String.intercalate ", " (params.map ("T " ++ ·))
   let lets := String.intercalate "\n" (body.assignments.map fun a =>
-    "    R128 " ++ a.varName ++ " = " ++ llToC a.value ++ ";")
-  "static inline R128 " ++ name ++ "(" ++ paramStr ++ ") {\n" ++
+    "    T " ++ a.varName ++ " = " ++ llToC a.value ++ ";")
+  "template <typename T>\nstatic inline T " ++ name ++ "(" ++ paramStr ++ ") {\n" ++
   lets ++ "\n    return " ++ llToC body.result ++ ";\n}"
 
 private def genC (name : String) (params : List String) (e : Expr Int) : String :=
@@ -1020,11 +1016,12 @@ private def quinticHermiteC : String :=
 
 private def aabbC : String :=
   "/* Source: Types.lean:28 Proved: unionBounds_contains_left/right */\n" ++
-  "typedef struct Aabb {\n" ++
-  "    R128 min_x, max_x;\n" ++
-  "    R128 min_y, max_y;\n" ++
-  "    R128 min_z, max_z;\n" ++
-  "} Aabb;\n\n" ++
+  "template <typename T>\nstruct AabbT {\n" ++
+  "    T min_x, max_x;\n" ++
+  "    T min_y, max_y;\n" ++
+  "    T min_z, max_z;\n" ++
+  "};\n" ++
+  "using Aabb = AabbT<R128>;\n\n" ++
   "/* Aabb union — hot-path short-circuit form (called per refit). Proved\n" ++
   "   equivalent to ring_min_r128 / ring_max_r128 via Z<->GF(2) bridge. */\n" ++
   "static inline Aabb aabb_union(const Aabb *a, const Aabb *o) {\n" ++
