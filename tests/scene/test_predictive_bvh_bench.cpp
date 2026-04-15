@@ -18,7 +18,7 @@ TEST_FORCE_LINK(test_predictive_bvh_bench)
 #include "core/math/dynamic_bvh.h"
 #include "core/os/os.h"
 
-#include "thirdparty/predictive_bvh/predictive_bvh.h"
+#include "core/math/predictive_bvh_adapter.h"
 
 #include <cmath>
 

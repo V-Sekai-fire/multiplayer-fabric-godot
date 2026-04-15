@@ -706,17 +706,17 @@ typedef struct pbvh_plane {
 
 /* Build the segment-AABB of a ray segment from (ox,oy,oz) to (tx,ty,tz).
  * Conservative broadphase: a segment hits `b` only if its AABB overlaps `b`.
- * Per-axis min/max routed through pbvh_r128_min / pbvh_r128_max (Z<->GF(2)
- * branchless ring form) — no r128_le ternaries inline. */
+ * Hot-path short-circuit form; proved equivalent to pbvh_r128_min/max
+ * (Z<->GF(2) branchless ring form) via bitDecompose. */
 static inline Aabb pbvh_segment_aabb_(R128 ox, R128 oy, R128 oz,
 \t\tR128 tx, R128 ty, R128 tz) {
 \tAabb s;
-\ts.min_x = pbvh_r128_min(ox, tx);
-\ts.max_x = pbvh_r128_max(ox, tx);
-\ts.min_y = pbvh_r128_min(oy, ty);
-\ts.max_y = pbvh_r128_max(oy, ty);
-\ts.min_z = pbvh_r128_min(oz, tz);
-\ts.max_z = pbvh_r128_max(oz, tz);
+\ts.min_x = r128_le(ox, tx) ? ox : tx;
+\ts.max_x = r128_le(ox, tx) ? tx : ox;
+\ts.min_y = r128_le(oy, ty) ? oy : ty;
+\ts.max_y = r128_le(oy, ty) ? ty : oy;
+\ts.min_z = r128_le(oz, tz) ? oz : tz;
+\ts.max_z = r128_le(oz, tz) ? tz : oz;
 \treturn s;
 }
 

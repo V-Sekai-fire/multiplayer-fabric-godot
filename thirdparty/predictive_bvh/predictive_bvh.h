@@ -202,26 +202,45 @@ typedef struct Aabb {
     R128 min_z, max_z;
 } Aabb;
 
-static inline Aabb aabb_from_floats(float x0, float x1, float y0, float y1, float z0, float z1) {
-    Aabb a; a.min_x = r128_from_int((int64_t)(x0*1000000.0f)); a.max_x = r128_from_int((int64_t)(x1*1000000.0f));
-    a.min_y = r128_from_int((int64_t)(y0*1000000.0f)); a.max_y = r128_from_int((int64_t)(y1*1000000.0f));
-    a.min_z = r128_from_int((int64_t)(z0*1000000.0f)); a.max_z = r128_from_int((int64_t)(z1*1000000.0f));
-    return a;
-}
-
-/* Aabb union via the Z<->GF(2) bridge: six branchless ring min/max ops.
-   Mirrors the Rust aabb_union_bridge path — same polynomial, same provenance. */
+/* Aabb union — hot-path short-circuit form (called per refit). Proved
+   equivalent to ring_min_r128 / ring_max_r128 via Z<->GF(2) bridge. */
 static inline Aabb aabb_union(const Aabb *a, const Aabb *o) {
     Aabb r;
-    r.min_x = pbvh_r128_min(a->min_x, o->min_x);
-    r.max_x = pbvh_r128_max(a->max_x, o->max_x);
-    r.min_y = pbvh_r128_min(a->min_y, o->min_y);
-    r.max_y = pbvh_r128_max(a->max_y, o->max_y);
-    r.min_z = pbvh_r128_min(a->min_z, o->min_z);
-    r.max_z = pbvh_r128_max(a->max_z, o->max_z);
+    r.min_x = r128_le(a->min_x, o->min_x) ? a->min_x : o->min_x;
+    r.max_x = r128_le(a->max_x, o->max_x) ? o->max_x : a->max_x;
+    r.min_y = r128_le(a->min_y, o->min_y) ? a->min_y : o->min_y;
+    r.max_y = r128_le(a->max_y, o->max_y) ? o->max_y : a->max_y;
+    r.min_z = r128_le(a->min_z, o->min_z) ? a->min_z : o->min_z;
+    r.max_z = r128_le(a->max_z, o->max_z) ? o->max_z : a->max_z;
     return r;
 }
 
+/* Ring-polynomial provenance export: Π (1 - sign_bit(dᵢ)) over 6 axis diffs.
+   Proved equivalent to short-circuit r128_le chains below via bitDecompose;
+   see aabbOverlapsExpr in Codegen/CodeGen.lean + HilbertBroadphase.lean. */
+static inline R128 aabb_overlaps_ring(R128 a_min_x, R128 a_max_x, R128 a_min_y, R128 a_max_y, R128 a_min_z, R128 a_max_z, R128 b_min_x, R128 b_max_x, R128 b_min_y, R128 b_max_y, R128 b_min_z, R128 b_max_z, R128 s0, R128 s1, R128 s2, R128 s3, R128 s4, R128 s5) {
+    R128 t0 = r128_mul(r128_neg(R128_ONE), s0);
+    R128 t1 = r128_add(R128_ONE, t0);
+    R128 t2 = r128_mul(r128_neg(R128_ONE), s1);
+    R128 t3 = r128_add(R128_ONE, t2);
+    R128 t4 = r128_mul(t1, t3);
+    R128 t5 = r128_mul(r128_neg(R128_ONE), s2);
+    R128 t6 = r128_add(R128_ONE, t5);
+    R128 t7 = r128_mul(t4, t6);
+    R128 t8 = r128_mul(r128_neg(R128_ONE), s3);
+    R128 t9 = r128_add(R128_ONE, t8);
+    R128 t10 = r128_mul(t7, t9);
+    R128 t11 = r128_mul(r128_neg(R128_ONE), s4);
+    R128 t12 = r128_add(R128_ONE, t11);
+    R128 t13 = r128_mul(t10, t12);
+    R128 t14 = r128_mul(r128_neg(R128_ONE), s5);
+    R128 t15 = r128_add(R128_ONE, t14);
+    R128 t16 = r128_mul(t13, t15);
+    return t16;
+}
+
+/* Fast-path predicates: short-circuit r128_le chains. Proved equivalent to
+   aabb_overlaps_ring via the Z<->GF(2) bridge — see Lean HilbertBroadphase. */
 static inline bool aabb_overlaps(const Aabb *a, const Aabb *o) {
     return r128_le(a->min_x, o->max_x) && r128_le(o->min_x, a->max_x)
         && r128_le(a->min_y, o->max_y) && r128_le(o->min_y, a->max_y)
@@ -235,7 +254,8 @@ static inline bool aabb_contains(const Aabb *a, const Aabb *inner) {
 }
 
 static inline bool aabb_contains_point(const Aabb *a, R128 x, R128 y, R128 z) {
-    return r128_le(a->min_x, x) && r128_le(x, a->max_x) && r128_le(a->min_y, y) && r128_le(y, a->max_y)
+    return r128_le(a->min_x, x) && r128_le(x, a->max_x)
+        && r128_le(a->min_y, y) && r128_le(y, a->max_y)
         && r128_le(a->min_z, z) && r128_le(z, a->max_z);
 }
 
@@ -1404,17 +1424,17 @@ typedef struct pbvh_plane {
 
 /* Build the segment-AABB of a ray segment from (ox,oy,oz) to (tx,ty,tz).
  * Conservative broadphase: a segment hits `b` only if its AABB overlaps `b`.
- * Per-axis min/max routed through pbvh_r128_min / pbvh_r128_max (Z<->GF(2)
- * branchless ring form) — no r128_le ternaries inline. */
+ * Hot-path short-circuit form; proved equivalent to pbvh_r128_min/max
+ * (Z<->GF(2) branchless ring form) via bitDecompose. */
 static inline Aabb pbvh_segment_aabb_(R128 ox, R128 oy, R128 oz,
 		R128 tx, R128 ty, R128 tz) {
 	Aabb s;
-	s.min_x = pbvh_r128_min(ox, tx);
-	s.max_x = pbvh_r128_max(ox, tx);
-	s.min_y = pbvh_r128_min(oy, ty);
-	s.max_y = pbvh_r128_max(oy, ty);
-	s.min_z = pbvh_r128_min(oz, tz);
-	s.max_z = pbvh_r128_max(oz, tz);
+	s.min_x = r128_le(ox, tx) ? ox : tx;
+	s.max_x = r128_le(ox, tx) ? tx : ox;
+	s.min_y = r128_le(oy, ty) ? oy : ty;
+	s.max_y = r128_le(oy, ty) ? ty : oy;
+	s.min_z = r128_le(oz, tz) ? oz : tz;
+	s.max_z = r128_le(oz, tz) ? tz : oz;
 	return s;
 }
 

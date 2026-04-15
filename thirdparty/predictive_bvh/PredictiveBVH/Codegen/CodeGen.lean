@@ -1025,33 +1025,42 @@ private def aabbC : String :=
   "    R128 min_y, max_y;\n" ++
   "    R128 min_z, max_z;\n" ++
   "} Aabb;\n\n" ++
-  "static inline Aabb aabb_from_floats(float x0, float x1, float y0, float y1, float z0, float z1) {\n" ++
-  "    Aabb a; a.min_x = r128_from_int((int64_t)(x0*1000000.0f)); a.max_x = r128_from_int((int64_t)(x1*1000000.0f));\n" ++
-  "    a.min_y = r128_from_int((int64_t)(y0*1000000.0f)); a.max_y = r128_from_int((int64_t)(y1*1000000.0f));\n" ++
-  "    a.min_z = r128_from_int((int64_t)(z0*1000000.0f)); a.max_z = r128_from_int((int64_t)(z1*1000000.0f));\n" ++
-  "    return a;\n}\n\n" ++
-  "/* Aabb union via the Z<->GF(2) bridge: six branchless ring min/max ops.\n" ++
-  "   Mirrors the Rust aabb_union_bridge path — same polynomial, same provenance. */\n" ++
+  "/* Aabb union — hot-path short-circuit form (called per refit). Proved\n" ++
+  "   equivalent to ring_min_r128 / ring_max_r128 via Z<->GF(2) bridge. */\n" ++
   "static inline Aabb aabb_union(const Aabb *a, const Aabb *o) {\n" ++
   "    Aabb r;\n" ++
-  "    r.min_x = pbvh_r128_min(a->min_x, o->min_x);\n" ++
-  "    r.max_x = pbvh_r128_max(a->max_x, o->max_x);\n" ++
-  "    r.min_y = pbvh_r128_min(a->min_y, o->min_y);\n" ++
-  "    r.max_y = pbvh_r128_max(a->max_y, o->max_y);\n" ++
-  "    r.min_z = pbvh_r128_min(a->min_z, o->min_z);\n" ++
-  "    r.max_z = pbvh_r128_max(a->max_z, o->max_z);\n" ++
+  "    r.min_x = r128_le(a->min_x, o->min_x) ? a->min_x : o->min_x;\n" ++
+  "    r.max_x = r128_le(a->max_x, o->max_x) ? o->max_x : a->max_x;\n" ++
+  "    r.min_y = r128_le(a->min_y, o->min_y) ? a->min_y : o->min_y;\n" ++
+  "    r.max_y = r128_le(a->max_y, o->max_y) ? o->max_y : a->max_y;\n" ++
+  "    r.min_z = r128_le(a->min_z, o->min_z) ? a->min_z : o->min_z;\n" ++
+  "    r.max_z = r128_le(a->max_z, o->max_z) ? o->max_z : a->max_z;\n" ++
   "    return r;\n}\n\n" ++
+  "/* Ring-polynomial provenance export: Π (1 - sign_bit(dᵢ)) over 6 axis diffs.\n" ++
+  "   Proved equivalent to short-circuit r128_le chains below via bitDecompose;\n" ++
+  "   see aabbOverlapsExpr in Codegen/CodeGen.lean + HilbertBroadphase.lean. */\n" ++
+  genC "aabb_overlaps_ring"
+    ["a_min_x","a_max_x","a_min_y","a_max_y","a_min_z","a_max_z",
+     "b_min_x","b_max_x","b_min_y","b_max_y","b_min_z","b_max_z",
+     "s0","s1","s2","s3","s4","s5"]
+    aabbOverlapsExpr ++ "\n\n" ++
+  "/* Fast-path predicates: short-circuit r128_le chains. Proved equivalent to\n" ++
+  "   aabb_overlaps_ring via the Z<->GF(2) bridge — see Lean HilbertBroadphase. */\n" ++
   "static inline bool aabb_overlaps(const Aabb *a, const Aabb *o) {\n" ++
   "    return r128_le(a->min_x, o->max_x) && r128_le(o->min_x, a->max_x)\n" ++
   "        && r128_le(a->min_y, o->max_y) && r128_le(o->min_y, a->max_y)\n" ++
-  "        && r128_le(a->min_z, o->max_z) && r128_le(o->min_z, a->max_z);\n}\n\n" ++
+  "        && r128_le(a->min_z, o->max_z) && r128_le(o->min_z, a->max_z);\n" ++
+  "}\n\n" ++
   "static inline bool aabb_contains(const Aabb *a, const Aabb *inner) {\n" ++
   "    return r128_le(a->min_x, inner->min_x) && r128_le(inner->max_x, a->max_x)\n" ++
   "        && r128_le(a->min_y, inner->min_y) && r128_le(inner->max_y, a->max_y)\n" ++
-  "        && r128_le(a->min_z, inner->min_z) && r128_le(inner->max_z, a->max_z);\n}\n\n" ++
+  "        && r128_le(a->min_z, inner->min_z) && r128_le(inner->max_z, a->max_z);\n" ++
+  "}\n\n" ++
   "static inline bool aabb_contains_point(const Aabb *a, R128 x, R128 y, R128 z) {\n" ++
-  "    return r128_le(a->min_x, x) && r128_le(x, a->max_x) && r128_le(a->min_y, y) && r128_le(y, a->max_y)\n" ++
-  "        && r128_le(a->min_z, z) && r128_le(z, a->max_z);\n}"
+  "    return r128_le(a->min_x, x) && r128_le(x, a->max_x)\n" ++
+  "        && r128_le(a->min_y, y) && r128_le(y, a->max_y)\n" ++
+  "        && r128_le(a->min_z, z) && r128_le(z, a->max_z);\n" ++
+  "}"
 
 private def utilC : String :=
   "/* Source: Build.lean:193 (clz30) */\n" ++

@@ -32,7 +32,7 @@
 
 #include "fabric_snapshot.h"
 
-#include <thirdparty/predictive_bvh/predictive_bvh.h>
+#include "core/math/predictive_bvh_adapter.h"
 
 #include "core/config/engine.h"
 #include "core/io/resource_loader.h"
