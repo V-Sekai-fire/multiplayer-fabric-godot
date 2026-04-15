@@ -39,6 +39,14 @@ private:
 	LocalVector<pbvh_node_id_t> sorted_storage;
 	LocalVector<pbvh_internal_t> internal_storage;
 	LocalVector<void *> userdata; // parallel to node_storage
+	// Phase 2c incremental-refit sidecars. Allocated lazily via _ensure_capacity
+	// so pbvh_tree_tick can do O(K + n_touched) ancestor refits rather than
+	// the O(internal_count) bottom-up pass.
+	LocalVector<uint32_t> parent_of_internal_storage;
+	LocalVector<uint32_t> leaf_to_internal_storage;
+	LocalVector<uint64_t> touched_bits_storage;
+	LocalVector<uint32_t> touched_list_storage;
+	LocalVector<uint32_t> touched_scratch_storage;
 	uint32_t index_slot = 0;
 	bool dirty = false; // true if insert/update/remove happened since last build
 
@@ -50,15 +58,26 @@ private:
 		while (new_cap < need) {
 			new_cap *= 2;
 		}
+		const uint32_t internal_cap = new_cap * 2u;
 		node_storage.resize(new_cap);
 		sorted_storage.resize(new_cap);
-		internal_storage.resize(new_cap * 2u);
+		internal_storage.resize(internal_cap);
 		userdata.resize(new_cap);
+		parent_of_internal_storage.resize(internal_cap);
+		leaf_to_internal_storage.resize(new_cap);
+		touched_bits_storage.resize((internal_cap + 63u) / 64u);
+		touched_list_storage.resize(internal_cap);
+		touched_scratch_storage.resize(internal_cap);
 		tree.nodes = node_storage.ptr();
 		tree.sorted = sorted_storage.ptr();
 		tree.internals = internal_storage.ptr();
 		tree.capacity = new_cap;
-		tree.internal_capacity = new_cap * 2u;
+		tree.internal_capacity = internal_cap;
+		tree.parent_of_internal = parent_of_internal_storage.ptr();
+		tree.leaf_to_internal = leaf_to_internal_storage.ptr();
+		tree.touched_bits = touched_bits_storage.ptr();
+		tree.touched_list = touched_list_storage.ptr();
+		tree.touched_scratch = touched_scratch_storage.ptr();
 	}
 
 	// Scale by 1e6 (micrometres) to preserve sub-meter precision; keep the

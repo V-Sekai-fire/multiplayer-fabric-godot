@@ -693,6 +693,11 @@ typedef struct pbvh_internal {
 	pbvh_internal_id_t right; /* PBVH_NULL_NODE when this is a leaf-range node */
 } pbvh_internal_t;
 
+typedef struct pbvh_dirty_leaf {
+	pbvh_node_id_t leaf_id;
+	uint32_t old_hilbert;
+} pbvh_dirty_leaf_t;
+
 typedef struct pbvh_tree {
 	pbvh_node_t *nodes;
 	uint32_t capacity;
@@ -715,6 +720,18 @@ typedef struct pbvh_tree {
 	 * laid out flat as [lo0, hi0, lo1, hi1, …]. Set bucket_bits=0 to skip. */
 	uint32_t *bucket_dir;
 	uint32_t bucket_bits;
+	/* Optional incremental-refit sidecar (eclass-keyed, no parent pointers
+	 * inside pbvh_internal_t). When all three are non-NULL, pbvh_tree_tick
+	 * restricts its refit to the ancestor set of dirty leaves — O(K log N)
+	 * touches instead of O(internal_count). leaf_to_internal[id] = the
+	 * enclosing leaf-range internal id for leaf node id; parent_of_internal[i]
+	 * = the immediately enclosing internal id (PBVH_NULL_NODE at root);
+	 * touched_bits = internal_capacity-bit scratch, cleared each tick. */
+	uint32_t *parent_of_internal; /* size internal_capacity, caller-owned */
+	uint32_t *leaf_to_internal; /* size capacity, caller-owned, indexed by node id */
+	uint64_t *touched_bits; /* size (internal_capacity + 63) / 64, caller-owned */
+	uint32_t *touched_list; /* size internal_capacity, caller-owned; scratch for ancestor walk */
+	uint32_t *touched_scratch; /* size internal_capacity, caller-owned; scratch for radix sort */
 } pbvh_tree_t;
 
 static inline pbvh_node_id_t pbvh_tree_insert_h(pbvh_tree_t *t, pbvh_eclass_id_t ec,
@@ -765,7 +782,8 @@ static inline void pbvh_tree_update_h(pbvh_tree_t *t, pbvh_node_id_t id,
  * itself ends up in DFS order. The `skip` field is set after the children
  * are placed — it equals t->internal_count at that point, i.e. the index
  * that any ancestor would jump to when pruning this subtree. */
-static inline pbvh_internal_id_t pbvh_build_internal_(pbvh_tree_t *t, uint32_t lo, uint32_t hi) {
+static inline pbvh_internal_id_t pbvh_build_internal_with_parent_(pbvh_tree_t *t,
+		uint32_t lo, uint32_t hi, pbvh_internal_id_t parent) {
 	if (lo >= hi) {
 		return PBVH_NULL_NODE;
 	}
@@ -773,6 +791,9 @@ static inline pbvh_internal_id_t pbvh_build_internal_(pbvh_tree_t *t, uint32_t l
 		return PBVH_NULL_NODE;
 	}
 	pbvh_internal_id_t id = t->internal_count++;
+	if (t->parent_of_internal != NULL) {
+		t->parent_of_internal[id] = parent;
+	}
 	pbvh_internal_t *n = &t->internals[id];
 	n->offset = lo;
 	n->span = hi - lo;
@@ -807,14 +828,21 @@ static inline pbvh_internal_id_t pbvh_build_internal_(pbvh_tree_t *t, uint32_t l
 			split = s;
 		}
 	}
-	pbvh_internal_id_t l = pbvh_build_internal_(t, lo, split);
-	pbvh_internal_id_t r = pbvh_build_internal_(t, split, hi);
+	pbvh_internal_id_t l = pbvh_build_internal_with_parent_(t, lo, split, id);
+	pbvh_internal_id_t r = pbvh_build_internal_with_parent_(t, split, hi, id);
 	/* Re-fetch: the `n` pointer to caller-owned fixed storage stays valid,
 	 * but writing through it after recursion is the clearest shape. */
 	t->internals[id].left = l;
 	t->internals[id].right = r;
 	t->internals[id].skip = t->internal_count;
 	return id;
+}
+
+/* Legacy entry point: defers to the parent-tracking variant with root parent
+ * = PBVH_NULL_NODE. Callers that don't care about parent_of_internal can
+ * leave the sidecar NULL; the recursive variant skips the write. */
+static inline pbvh_internal_id_t pbvh_build_internal_(pbvh_tree_t *t, uint32_t lo, uint32_t hi) {
+	return pbvh_build_internal_with_parent_(t, lo, hi, PBVH_NULL_NODE);
 }
 
 /* Populate bucket_dir[2*b], bucket_dir[2*b+1] with the (lo, hi) window in
@@ -866,6 +894,101 @@ static inline void pbvh_tree_refit(pbvh_tree_t *t) {
 			if (s == 0u) {
 				continue;
 			}
+			Aabb acc = t->nodes[t->sorted[o]].bounds;
+			for (uint32_t j = o + 1u; j < o + s; j++) {
+				acc = aabb_union(&acc, &t->nodes[t->sorted[j]].bounds);
+			}
+			n->bounds = acc;
+		} else if (n->left != PBVH_NULL_NODE && n->right != PBVH_NULL_NODE) {
+			n->bounds = aabb_union(&t->internals[n->left].bounds,
+					&t->internals[n->right].bounds);
+		} else {
+			const pbvh_internal_id_t only =
+					(n->left != PBVH_NULL_NODE) ? n->left : n->right;
+			n->bounds = t->internals[only].bounds;
+		}
+	}
+}
+
+/* Incremental refit: touches only the leaf-range internals containing dirty
+ * leaves and their ancestor chain up to the root. Relies on two caller-owned
+ * sidecars (leaf_to_internal[], parent_of_internal[]) plus scratch (touched_bits,
+ * touched_list, touched_scratch).
+ *
+ * Complexity: O(K + n_touched) where K = dirty_count and n_touched = size of
+ * the ancestor-union set (bounded by K × depth, typically much smaller when
+ * dirty leaves cluster inside Hilbert buckets). Strictly bounded by O(N + K).
+ *
+ * Algorithm:
+ *   1. For each dirty leaf d, look up its enclosing leaf-range internal via
+ *      leaf_to_internal[d.leaf_id]. Walk up parent_of_internal[] marking a
+ *      bitmap and appending newly-marked ids to touched_list[]. Stop at
+ *      already-marked (covers the shared-ancestor case in O(1)).
+ *   2. LSD-radix-sort touched_list[] ascending on internal id (one O(n) pass).
+ *      Since pre-order DFS gives parent < child, iterating DESCENDING on id
+ *      visits children before parents — the bottom-up order refit needs.
+ *   3. For each touched id in descending order: if leaf-range, re-union from
+ *      sorted[offset..offset+span); else union children's bounds (which have
+ *      either been refit already in this pass or remain correct from the last
+ *      build because the corresponding subtree had no dirty leaf).
+ *
+ * Falls back to pbvh_tree_refit when any sidecar is NULL. */
+static inline void pbvh_tree_refit_incremental_(pbvh_tree_t *t,
+		const pbvh_dirty_leaf_t *dirty, uint32_t dirty_count) {
+	if (t->internal_count == 0u) { return; }
+	if (dirty == NULL || dirty_count == 0u ||
+			t->parent_of_internal == NULL || t->leaf_to_internal == NULL ||
+			t->touched_bits == NULL || t->touched_list == NULL ||
+			t->touched_scratch == NULL) {
+		pbvh_tree_refit(t);
+		return;
+	}
+	const uint32_t words = (t->internal_count + 63u) / 64u;
+	for (uint32_t w = 0u; w < words; w++) { t->touched_bits[w] = 0ull; }
+	uint32_t n_touched = 0u;
+	for (uint32_t d = 0u; d < dirty_count; d++) {
+		const pbvh_node_id_t leaf_id = dirty[d].leaf_id;
+		if (leaf_id >= t->count) { continue; }
+		uint32_t i = t->leaf_to_internal[leaf_id];
+		while (i != PBVH_NULL_NODE && i < t->internal_count) {
+			const uint32_t w = i >> 6;
+			const uint64_t mask = 1ull << (i & 63u);
+			if ((t->touched_bits[w] & mask) != 0ull) { break; }
+			t->touched_bits[w] |= mask;
+			t->touched_list[n_touched++] = i;
+			i = t->parent_of_internal[i];
+		}
+	}
+	if (n_touched == 0u) { return; }
+	/* LSD radix sort ascending on internal id (4 passes × 8 bits).
+	 * touched_scratch is a caller-owned uint32_t array of size internal_capacity. */
+	uint32_t *src = t->touched_list;
+	uint32_t *dst = t->touched_scratch;
+	for (uint32_t pass = 0u; pass < 4u; pass++) {
+		uint32_t count_bin[256];
+		for (uint32_t b = 0u; b < 256u; b++) { count_bin[b] = 0u; }
+		const uint32_t shift = pass * 8u;
+		for (uint32_t i = 0u; i < n_touched; i++) {
+			count_bin[(src[i] >> shift) & 0xFFu]++;
+		}
+		uint32_t sum = 0u;
+		for (uint32_t b = 0u; b < 256u; b++) {
+			uint32_t c = count_bin[b]; count_bin[b] = sum; sum += c;
+		}
+		for (uint32_t i = 0u; i < n_touched; i++) {
+			dst[count_bin[(src[i] >> shift) & 0xFFu]++] = src[i];
+		}
+		uint32_t *tmp = src; src = dst; dst = tmp;
+	}
+	/* After 4 passes, src == touched_list (even swap count). Iterate descending
+	 * so children refit before parents. */
+	for (uint32_t k = n_touched; k > 0u; k--) {
+		const uint32_t idx = src[k - 1u];
+		pbvh_internal_t *n = &t->internals[idx];
+		if (n->left == PBVH_NULL_NODE && n->right == PBVH_NULL_NODE) {
+			const uint32_t o = n->offset;
+			const uint32_t s = n->span;
+			if (s == 0u) { continue; }
 			Aabb acc = t->nodes[t->sorted[o]].bounds;
 			for (uint32_t j = o + 1u; j < o + s; j++) {
 				acc = aabb_union(&acc, &t->nodes[t->sorted[j]].bounds);
@@ -942,6 +1065,23 @@ static inline void pbvh_tree_build(pbvh_tree_t *t) {
 		t->internal_root = pbvh_build_internal_(t, 0u, k);
 	}
 	pbvh_build_bucket_dir_(t);
+	/* Populate leaf_to_internal[] from the leaf-range internals produced
+	 * above. Any leaf id inside a leaf-range internal's [offset, offset+span)
+	 * window has that internal as its immediate enclosing ancestor. One pass
+	 * over leaf-range internals, total O(N) writes. */
+	if (t->leaf_to_internal != NULL) {
+		for (uint32_t i = 0u; i < t->internal_count; i++) {
+			pbvh_internal_t *n = &t->internals[i];
+			if (n->left != PBVH_NULL_NODE || n->right != PBVH_NULL_NODE) {
+				continue;
+			}
+			const uint32_t o = n->offset;
+			const uint32_t s = n->span;
+			for (uint32_t j = o; j < o + s; j++) {
+				t->leaf_to_internal[t->sorted[j]] = i;
+			}
+		}
+	}
 }
 
 /* O(N) brute-force leaf scan. Kept only as the correctness oracle for
@@ -1283,11 +1423,6 @@ static inline bool pbvh_tree_is_empty(const pbvh_tree_t *t) {
  * code lives in t->nodes[leaf_id].hilbert. Comparing the two, masked by
  * bucket_bits, classifies the leaf as stayed-in-bucket (refit-compatible)
  * vs crossed-boundary (needs full rebuild). */
-typedef struct pbvh_dirty_leaf {
-	pbvh_node_id_t leaf_id;
-	uint32_t old_hilbert;
-} pbvh_dirty_leaf_t;
-
 /* Per-frame rebalance. When every dirty leaf kept its Hilbert-prefix bucket
  * (so sorted[] order and internals[] topology are still valid), we can skip
  * the O(N) sort+build and just re-union bounds bottom-up via pbvh_tree_refit
@@ -1341,29 +1476,24 @@ static inline void pbvh_tree_tick(pbvh_tree_t *t,
 		pbvh_tree_build(t);
 		return;
 	}
-	const uint32_t shift = 30u - t->bucket_bits;
+	/* Never rebuild in steady-state — any input pattern that forces a full
+	 * O(N) pass is a DoS vector. Instead, treat sorted[]/internals[] topology
+	 * as copy-on-write: structure is fixed at the last build, and every frame
+	 * only refits bounds along the ancestor union of dirty leaves. Bucket
+	 * crossings are NOT forced to a rebuild — the leaf stays at its old
+	 * sorted[] index, its enclosing leaf-range internal re-unions to cover
+	 * the leaf's new AABB, and the crossing becomes an over-conservative
+	 * (but sound) bound. aabb_query_n scans by bounds, not by Hilbert bucket,
+	 * so correctness is preserved; bucket_dir-based aabb_query_b may return
+	 * slack but the adapter never invokes it. Dead slots (is_leaf=0) are
+	 * skipped — their sorted[] entry contributes nothing to unions. */
 	for (uint32_t i = 0; i < dirty_count; i++) {
 		const pbvh_dirty_leaf_t *d = &dirty[i];
-		/* (5a) Stale/out-of-range leaf_id: caller may hold ids past remove;
-		 * skipping is safe because the slot contributes nothing to queries. */
 		if (d->leaf_id >= t->count) {
 			continue;
 		}
-		const pbvh_node_t *n = &t->nodes[d->leaf_id];
-		/* (5b) Dead slot → topology changed. */
-		if (!n->is_leaf) {
-			pbvh_tree_build(t);
-			return;
-		}
-		/* (5c) Bucket boundary crossed → sorted[] order is stale. */
-		if ((n->hilbert >> shift) != (d->old_hilbert >> shift)) {
-			pbvh_tree_build(t);
-			return;
-		}
 	}
-	/* All dirty leaves stayed in their bucket and every precondition holds:
-	 * bounds-only refit suffices. */
-	pbvh_tree_refit(t);
+	pbvh_tree_refit_incremental_(t, dirty, dirty_count);
 }
 
 /* DynamicBVH-parity wrapper: ignore `passes`, route through pbvh_tree_tick
