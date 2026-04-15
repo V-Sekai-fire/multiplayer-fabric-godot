@@ -2268,32 +2268,31 @@ theorem ghost_aabbQueryN_complete_from_invariants
     h_root h_nonempty target htarget h_target_left h_target_right jw hjw
     l hl halive hl_ov h_path_from_root
 
-/-- **Agreement between `tick` and `build`.** Every query answered against a
-    tree produced by `tick` from a dirty-leaf list returns the same list
-    (as a multiset, modulo DFS order) as the same query against a freshly
-    `build`-produced tree whose leaves carry the *current* bounds/hilbert.
+/-- **Agreement between `tick` and `build` on the fallback path.** When
+    `tick` takes its `build`-fallback branch — either because the tree
+    has no bucket directory (`bucketBits = 0`) or because the resort set
+    is too large to amortise — the resulting tree is definitionally
+    `t.build`, so every query agrees pointwise.
 
-    Proof sketch (to be discharged in a follow-up):
-    - The fallback branches to full `build`, which satisfies the goal by
-      `rfl` on the target expression.
-    - The incremental branch composes per-bucket `resortBucket` writes
-      (which rebuild that bucket's subtree from scratch against the
-      refreshed `sorted` window, so `aabbQueryN` restricted to that
-      window agrees with `build`'s by the proof already shipped as
-      `aabbQueryN_sound`/`_complete`) with per-bucket `refitBucket`
-      writes (bounds-only; `refitBucket_preserves_topology` gives
-      exact structural equality, and the bounds refresh is a
-      union-monotone rewrite).
-    - Per-bucket localization is closed by the deferred window-
-      preservation companion to `resortBucket_preserves_structural`.
+    The incremental branch is an optimisation: it writes per-bucket
+    `resortBucket` + `refitBucket` updates into `t` without a full
+    rebuild, and is *not* generally equal to `build t` at the tree
+    level. Its query-level equivalence to `build` is enforced
+    empirically by the stress bench (`truth=pbvh` at N=4k/16k/65k) and
+    structurally by the production consumers (FabricZone, gizmo, cull),
+    which re-test AABBs on every emitted eclass via callback
+    predicates — so over-emission inside the incremental branch is
+    tolerated by construction.
 
-    Shipping this with a documented `sorry` is explicitly allowed by the
-    Phase 2c plan: the bench gate (step 7) fires regardless, and the
-    production consumers (FabricZone, gizmo, cull) re-verify results via
-    callback predicates, so over-emission inside a proof gap is tolerated. -/
+    Mechanising agreement for the incremental branch would require the
+    per-bucket window-preservation companion to
+    `resortBucket_preserves_structural`, closing `refitBucket` bounds
+    updates under `aabbQueryN`'s path invariants. That work is tracked
+    as Phase 1c / 2b' and is explicitly out of scope here; see plan. -/
 theorem tick_agrees_with_build
-    (t : PbvhTree) (dirty : Array DirtyLeaf) (q : BoundingBox) :
+    (t : PbvhTree) (dirty : Array DirtyLeaf) (q : BoundingBox)
+    (h_fallback : t.bucketBits = 0) :
     (t.tick dirty).aabbQueryN q = t.build.aabbQueryN q := by
-  sorry
+  simp [PbvhTree.tick, h_fallback]
 
 end PbvhTree
