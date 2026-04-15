@@ -747,6 +747,48 @@ theorem windowBounds_contains_step_slot
     rw [hgj]
     exact unionBounds_contains_right _ _
 
+/-- After `buildSubtree`, the root node's `bounds` field equals the window
+    union over `[lo, hi)`. Both builder branches (leaf push, recursive set!)
+    write `bounds := windowBounds leaves sorted lo hi`; this theorem reads
+    that write back. Load-bearing for lifting `windowBounds_contains_*` into
+    tree-level bound containment. -/
+theorem buildSubtree_root_bounds
+    (leaves : Array PbvhLeaf) (sorted : Array LeafId)
+    (internals : Array PbvhInternal) (lo hi : Nat) :
+    let r := (buildSubtree leaves sorted internals lo hi).1
+    r[(buildSubtree leaves sorted internals lo hi).2]!.bounds =
+      windowBounds leaves sorted lo hi ∧
+    r[(buildSubtree leaves sorted internals lo hi).2]!.offset = lo ∧
+    r[(buildSubtree leaves sorted internals lo hi).2]!.span = hi - lo := by
+  rw [buildSubtree_root]
+  unfold buildSubtree
+  split
+  · -- Base: the pushed leaf has bounds := windowBounds, offset := lo, span := hi - lo.
+    dsimp only
+    rw [Array.getElem!_eq_getD, Array.getD, dif_pos (by simp [Array.size_push])]
+    simp [Array.getElem_push_eq]
+  · -- Recursive: final `set!` at internals.size writes `updated` with the same fields.
+    dsimp only
+    obtain ⟨mid, _, _⟩ := computeMid leaves sorted lo hi (by omega)
+    let ph : PbvhInternal :=
+      { bounds := windowBounds leaves sorted lo hi, offset := lo,
+        span := hi - lo, skip := internals.size + 1,
+        left := none, right := none }
+    let state0 := internals.push ph
+    have h0 : state0.size = internals.size + 1 := by
+      show (internals.push ph).size = internals.size + 1
+      simp [Array.size_push]
+    have h1 := buildSubtree_size_ge leaves sorted _ state0 lo mid rfl
+    have h2 := buildSubtree_size_ge leaves sorted _
+      (buildSubtree leaves sorted state0 lo mid).1 mid hi rfl
+    have hmyIdx : internals.size <
+        (buildSubtree leaves sorted
+          (buildSubtree leaves sorted state0 lo mid).1 mid hi).1.size := by
+      omega
+    show ((buildSubtree leaves sorted _ mid hi).1.set! internals.size _)[internals.size]!.bounds = _ ∧ _ ∧ _
+    rw [Array.getElem!_eq_getD, Array.getD, dif_pos (by simp; exact hmyIdx)]
+    refine ⟨?_, ?_, ?_⟩ <;> simp
+
 /-- Root-level skip monotonicity: the root node returned by `buildSubtree`
     has `root < skip[root] ≤ result.size`. Direct composition of
     `buildSubtree_root`, `buildSubtree_root_lt_size`, and
