@@ -543,4 +543,97 @@ This work replaces that bottleneck with a proved-optimal O(N+k) broadphase and a
   year      = {2021},
   doi       = {10.1145/3485983.3494848}
 }
+
+@article{chazelle1990lbreporting,
+  author  = {Chazelle, Bernard},
+  title   = {Lower Bounds for Orthogonal Range Searching: {I.} {T}he Reporting Case},
+  journal = {Journal of the {ACM}},
+  volume  = {37},
+  number  = {2},
+  pages   = {200--212},
+  year    = {1990},
+  doi     = {10.1145/77600.77614},
+  url     = {https://www.cs.princeton.edu/~chazelle/pubs/LBOrthoRangeSearchReporting.pdf}
+}
+
+@article{chazelle1990lbarithmetic,
+  author  = {Chazelle, Bernard},
+  title   = {Lower Bounds for Orthogonal Range Searching: {II.} {T}he Arithmetic Model},
+  journal = {Journal of the {ACM}},
+  volume  = {37},
+  number  = {3},
+  pages   = {439--463},
+  year    = {1990},
+  doi     = {10.1145/79147.79149},
+  url     = {https://www.cs.princeton.edu/~chazelle/pubs/LBOrthoRangeSearchArithmetic.pdf}
+}
+
+@inproceedings{larsen2011improved,
+  author    = {Larsen, Kasper Green},
+  title     = {On Range Searching in the Group Model and Combinatorial Discrepancy},
+  booktitle = {2011 {IEEE} 52nd Annual Symposium on Foundations of Computer Science ({FOCS})},
+  pages     = {542--549},
+  year      = {2011},
+  doi       = {10.1109/FOCS.2011.51},
+  url       = {https://cs.au.dk/~larsen/papers/improved_range_lb.pdf}
+}
+
+@inproceedings{chan2011rangeram,
+  author    = {Chan, Timothy M. and Larsen, Kasper Green and P{\u a}tra{\c s}cu, Mihai},
+  title     = {Orthogonal Range Searching on the {RAM}, Revisited},
+  booktitle = {Proceedings of the 27th Annual Symposium on Computational Geometry ({SoCG} '11)},
+  pages     = {1--10},
+  year      = {2011},
+  doi       = {10.1145/1998196.1998198},
+  url       = {https://cs.au.dk/~larsen/papers/orth_revisit.pdf}
+}
+
+@incollection{agarwal2017rangesearching,
+  author    = {Agarwal, Pankaj K.},
+  title     = {Range Searching},
+  booktitle = {Handbook of Discrete and Computational Geometry (3rd ed.)},
+  editor    = {Goodman, Jacob E. and O'Rourke, Joseph and T{\'o}th, Csaba D.},
+  publisher = {Chapman and Hall/CRC},
+  year      = {2017},
+  chapter   = {41},
+  url       = {https://users.cs.duke.edu/~pankaj/publications/surveys/rs3ed.pdf}
+}
+
+@inproceedings{nipkow2015amortized,
+  author    = {Nipkow, Tobias},
+  title     = {Amortized Complexity Verified},
+  booktitle = {Interactive Theorem Proving ({ITP} 2015)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {9236},
+  pages     = {310--324},
+  year      = {2015},
+  publisher = {Springer},
+  doi       = {10.1007/978-3-319-22102-1_21},
+  url       = {https://isabelle.in.tum.de/~nipkow/pubs/itp15.pdf}
+}
+
+@book{nipkow2024fav,
+  author    = {Nipkow, Tobias and Blanchette, Jasmin and Eberl, Manuel and G{\'o}mez-London{\~n}o, Alejandro and Lammich, Peter and Sternagel, Christian and Wimmer, Simon and Zhan, Bohua},
+  title     = {Functional Data Structures and Algorithms: A Proof Assistant Approach},
+  publisher = {{ACM} Books},
+  year      = {2024},
+  url       = {https://functional-algorithms-verified.org}
+}
+
+@article{zhan2018imperativetime,
+  author  = {Zhan, Bohua and Haslbeck, Maximilian P. L.},
+  title   = {Verifying Asymptotic Time Complexity of Imperative Programs in {Isabelle}},
+  journal = {{CoRR}},
+  volume  = {abs/1802.01336},
+  year    = {2018},
+  url     = {https://arxiv.org/abs/1802.01336}
+}
+
+@inproceedings{bender2024kdtree,
+  author    = {Bender, Anja and Volmer, Jonas and Schwerhoff, Malte and Kunze, Julian and Summers, Alexander J.},
+  title     = {(Nearest) Neighbors You Can Rely On: Formally Verified k-d Tree Construction and Search in {Coq}},
+  booktitle = {Proceedings of the 39th {ACM/SIGAPP} Symposium on Applied Computing ({SAC} '24)},
+  year      = {2024},
+  doi       = {10.1145/3605098.3635960}
+}
 ```
