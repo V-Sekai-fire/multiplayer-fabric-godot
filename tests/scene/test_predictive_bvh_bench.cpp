@@ -15,7 +15,9 @@ TEST_FORCE_LINK(test_predictive_bvh_bench)
 #ifdef MODULE_MULTIPLAYER_FABRIC_ENABLED
 
 #include "core/math/aabb.h"
+#ifndef DISABLE_DEPRECATED
 #include "core/math/dynamic_bvh.h"
+#endif
 #include "core/os/os.h"
 
 #include "core/math/predictive_bvh_adapter.h"
@@ -152,6 +154,7 @@ static uint64_t bench_r128_prefix(const Vector<R128Leaf> &leaves, uint64_t &r_us
 	return matches;
 }
 
+#ifndef DISABLE_DEPRECATED
 // Path D: DynamicBVH destination budget — insert N, query each leaf's AABB,
 // count overlaps with any other leaf.
 struct BVHPairCollector {
@@ -188,36 +191,44 @@ static uint64_t bench_dynamic_bvh(const Vector<FloatLeaf> &leaves, uint64_t &r_u
 	r_usec = OS::get_singleton()->get_ticks_usec() - t0;
 	return matches;
 }
+#endif // DISABLE_DEPRECATED
 
 static void run_one_n(uint32_t n) {
 	Vector<FloatLeaf> floats;
 	Vector<R128Leaf> r128s;
 	generate_dataset(n, 0xC0FFEEull ^ (uint64_t)n, floats, r128s);
 
-	uint64_t t_float = 0, t_r128 = 0, t_prefix = 0, t_bvh = 0;
+	uint64_t t_float = 0, t_r128 = 0, t_prefix = 0;
 	const uint64_t m_float = bench_float_pairs(floats, t_float);
 	const uint64_t m_r128 = bench_r128_pairs(r128s, t_r128);
 	const uint64_t m_prefix = bench_r128_prefix(r128s, t_prefix);
+#ifndef DISABLE_DEPRECATED
+	uint64_t t_bvh = 0;
 	const uint64_t m_bvh = bench_dynamic_bvh(floats, t_bvh);
+#endif
 
 	// All paths must find the same pair set. Float↔R128 may differ by ≤1 at
 	// exact-touch boundaries due to quantization, but with sparse BENCH_EXTENT
 	// they should match exactly.
 	CHECK_MESSAGE(m_float == m_r128, vformat("pair-count mismatch: float=%d vs R128=%d at N=%d", m_float, m_r128, n));
 	CHECK_MESSAGE(m_prefix == m_r128, vformat("prefix prune dropped pairs: prefix=%d vs R128=%d at N=%d", m_prefix, m_r128, n));
+#ifndef DISABLE_DEPRECATED
 	CHECK_MESSAGE(m_bvh == m_float, vformat("DynamicBVH pair-count mismatch: bvh=%d vs float=%d at N=%d", m_bvh, m_float, n));
+#endif
 
 	const uint64_t pairs = (uint64_t)n * (n - 1) / 2;
 	const double ns_float = t_float * 1000.0 / (double)pairs;
 	const double ns_r128 = t_r128 * 1000.0 / (double)pairs;
 	const double ns_prefix = t_prefix * 1000.0 / (double)pairs;
-	const double ns_bvh = t_bvh * 1000.0 / (double)n; // per query, not per pair
 
 	print_line(vformat("[bench N=%d pairs=%d matches=%d]", n, pairs, m_float));
 	print_line(vformat("    float AABB::intersects   : %d us total  %.2f ns/pair", t_float, ns_float));
 	print_line(vformat("    R128 aabb_overlaps       : %d us total  %.2f ns/pair", t_r128, ns_r128));
 	print_line(vformat("    R128 + Hilbert prefix    : %d us total  %.2f ns/pair", t_prefix, ns_prefix));
+#ifndef DISABLE_DEPRECATED
+	const double ns_bvh = t_bvh * 1000.0 / (double)n; // per query, not per pair
 	print_line(vformat("    DynamicBVH aabb_query    : %d us total  %.2f ns/query (N queries)", t_bvh, ns_bvh));
+#endif
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -240,12 +251,14 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree vs DynamicBVH aabb_query") {
 	Vector<R128Leaf> r128s;
 	generate_dataset(N, 0xDEADBEEFull, floats, r128s);
 
+#ifndef DISABLE_DEPRECATED
 	DynamicBVH dtree;
 	LocalVector<DynamicBVH::ID> dids;
 	dids.resize(N);
 	for (uint32_t i = 0; i < N; i++) {
 		dids[i] = dtree.insert(floats[i].box, (void *)(uintptr_t)i);
 	}
+#endif
 
 	Vector<pbvh_node_t> storage;
 	storage.resize(N * 2 + 8);
@@ -262,6 +275,9 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree vs DynamicBVH aabb_query") {
 	}
 
 	for (uint32_t i = 0; i < N; i++) {
+		PBVHParityCollector pcb;
+		pbvh_tree_aabb_query(&ptree, &r128s[i].box, pbvh_parity_cb, &pcb);
+#ifndef DISABLE_DEPRECATED
 		Vector<uint32_t> dhits;
 		struct DCollect {
 			Vector<uint32_t> *out = nullptr;
@@ -273,13 +289,12 @@ TEST_CASE("[PredictiveBVH][Parity] pbvh_tree vs DynamicBVH aabb_query") {
 		dcb.out = &dhits;
 		dtree.aabb_query(floats[i].box, dcb);
 
-		PBVHParityCollector pcb;
-		pbvh_tree_aabb_query(&ptree, &r128s[i].box, pbvh_parity_cb, &pcb);
-
 		dhits.sort();
 		pcb.hits.sort();
 		CHECK_MESSAGE(dhits == pcb.hits,
 				vformat("pbvh_tree parity mismatch at i=%d: dbvh=%d hits pbvh=%d hits", i, dhits.size(), pcb.hits.size()));
+#endif
+		(void)pcb;
 	}
 }
 
@@ -843,8 +858,9 @@ TEST_CASE("[PredictiveBVH][Bench] growth rate of insert+tick vs DynamicBVH") {
 	constexpr uint32_t kSweeps = sizeof(Ns) / sizeof(Ns[0]);
 
 	uint64_t pbvh_totals[kSweeps] = {};
+#ifndef DISABLE_DEPRECATED
 	uint64_t dbvh_totals[kSweeps] = {};
-
+#endif
 	Aabb scene = aabb_from_floats(-BENCH_BOUND, BENCH_BOUND,
 			-BENCH_BOUND, BENCH_BOUND, -BENCH_BOUND, BENCH_BOUND);
 
@@ -924,47 +940,60 @@ TEST_CASE("[PredictiveBVH][Bench] growth rate of insert+tick vs DynamicBVH") {
 		pbvh_tree_tick(&tree, dirty.ptr(), N);
 		const uint64_t t_p_tick = OS::get_singleton()->get_ticks_usec() - t_p_tick0;
 
-		DynamicBVH dtree;
-		LocalVector<DynamicBVH::ID> dids;
-		dids.resize(N);
-
-		const uint64_t t_d_ins0 = OS::get_singleton()->get_ticks_usec();
-		for (uint32_t i = 0; i < N; i++) {
-			dids[i] = dtree.insert(floats[i].box, (void *)(uintptr_t)i);
-		}
-		const uint64_t t_d_ins = OS::get_singleton()->get_ticks_usec() - t_d_ins0;
-
-		const uint64_t t_d_upd0 = OS::get_singleton()->get_ticks_usec();
-		for (uint32_t i = 0; i < N; i++) {
-			dtree.update(dids[i], floats[i].box);
-		}
-		const uint64_t t_d_upd = OS::get_singleton()->get_ticks_usec() - t_d_upd0;
-
-		const uint64_t t_d_opt0 = OS::get_singleton()->get_ticks_usec();
-		dtree.optimize_incremental(1);
-		const uint64_t t_d_opt = OS::get_singleton()->get_ticks_usec() - t_d_opt0;
-
 		pbvh_totals[s] = t_p_ins + t_p_build + t_p_tick;
-		dbvh_totals[s] = t_d_ins + t_d_upd + t_d_opt;
+#ifndef DISABLE_DEPRECATED
+		{
+			DynamicBVH dtree;
+			LocalVector<DynamicBVH::ID> dids;
+			dids.resize(N);
 
-		print_line(vformat("[N=%5d] pbvh ins=%7d build=%7d tick=%7d total=%8d us  |  dbvh ins=%7d upd=%7d opt=%7d total=%8d us",
-				(int)N, (int)t_p_ins, (int)t_p_build, (int)t_p_tick, (int)pbvh_totals[s],
-				(int)t_d_ins, (int)t_d_upd, (int)t_d_opt, (int)dbvh_totals[s]));
+			const uint64_t t_d_ins0 = OS::get_singleton()->get_ticks_usec();
+			for (uint32_t i = 0; i < N; i++) {
+				dids[i] = dtree.insert(floats[i].box, (void *)(uintptr_t)i);
+			}
+			const uint64_t t_d_ins = OS::get_singleton()->get_ticks_usec() - t_d_ins0;
+
+			const uint64_t t_d_upd0 = OS::get_singleton()->get_ticks_usec();
+			for (uint32_t i = 0; i < N; i++) {
+				dtree.update(dids[i], floats[i].box);
+			}
+			const uint64_t t_d_upd = OS::get_singleton()->get_ticks_usec() - t_d_upd0;
+
+			const uint64_t t_d_opt0 = OS::get_singleton()->get_ticks_usec();
+			dtree.optimize_incremental(1);
+			const uint64_t t_d_opt = OS::get_singleton()->get_ticks_usec() - t_d_opt0;
+
+			dbvh_totals[s] = t_d_ins + t_d_upd + t_d_opt;
+			print_line(vformat("[N=%5d] pbvh ins=%7d build=%7d tick=%7d total=%8d us  |  dbvh ins=%7d upd=%7d opt=%7d total=%8d us",
+					(int)N, (int)t_p_ins, (int)t_p_build, (int)t_p_tick, (int)pbvh_totals[s],
+					(int)t_d_ins, (int)t_d_upd, (int)t_d_opt, (int)dbvh_totals[s]));
+		}
+#else
+		print_line(vformat("[N=%5d] pbvh ins=%7d build=%7d tick=%7d total=%8d us",
+				(int)N, (int)t_p_ins, (int)t_p_build, (int)t_p_tick, (int)pbvh_totals[s]));
+#endif
 	}
 
 	print_line("[growth rate per doubling of N — exponent = log2(ratio)]");
 	for (uint32_t s = 1; s < kSweeps; s++) {
 		const double p_ratio = (double)pbvh_totals[s] / (double)MAX((uint64_t)1, pbvh_totals[s - 1]);
-		const double d_ratio = (double)dbvh_totals[s] / (double)MAX((uint64_t)1, dbvh_totals[s - 1]);
 		const double p_exp = p_ratio > 0.0 ? std::log2(p_ratio) : 0.0;
+#ifndef DISABLE_DEPRECATED
+		const double d_ratio = (double)dbvh_totals[s] / (double)MAX((uint64_t)1, dbvh_totals[s - 1]);
 		const double d_exp = d_ratio > 0.0 ? std::log2(d_ratio) : 0.0;
 		print_line(vformat("    N:%5d -> %5d   pbvh x%.2f (exp %.2f)   dbvh x%.2f (exp %.2f)",
 				(int)Ns[s - 1], (int)Ns[s], p_ratio, p_exp, d_ratio, d_exp));
+#else
+		print_line(vformat("    N:%5d -> %5d   pbvh x%.2f (exp %.2f)",
+				(int)Ns[s - 1], (int)Ns[s], p_ratio, p_exp));
+#endif
 	}
 
 	for (uint32_t s = 0; s < kSweeps; s++) {
 		CHECK(pbvh_totals[s] > 0);
+#ifndef DISABLE_DEPRECATED
 		CHECK(dbvh_totals[s] > 0);
+#endif
 	}
 }
 
@@ -1062,11 +1091,13 @@ TEST_CASE("[PredictiveBVH][Bench] per-frame 1%-dirty + Q-queries steady-state") 
 							(int)bmax, (int)PBVH_BUCKET_K_TARGET, (int)N, (int)tree.bucket_bits));
 		}
 
+#ifndef DISABLE_DEPRECATED
 		DynamicBVH dtree;
 		LocalVector<DynamicBVH::ID> dids; dids.resize(N);
 		for (uint32_t i = 0; i < N; i++) {
 			dids[i] = dtree.insert(floats[i].box, (void *)(uintptr_t)i);
 		}
+#endif
 
 		XorShift rng(0x1234ull ^ (uint64_t)N);
 		uint64_t t_pbvh_frames = 0, t_dbvh_frames = 0;
@@ -1102,12 +1133,16 @@ TEST_CASE("[PredictiveBVH][Bench] per-frame 1%-dirty + Q-queries steady-state") 
 			pbvh_tree_tick(&tree, dirty.ptr(), dirty_n);
 			t_pbvh_frames += OS::get_singleton()->get_ticks_usec() - t_p0;
 
-			const uint64_t t_d0 = OS::get_singleton()->get_ticks_usec();
-			for (uint32_t d = 0; d < dirty_n; d++) {
-				dtree.update(dids[dirty_ids[d]], floats[dirty_ids[d]].box);
+#ifndef DISABLE_DEPRECATED
+			{
+				const uint64_t t_d0 = OS::get_singleton()->get_ticks_usec();
+				for (uint32_t d = 0; d < dirty_n; d++) {
+					dtree.update(dids[dirty_ids[d]], floats[dirty_ids[d]].box);
+				}
+				dtree.optimize_incremental(1);
+				t_dbvh_frames += OS::get_singleton()->get_ticks_usec() - t_d0;
 			}
-			dtree.optimize_incremental(1);
-			t_dbvh_frames += OS::get_singleton()->get_ticks_usec() - t_d0;
+#endif
 
 			// Query phase — same Q queries hit both backends. Hits per
 			// backend must equal a linear-scan ground truth over the current
@@ -1146,37 +1181,42 @@ TEST_CASE("[PredictiveBVH][Bench] per-frame 1%-dirty + Q-queries steady-state") 
 			t_pbvh_frames += OS::get_singleton()->get_ticks_usec() - t_pq0;
 			pbvh_hits_total += pbvh_hits;
 
-			const uint64_t t_dq0 = OS::get_singleton()->get_ticks_usec();
-			BenchPairCollector dbvh_ctr;
-			for (uint32_t q = 0; q < kQueries; q++) {
-				dtree.aabb_query(q_f[q], dbvh_ctr);
-			}
-			t_dbvh_frames += OS::get_singleton()->get_ticks_usec() - t_dq0;
-			dbvh_hits_total += dbvh_ctr.hits;
+#ifndef DISABLE_DEPRECATED
+			{
+				const uint64_t t_dq0 = OS::get_singleton()->get_ticks_usec();
+				BenchPairCollector dbvh_ctr;
+				for (uint32_t q = 0; q < kQueries; q++) {
+					dtree.aabb_query(q_f[q], dbvh_ctr);
+				}
+				t_dbvh_frames += OS::get_singleton()->get_ticks_usec() - t_dq0;
+				dbvh_hits_total += dbvh_ctr.hits;
 
-			// Per-frame tightness: pbvh must match truth exactly (same R128
-			// overlap primitive). DynamicBVH uses float AABBs so boundary
-			// rounding can differ by a few hits; we enforce loose parity
-			// within 2% rather than strict equality there.
+				const int64_t dbvh_delta = (int64_t)dbvh_ctr.hits - (int64_t)truth_hits;
+				const int64_t dbvh_tol = MAX((int64_t)1, (int64_t)truth_hits / 50);
+				CHECK_MESSAGE(std::abs(dbvh_delta) <= dbvh_tol,
+						vformat("dbvh tightness (float roundoff): hits=%d truth=%d (N=%d frame=%d)",
+								(int)dbvh_ctr.hits, (int)truth_hits, (int)N, (int)f));
+			}
+#endif
 			CHECK_MESSAGE(pbvh_hits == truth_hits,
 					vformat("pbvh tightness: hits=%d truth=%d (N=%d frame=%d)",
 							(int)pbvh_hits, (int)truth_hits, (int)N, (int)f));
-			const int64_t dbvh_delta = (int64_t)dbvh_ctr.hits - (int64_t)truth_hits;
-			const int64_t dbvh_tol = MAX((int64_t)1, (int64_t)truth_hits / 50);
-			CHECK_MESSAGE(std::abs(dbvh_delta) <= dbvh_tol,
-					vformat("dbvh tightness (float roundoff): hits=%d truth=%d (N=%d frame=%d)",
-							(int)dbvh_ctr.hits, (int)truth_hits, (int)N, (int)f));
 		}
 
 		const double p_per = (double)t_pbvh_frames / (double)kFrames;
+#ifndef DISABLE_DEPRECATED
 		const double d_per = (double)t_dbvh_frames / (double)kFrames;
 		const double speedup = p_per > 0.0 ? d_per / p_per : 0.0;
 		print_line(vformat("[N=%6d dirty=%5d Q=%d] pbvh %.1fus  dbvh %.1fus  pbvh-x%.2f  hits(truth=%d pbvh=%d dbvh=%d)",
 				(int)N, (int)dirty_n, (int)kQueries, p_per, d_per, speedup,
 				(int)truth_hits_total, (int)pbvh_hits_total, (int)dbvh_hits_total));
-
-		CHECK(t_pbvh_frames > 0);
 		CHECK(t_dbvh_frames > 0);
+#else
+		print_line(vformat("[N=%6d dirty=%5d Q=%d] pbvh %.1fus  hits(truth=%d pbvh=%d)",
+				(int)N, (int)dirty_n, (int)kQueries, p_per,
+				(int)truth_hits_total, (int)pbvh_hits_total));
+#endif
+		CHECK(t_pbvh_frames > 0);
 		CHECK(pbvh_hits_total == truth_hits_total);
 	}
 }
@@ -1238,11 +1278,13 @@ TEST_CASE("[PredictiveBVH][Bench] per-frame stress 20%-dirty metre-scale motion"
 		}
 		pbvh_tree_build(&tree);
 
+#ifndef DISABLE_DEPRECATED
 		DynamicBVH dtree;
 		LocalVector<DynamicBVH::ID> dids; dids.resize(N);
 		for (uint32_t i = 0; i < N; i++) {
 			dids[i] = dtree.insert(floats[i].box, (void *)(uintptr_t)i);
 		}
+#endif
 
 		XorShift rng(0xBEEFBEEFu ^ (uint64_t)N);
 		uint64_t t_pbvh_frames = 0, t_dbvh_frames = 0;
@@ -1278,12 +1320,16 @@ TEST_CASE("[PredictiveBVH][Bench] per-frame stress 20%-dirty metre-scale motion"
 			pbvh_tree_tick(&tree, dirty.ptr(), dirty_n);
 			t_pbvh_frames += OS::get_singleton()->get_ticks_usec() - t_p0;
 
-			const uint64_t t_d0 = OS::get_singleton()->get_ticks_usec();
-			for (uint32_t d = 0; d < dirty_n; d++) {
-				dtree.update(dids[dirty_ids[d]], floats[dirty_ids[d]].box);
+#ifndef DISABLE_DEPRECATED
+			{
+				const uint64_t t_d0 = OS::get_singleton()->get_ticks_usec();
+				for (uint32_t d = 0; d < dirty_n; d++) {
+					dtree.update(dids[dirty_ids[d]], floats[dirty_ids[d]].box);
+				}
+				dtree.optimize_incremental(1);
+				t_dbvh_frames += OS::get_singleton()->get_ticks_usec() - t_d0;
 			}
-			dtree.optimize_incremental(1);
-			t_dbvh_frames += OS::get_singleton()->get_ticks_usec() - t_d0;
+#endif
 
 			AABB q_f[kQueries]; Aabb q_r[kQueries];
 			for (uint32_t q = 0; q < kQueries; q++) {
@@ -1315,35 +1361,458 @@ TEST_CASE("[PredictiveBVH][Bench] per-frame stress 20%-dirty metre-scale motion"
 			t_pbvh_frames += OS::get_singleton()->get_ticks_usec() - t_pq0;
 			pbvh_hits_total += pbvh_hits;
 
-			const uint64_t t_dq0 = OS::get_singleton()->get_ticks_usec();
-			BenchPairCollector dbvh_ctr;
-			for (uint32_t q = 0; q < kQueries; q++) {
-				dtree.aabb_query(q_f[q], dbvh_ctr);
-			}
-			t_dbvh_frames += OS::get_singleton()->get_ticks_usec() - t_dq0;
-			dbvh_hits_total += dbvh_ctr.hits;
+#ifndef DISABLE_DEPRECATED
+			{
+				const uint64_t t_dq0 = OS::get_singleton()->get_ticks_usec();
+				BenchPairCollector dbvh_ctr;
+				for (uint32_t q = 0; q < kQueries; q++) {
+					dtree.aabb_query(q_f[q], dbvh_ctr);
+				}
+				t_dbvh_frames += OS::get_singleton()->get_ticks_usec() - t_dq0;
+				dbvh_hits_total += dbvh_ctr.hits;
 
+				const int64_t dbvh_delta = (int64_t)dbvh_ctr.hits - (int64_t)truth_hits;
+				const int64_t dbvh_tol = MAX((int64_t)1, (int64_t)truth_hits / 50);
+				CHECK_MESSAGE(std::abs(dbvh_delta) <= dbvh_tol,
+						vformat("dbvh tightness (float roundoff): hits=%d truth=%d (N=%d frame=%d)",
+								(int)dbvh_ctr.hits, (int)truth_hits, (int)N, (int)f));
+			}
+#endif
 			CHECK_MESSAGE(pbvh_hits == truth_hits,
 					vformat("pbvh tightness: hits=%d truth=%d (N=%d frame=%d)",
 							(int)pbvh_hits, (int)truth_hits, (int)N, (int)f));
-			const int64_t dbvh_delta = (int64_t)dbvh_ctr.hits - (int64_t)truth_hits;
-			const int64_t dbvh_tol = MAX((int64_t)1, (int64_t)truth_hits / 50);
-			CHECK_MESSAGE(std::abs(dbvh_delta) <= dbvh_tol,
-					vformat("dbvh tightness (float roundoff): hits=%d truth=%d (N=%d frame=%d)",
-							(int)dbvh_ctr.hits, (int)truth_hits, (int)N, (int)f));
 		}
 
 		const double p_per = (double)t_pbvh_frames / (double)kFrames;
+#ifndef DISABLE_DEPRECATED
 		const double d_per = (double)t_dbvh_frames / (double)kFrames;
 		const double speedup = p_per > 0.0 ? d_per / p_per : 0.0;
 		print_line(vformat("[STRESS N=%6d dirty=%5d Q=%d motion=%.1fm] pbvh %.1fus  dbvh %.1fus  pbvh-x%.2f  hits(truth=%d pbvh=%d dbvh=%d)",
 				(int)N, (int)dirty_n, (int)kQueries, (double)kMotionMax, p_per, d_per, speedup,
 				(int)truth_hits_total, (int)pbvh_hits_total, (int)dbvh_hits_total));
-
-		CHECK(t_pbvh_frames > 0);
 		CHECK(t_dbvh_frames > 0);
+#else
+		print_line(vformat("[STRESS N=%6d dirty=%5d Q=%d motion=%.1fm] pbvh %.1fus  hits(truth=%d pbvh=%d)",
+				(int)N, (int)dirty_n, (int)kQueries, (double)kMotionMax, p_per,
+				(int)truth_hits_total, (int)pbvh_hits_total));
+#endif
+		CHECK(t_pbvh_frames > 0);
 		CHECK(pbvh_hits_total == truth_hits_total);
 	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Tick adversarial gate: cases 6–7 complete the Phase 2c tick matrix.
+// C6: zero dirty count → no-op, all leaves still reachable.
+// C7: 100%-dirty teleport → forced full rebuild, all leaves reachable.
+// ──────────────────────────────────────────────────────────────────────────
+
+// C6 — zero dirty count: tick(&dummy, n=0) must be a pure no-op; all N
+// leaves remain queryable via query_n after the call.
+TEST_CASE("[PredictiveBVH][Tick] C6 zero dirty count leaves tree consistent") {
+	tick_harness::Harness h;
+	h.init(64, 0x66666666ull);
+	pbvh_dirty_leaf_t dummy = { 0u, h.r128s[0].hilbert };
+	pbvh_tree_tick(&h.tree, &dummy, 0u);
+	for (uint32_t i = 0; i < 64u; i++) {
+		CHECK_MESSAGE(h.query_hits(i),
+				vformat("C6 zero-dirty tick lost leaf %d", i));
+	}
+}
+
+// C7 — 100%-dirty (every leaf teleports to the far corner of the scene):
+// every leaf crosses its Hilbert bucket boundary, forcing a full rebuild.
+// All leaves must be queryable at their new position after tick.
+TEST_CASE("[PredictiveBVH][Tick] C7 100pct dirty teleport forces rebuild all leaves reachable") {
+	tick_harness::Harness h;
+	h.init(64, 0x77777777ull);
+
+	LocalVector<pbvh_dirty_leaf_t> dirty;
+	dirty.resize(64u);
+	for (uint32_t i = 0; i < 64u; i++) {
+		// Move each leaf to the far (+X,+Y,+Z) corner with a sub-mm spread.
+		const float off = (float)i * 0.0005f;
+		Aabb nb = aabb_from_floats(
+				BENCH_BOUND - 2.0f * BENCH_EXTENT - off,
+				BENCH_BOUND - off,
+				BENCH_BOUND - 2.0f * BENCH_EXTENT - off,
+				BENCH_BOUND - off,
+				BENCH_BOUND - 2.0f * BENCH_EXTENT - off,
+				BENCH_BOUND - off);
+		const uint32_t new_h = hilbert_of_aabb(&nb, &h.scene);
+		dirty[i].leaf_id = (pbvh_node_id_t)i;
+		dirty[i].old_hilbert = h.r128s[i].hilbert;
+		h.r128s.write[i].box = nb;
+		h.r128s.write[i].hilbert = new_h;
+		pbvh_tree_update_h(&h.tree, (pbvh_node_id_t)i, nb, new_h);
+	}
+	pbvh_tree_tick(&h.tree, dirty.ptr(), dirty.size());
+
+	for (uint32_t i = 0; i < 64u; i++) {
+		CHECK_MESSAGE(h.query_hits(i),
+				vformat("C7 100%%-dirty teleport: leaf %d unreachable at new pos", i));
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Adversarial query correctness: A1–A8.
+//
+// Each case probes a degenerate or worst-case tree shape where a naive or
+// misbehaving implementation would produce wrong query results. All cases
+// verify pbvh_tree_aabb_query_n against an explicit ground truth.
+//
+// A1 — empty tree.
+// A2 — single leaf hit/miss.
+// A3 — N leaves at identical position.
+// A4 — query covers entire scene.
+// A5 — query entirely outside all leaves.
+// A6 — zero-extent (point) leaves.
+// A7 — insert-remove-reinsert: slot reuse must not confuse eclass identity.
+// A8 — 99% recall gate: 1000 random queries over N=1024, every query must
+//       match the linear-scan ground truth exactly (PredictiveBVH's Lean
+//       proofs guarantee completeness: no false negatives, ever).
+// ──────────────────────────────────────────────────────────────────────────
+
+// A1 — empty tree: no inserts → query returns 0, no crash.
+TEST_CASE("[PredictiveBVH][Adversarial] A1 empty tree query returns zero hits") {
+	Vector<pbvh_node_t> storage;
+	storage.resize(8);
+	Vector<pbvh_node_id_t> sorted;
+	sorted.resize(8);
+	Vector<pbvh_internal_t> internals;
+	internals.resize(16);
+	pbvh_tree_t tree = {};
+	tree.nodes = storage.ptrw();
+	tree.capacity = storage.size();
+	tree.root = PBVH_NULL_NODE;
+	tree.free_head = PBVH_NULL_NODE;
+	tree.sorted = sorted.ptrw();
+	tree.internals = internals.ptrw();
+	tree.internal_capacity = internals.size();
+	tree.internal_root = PBVH_NULL_NODE;
+	pbvh_tree_build(&tree);
+
+	Aabb q = aabb_from_floats(-BENCH_BOUND, BENCH_BOUND,
+			-BENCH_BOUND, BENCH_BOUND, -BENCH_BOUND, BENCH_BOUND);
+	uint32_t hits = 0;
+	pbvh_tree_aabb_query_n(&tree, &q,
+			[](pbvh_eclass_id_t, void *ud) { *(uint32_t *)ud += 1u; return 0; }, &hits);
+	CHECK_MESSAGE(hits == 0u, vformat("A1: empty tree query returned %d hits (want 0)", hits));
+}
+
+// A2 — single leaf: overlapping query → 1 hit; non-overlapping → 0.
+TEST_CASE("[PredictiveBVH][Adversarial] A2 single leaf hit and miss") {
+	const Aabb scene = aabb_from_floats(-BENCH_BOUND, BENCH_BOUND,
+			-BENCH_BOUND, BENCH_BOUND, -BENCH_BOUND, BENCH_BOUND);
+	Vector<pbvh_node_t> storage;
+	storage.resize(8);
+	Vector<pbvh_node_id_t> sorted;
+	sorted.resize(8);
+	Vector<pbvh_internal_t> internals;
+	internals.resize(16);
+	pbvh_tree_t tree = {};
+	tree.nodes = storage.ptrw();
+	tree.capacity = storage.size();
+	tree.root = PBVH_NULL_NODE;
+	tree.free_head = PBVH_NULL_NODE;
+	tree.sorted = sorted.ptrw();
+	tree.internals = internals.ptrw();
+	tree.internal_capacity = internals.size();
+	tree.internal_root = PBVH_NULL_NODE;
+
+	Aabb leaf_box = aabb_from_floats(1.0f, 2.0f, 1.0f, 2.0f, 1.0f, 2.0f);
+	uint32_t lh = hilbert_of_aabb(&leaf_box, &scene);
+	pbvh_tree_insert_h(&tree, 7u, leaf_box, lh);
+	pbvh_tree_build(&tree);
+
+	uint32_t hits = 0;
+	pbvh_tree_aabb_query_n(&tree, &leaf_box,
+			[](pbvh_eclass_id_t, void *ud) { *(uint32_t *)ud += 1u; return 0; }, &hits);
+	CHECK_MESSAGE(hits == 1u, vformat("A2 hit: overlapping query returned %d hits (want 1)", hits));
+
+	Aabb miss_box = aabb_from_floats(-5.0f, -4.0f, -5.0f, -4.0f, -5.0f, -4.0f);
+	hits = 0;
+	pbvh_tree_aabb_query_n(&tree, &miss_box,
+			[](pbvh_eclass_id_t, void *ud) { *(uint32_t *)ud += 1u; return 0; }, &hits);
+	CHECK_MESSAGE(hits == 0u, vformat("A2 miss: non-overlapping query returned %d hits (want 0)", hits));
+}
+
+// A3 — N leaves all at identical position: a query at that AABB must return
+// all N hits (Hilbert sort must handle duplicates, build must not dedup).
+TEST_CASE("[PredictiveBVH][Adversarial] A3 duplicate positions all N hits") {
+	constexpr uint32_t N = 32u;
+	const Aabb scene = aabb_from_floats(-BENCH_BOUND, BENCH_BOUND,
+			-BENCH_BOUND, BENCH_BOUND, -BENCH_BOUND, BENCH_BOUND);
+	Vector<pbvh_node_t> storage;
+	storage.resize(N + 8);
+	Vector<pbvh_node_id_t> sorted;
+	sorted.resize(N + 8);
+	Vector<pbvh_internal_t> internals;
+	internals.resize(2 * (N + 8));
+	pbvh_tree_t tree = {};
+	tree.nodes = storage.ptrw();
+	tree.capacity = storage.size();
+	tree.root = PBVH_NULL_NODE;
+	tree.free_head = PBVH_NULL_NODE;
+	tree.sorted = sorted.ptrw();
+	tree.internals = internals.ptrw();
+	tree.internal_capacity = internals.size();
+	tree.internal_root = PBVH_NULL_NODE;
+
+	Aabb same = aabb_from_floats(0.0f, 0.2f, 0.0f, 0.2f, 0.0f, 0.2f);
+	uint32_t sh = hilbert_of_aabb(&same, &scene);
+	for (uint32_t i = 0; i < N; i++) {
+		pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i, same, sh);
+	}
+	pbvh_tree_build(&tree);
+
+	uint32_t hits = 0;
+	pbvh_tree_aabb_query_n(&tree, &same,
+			[](pbvh_eclass_id_t, void *ud) { *(uint32_t *)ud += 1u; return 0; }, &hits);
+	CHECK_MESSAGE(hits == N,
+			vformat("A3: duplicate-pos query returned %d hits (want %d)", hits, N));
+}
+
+// A4 — query covers entire scene: must return all N leaves.
+TEST_CASE("[PredictiveBVH][Adversarial] A4 scene-covering query returns all N leaves") {
+	constexpr uint32_t N = 128u;
+	Vector<FloatLeaf> floats;
+	Vector<R128Leaf> r128s;
+	generate_dataset(N, 0xA4A4A4A4ull, floats, r128s);
+
+	Vector<pbvh_node_t> storage;
+	storage.resize(N + 8);
+	Vector<pbvh_node_id_t> sorted;
+	sorted.resize(N + 8);
+	Vector<pbvh_internal_t> internals;
+	internals.resize(2 * (N + 8));
+	pbvh_tree_t tree = {};
+	tree.nodes = storage.ptrw();
+	tree.capacity = storage.size();
+	tree.root = PBVH_NULL_NODE;
+	tree.free_head = PBVH_NULL_NODE;
+	tree.sorted = sorted.ptrw();
+	tree.internals = internals.ptrw();
+	tree.internal_capacity = internals.size();
+	tree.internal_root = PBVH_NULL_NODE;
+
+	for (uint32_t i = 0; i < N; i++) {
+		pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i, r128s[i].box, r128s[i].hilbert);
+	}
+	pbvh_tree_build(&tree);
+
+	Aabb full = aabb_from_floats(-BENCH_BOUND, BENCH_BOUND,
+			-BENCH_BOUND, BENCH_BOUND, -BENCH_BOUND, BENCH_BOUND);
+	uint32_t hits = 0;
+	pbvh_tree_aabb_query_n(&tree, &full,
+			[](pbvh_eclass_id_t, void *ud) { *(uint32_t *)ud += 1u; return 0; }, &hits);
+	CHECK_MESSAGE(hits == N,
+			vformat("A4: scene-covering query returned %d hits (want %d)", hits, N));
+}
+
+// A5 — query entirely outside the populated scene: must return 0 hits.
+TEST_CASE("[PredictiveBVH][Adversarial] A5 query outside scene returns zero hits") {
+	constexpr uint32_t N = 128u;
+	Vector<FloatLeaf> floats;
+	Vector<R128Leaf> r128s;
+	generate_dataset(N, 0xA5A5A5A5ull, floats, r128s);
+
+	Vector<pbvh_node_t> storage;
+	storage.resize(N + 8);
+	Vector<pbvh_node_id_t> sorted;
+	sorted.resize(N + 8);
+	Vector<pbvh_internal_t> internals;
+	internals.resize(2 * (N + 8));
+	pbvh_tree_t tree = {};
+	tree.nodes = storage.ptrw();
+	tree.capacity = storage.size();
+	tree.root = PBVH_NULL_NODE;
+	tree.free_head = PBVH_NULL_NODE;
+	tree.sorted = sorted.ptrw();
+	tree.internals = internals.ptrw();
+	tree.internal_capacity = internals.size();
+	tree.internal_root = PBVH_NULL_NODE;
+
+	for (uint32_t i = 0; i < N; i++) {
+		pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i, r128s[i].box, r128s[i].hilbert);
+	}
+	pbvh_tree_build(&tree);
+
+	// 100 m away from any leaf in the scene.
+	Aabb outside = aabb_from_floats(100.0f, 101.0f, 100.0f, 101.0f, 100.0f, 101.0f);
+	uint32_t hits = 0;
+	pbvh_tree_aabb_query_n(&tree, &outside,
+			[](pbvh_eclass_id_t, void *ud) { *(uint32_t *)ud += 1u; return 0; }, &hits);
+	CHECK_MESSAGE(hits == 0u,
+			vformat("A5: outside-scene query returned %d hits (want 0)", hits));
+}
+
+// A6 — zero-extent (point) leaves: each leaf has min == max. aabb_overlaps
+// uses <=, so a query at the exact same point must find each leaf;
+// a query strictly between two points must find 0.
+TEST_CASE("[PredictiveBVH][Adversarial] A6 zero-extent point leaves exact hit and miss") {
+	constexpr uint32_t N = 8u;
+	const Aabb scene = aabb_from_floats(-BENCH_BOUND, BENCH_BOUND,
+			-BENCH_BOUND, BENCH_BOUND, -BENCH_BOUND, BENCH_BOUND);
+	Vector<pbvh_node_t> storage;
+	storage.resize(N + 8);
+	Vector<pbvh_node_id_t> sorted;
+	sorted.resize(N + 8);
+	Vector<pbvh_internal_t> internals;
+	internals.resize(2 * (N + 8));
+	pbvh_tree_t tree = {};
+	tree.nodes = storage.ptrw();
+	tree.capacity = storage.size();
+	tree.root = PBVH_NULL_NODE;
+	tree.free_head = PBVH_NULL_NODE;
+	tree.sorted = sorted.ptrw();
+	tree.internals = internals.ptrw();
+	tree.internal_capacity = internals.size();
+	tree.internal_root = PBVH_NULL_NODE;
+
+	// Leaves at even-integer positions: -8, -6, ..., +6 (N=8).
+	Vector<Aabb> pts;
+	pts.resize(N);
+	for (uint32_t i = 0; i < N; i++) {
+		const float p = (float)i * 2.0f - (float)N; // i=0 → -8, i=7 → +6
+		pts.write[i] = aabb_from_floats(p, p, p, p, p, p); // zero-extent
+		uint32_t h = hilbert_of_aabb(&pts[i], &scene);
+		pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i, pts[i], h);
+	}
+	pbvh_tree_build(&tree);
+
+	// Each leaf must be found by an exact-point query.
+	for (uint32_t i = 0; i < N; i++) {
+		uint32_t hits = 0;
+		pbvh_tree_aabb_query_n(&tree, &pts[i],
+				[](pbvh_eclass_id_t, void *ud) { *(uint32_t *)ud += 1u; return 0; }, &hits);
+		CHECK_MESSAGE(hits >= 1u,
+				vformat("A6: zero-extent leaf %d not found by point query", i));
+	}
+
+	// A point query strictly between leaves -2 (i=3) and 0 (i=4) must miss.
+	// (-1.0f is between -2.0f and 0.0f and equals no leaf coordinate.)
+	const float gap = -1.0f;
+	Aabb q_gap = aabb_from_floats(gap, gap, gap, gap, gap, gap);
+	uint32_t gap_hits = 0;
+	pbvh_tree_aabb_query_n(&tree, &q_gap,
+			[](pbvh_eclass_id_t, void *ud) { *(uint32_t *)ud += 1u; return 0; }, &gap_hits);
+	CHECK_MESSAGE(gap_hits == 0u,
+			vformat("A6: gap point query returned %d hits (want 0)", gap_hits));
+}
+
+// A7 — insert-remove-reinsert: removing eclass=42 and reinserting eclass=99
+// at a different position must not surface the old eclass or miss the new one.
+TEST_CASE("[PredictiveBVH][Adversarial] A7 insert-remove-reinsert slot reuse eclass identity") {
+	const Aabb scene = aabb_from_floats(-BENCH_BOUND, BENCH_BOUND,
+			-BENCH_BOUND, BENCH_BOUND, -BENCH_BOUND, BENCH_BOUND);
+	Vector<pbvh_node_t> storage;
+	storage.resize(8);
+	Vector<pbvh_node_id_t> sorted;
+	sorted.resize(8);
+	Vector<pbvh_internal_t> internals;
+	internals.resize(16);
+	pbvh_tree_t tree = {};
+	tree.nodes = storage.ptrw();
+	tree.capacity = storage.size();
+	tree.root = PBVH_NULL_NODE;
+	tree.free_head = PBVH_NULL_NODE;
+	tree.sorted = sorted.ptrw();
+	tree.internals = internals.ptrw();
+	tree.internal_capacity = internals.size();
+	tree.internal_root = PBVH_NULL_NODE;
+
+	Aabb box_a = aabb_from_floats(1.0f, 2.0f, 1.0f, 2.0f, 1.0f, 2.0f);
+	pbvh_node_id_t id_a = pbvh_tree_insert_h(&tree, 42u, box_a,
+			hilbert_of_aabb(&box_a, &scene));
+	pbvh_tree_build(&tree);
+
+	pbvh_tree_remove(&tree, id_a);
+
+	Aabb box_b = aabb_from_floats(-5.0f, -4.0f, -5.0f, -4.0f, -5.0f, -4.0f);
+	pbvh_tree_insert_h(&tree, 99u, box_b, hilbert_of_aabb(&box_b, &scene));
+	pbvh_tree_build(&tree);
+
+	Vector<uint32_t> hits;
+	struct C {
+		Vector<uint32_t> *out = nullptr;
+	} c;
+	c.out = &hits;
+	pbvh_tree_aabb_query_n(&tree, &box_b,
+			[](pbvh_eclass_id_t id, void *ud) {
+				((C *)ud)->out->push_back((uint32_t)id);
+				return 0;
+			}, &c);
+	CHECK_MESSAGE(hits.has(99u),
+			vformat("A7: reinserted eclass=99 not found; hits=%d", hits.size()));
+	CHECK_MESSAGE(!hits.has(42u),
+			"A7: removed eclass=42 surfaced after slot reuse");
+}
+
+// A8 — 99% recall gate: 1000 random queries over N=1024 leaves.
+// The Lean proofs guarantee pbvh_tree_aabb_query_n is complete (no false
+// negatives), so every query MUST match the linear-scan ground truth exactly.
+// Any mismatch is a correctness regression, not a performance concern.
+TEST_CASE("[PredictiveBVH][Adversarial] A8 99pct recall 1000 random queries match linear scan") {
+	constexpr uint32_t N = 1024u;
+	constexpr uint32_t kQueries = 1000u;
+	constexpr float kQueryExt = 0.5f; // 0.5 m half-extent
+
+	Vector<FloatLeaf> floats;
+	Vector<R128Leaf> r128s;
+	generate_dataset(N, 0xA8B8C8D8ull, floats, r128s);
+
+	Vector<pbvh_node_t> storage;
+	storage.resize(N + 8);
+	Vector<pbvh_node_id_t> sorted;
+	sorted.resize(N + 8);
+	Vector<pbvh_internal_t> internals;
+	internals.resize(2 * (N + 8));
+	Vector<uint32_t> bucket_dir;
+	bucket_dir.resize(pbvh_bucket_dir_size(N));
+	pbvh_tree_t tree = {};
+	tree.nodes = storage.ptrw();
+	tree.capacity = storage.size();
+	tree.root = PBVH_NULL_NODE;
+	tree.free_head = PBVH_NULL_NODE;
+	tree.sorted = sorted.ptrw();
+	tree.internals = internals.ptrw();
+	tree.internal_capacity = internals.size();
+	tree.internal_root = PBVH_NULL_NODE;
+	tree.bucket_dir = bucket_dir.ptrw();
+	tree.bucket_bits = HILBERT_PREFIX_BITS;
+
+	for (uint32_t i = 0; i < N; i++) {
+		pbvh_tree_insert_h(&tree, (pbvh_eclass_id_t)i, r128s[i].box, r128s[i].hilbert);
+	}
+	pbvh_tree_build(&tree);
+
+	XorShift rng(0xA8B8C8D8ull);
+	uint32_t mismatches = 0;
+	for (uint32_t q = 0; q < kQueries; q++) {
+		const float qx = rng.uniform(-BENCH_BOUND, BENCH_BOUND);
+		const float qy = rng.uniform(-BENCH_BOUND, BENCH_BOUND);
+		const float qz = rng.uniform(-BENCH_BOUND, BENCH_BOUND);
+		Aabb query = aabb_from_floats(qx - kQueryExt, qx + kQueryExt,
+				qy - kQueryExt, qy + kQueryExt,
+				qz - kQueryExt, qz + kQueryExt);
+
+		uint32_t truth = 0;
+		for (uint32_t i = 0; i < N; i++) {
+			if (aabb_overlaps(&r128s[i].box, &query)) {
+				truth++;
+			}
+		}
+		uint32_t hits = 0;
+		pbvh_tree_aabb_query_n(&tree, &query,
+				[](pbvh_eclass_id_t, void *ud) { *(uint32_t *)ud += 1u; return 0; }, &hits);
+		if (hits != truth) {
+			mismatches++;
+		}
+	}
+	CHECK_MESSAGE(mismatches == 0u,
+			vformat("A8 recall: %d/%d queries had pbvh_hits != truth (completeness failure)",
+					mismatches, kQueries));
 }
 
 } // namespace TestPredictiveBVHBench
