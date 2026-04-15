@@ -668,6 +668,85 @@ theorem foldl_unionBounds_contains_item (f : Nat → BoundingBox) :
     · -- j ∈ xs: recurse.
       exact ih (unionBounds init (f x)) j htail
 
+/-- Generalized fold-contains-init: same as `foldl_unionBounds_contains_init`
+    but lets the step function depend on the accumulator. Every step is
+    `unionBounds acc _`, and `unionBounds_contains_left` works regardless of
+    what the right operand is. -/
+theorem foldl_unionBounds_dep_contains_init {α : Type _}
+    (g : BoundingBox → α → BoundingBox) :
+    ∀ (l : List α) (init : BoundingBox),
+      aabbContains (l.foldl (fun acc a => unionBounds acc (g acc a)) init) init := by
+  intro l
+  induction l with
+  | nil => intro init; exact aabbContains_refl init
+  | cons x xs ih =>
+    intro init
+    have hstep : aabbContains (unionBounds init (g init x)) init :=
+      unionBounds_contains_left _ _
+    have := ih (unionBounds init (g init x))
+    exact aabbContains_trans this hstep
+
+/-- If `a ∈ l` and at position `a` the step produces a value whose union with
+    the accumulator contains `x`, then the final fold result contains `x`. -/
+theorem foldl_dep_contains_item {α : Type _}
+    (g : BoundingBox → α → BoundingBox) (x : BoundingBox) :
+    ∀ (l : List α) (a : α), a ∈ l →
+      (∀ acc : BoundingBox, aabbContains (unionBounds acc (g acc a)) x) →
+      ∀ init : BoundingBox,
+        aabbContains (l.foldl (fun acc a' => unionBounds acc (g acc a')) init) x := by
+  intro l
+  induction l with
+  | nil => intro _ ha _ _; exact absurd ha List.not_mem_nil
+  | cons hd tl ih =>
+    intro a ha hg init
+    simp only [List.mem_cons] at ha
+    rcases ha with heq | htail
+    · subst heq
+      have hhit : aabbContains (unionBounds init (g init a)) x := hg init
+      have hrest := foldl_unionBounds_dep_contains_init g tl
+        (unionBounds init (g init a))
+      exact aabbContains_trans hrest hhit
+    · exact ih a htail hg (unionBounds init (g init hd))
+
+/-- Containment at the `init` slot of `windowBounds`: when `lo < hi` and
+    the leaf at `sorted[lo]` resolves, its bounds are contained in the
+    window union. -/
+theorem windowBounds_contains_init_slot
+    (leaves : Array PbvhLeaf) (sorted : Array LeafId) (lo hi : Nat)
+    (hlo : lo < hi) (l : PbvhLeaf)
+    (hl : leaves[sorted[lo]!]? = some l) :
+    aabbContains (windowBounds leaves sorted lo hi) l.bounds := by
+  unfold windowBounds
+  rw [if_neg (by omega : ¬ lo ≥ hi)]
+  dsimp only
+  have hinit_eq : (leaves[sorted[lo]!]?.map (·.bounds)).getD
+      { minX := 0, maxX := 0, minY := 0, maxY := 0, minZ := 0, maxZ := 0 } =
+      l.bounds := by
+    rw [hl]; simp
+  rw [hinit_eq]
+  exact foldl_unionBounds_dep_contains_init
+    (fun acc j => (leaves[sorted[lo + j + 1]!]?.map (·.bounds)).getD acc)
+    _ l.bounds
+
+/-- Containment at a non-init slot `k = lo + j + 1` of `windowBounds`. -/
+theorem windowBounds_contains_step_slot
+    (leaves : Array PbvhLeaf) (sorted : Array LeafId) (lo hi : Nat)
+    (hlo : lo < hi) (j : Nat) (hj : j < hi - lo - 1)
+    (l : PbvhLeaf) (hl : leaves[sorted[lo + j + 1]!]? = some l) :
+    aabbContains (windowBounds leaves sorted lo hi) l.bounds := by
+  unfold windowBounds
+  rw [if_neg (by omega : ¬ lo ≥ hi)]
+  dsimp only
+  apply foldl_dep_contains_item
+    (g := fun acc j' => (leaves[sorted[lo + j' + 1]!]?.map (·.bounds)).getD acc)
+    (x := l.bounds) (a := j)
+  · exact List.mem_range.mpr hj
+  · intro acc
+    have hgj : (leaves[sorted[lo + j + 1]!]?.map (·.bounds)).getD acc = l.bounds := by
+      rw [hl]; simp
+    rw [hgj]
+    exact unionBounds_contains_right _ _
+
 /-- Root-level skip monotonicity: the root node returned by `buildSubtree`
     has `root < skip[root] ≤ result.size`. Direct composition of
     `buildSubtree_root`, `buildSubtree_root_lt_size`, and
