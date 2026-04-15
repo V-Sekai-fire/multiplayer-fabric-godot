@@ -552,4 +552,64 @@ theorem buildSubtree_skip_eq_final_size
 def subtreeSize (t : PbvhTree) (i : InternalId) : Nat :=
   if h : i < t.internals.size then t.internals[i].skip - i else 0
 
+/-- Positions strictly below `internals.size` are untouched by `buildSubtree`:
+    the builder only pushes new slots and the final `set!` writes to `myIdx`
+    which equals the input `internals.size`, never below. This is the
+    workhorse that lets skip invariants propagate across nested builds. -/
+theorem buildSubtree_preserves_prefix (leaves : Array PbvhLeaf)
+    (sorted : Array LeafId) :
+    ∀ (n : Nat) (internals : Array PbvhInternal) (lo hi : Nat), hi - lo = n →
+      ∀ (j : Nat) (hj : j < internals.size),
+        ∃ (hj' : j < (buildSubtree leaves sorted internals lo hi).1.size),
+          (buildSubtree leaves sorted internals lo hi).1[j]'hj' = internals[j] := by
+  intro n
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+    intro internals lo hi hn j hj
+    unfold buildSubtree
+    split
+    · -- Base: push leaf; j < internals.size < (push).size.
+      refine ⟨?_, ?_⟩
+      · show j < (internals.push _).size; simp [Array.size_push]; omega
+      · show (internals.push _)[j]'_ = internals[j]
+        exact Array.getElem_push_lt hj
+    · -- Recursive: state0 = push ph; two recursive calls; set! internals.size.
+      dsimp only
+      obtain ⟨mid, _, _⟩ := computeMid leaves sorted lo hi (by omega)
+      let ph : PbvhInternal :=
+        { bounds := windowBounds leaves sorted lo hi, offset := lo,
+          span := hi - lo, skip := internals.size + 1,
+          left := none, right := none }
+      let state0 := internals.push ph
+      have hstate0_size : state0.size = internals.size + 1 := by
+        show (internals.push ph).size = internals.size + 1
+        simp [Array.size_push]
+      have hj_state0 : j < state0.size := by omega
+      have hstate0_j : ∀ (h : j < state0.size), state0[j]'h = internals[j] := by
+        intro h
+        show (internals.push ph)[j]'h = internals[j]
+        exact Array.getElem_push_lt hj
+      -- IH on left call.
+      have hleft_lt : mid - lo < n := by omega
+      obtain ⟨hj_s1, hleft⟩ := ih (mid - lo) hleft_lt state0 lo mid rfl j hj_state0
+      have hleft_j : (buildSubtree leaves sorted state0 lo mid).1[j]'hj_s1 =
+          internals[j] := by rw [hleft]; exact hstate0_j hj_state0
+      -- IH on right call.
+      have hright_lt : hi - mid < n := by omega
+      obtain ⟨hj_s2, hright⟩ := ih (hi - mid) hright_lt
+        (buildSubtree leaves sorted state0 lo mid).1 mid hi rfl j hj_s1
+      have hbridge : (buildSubtree leaves sorted
+          (buildSubtree leaves sorted state0 lo mid).1 mid hi).1[j]'hj_s2 =
+            internals[j] := by rw [hright]; exact hleft_j
+      -- set! at position internals.size doesn't touch j < internals.size.
+      have hne : j ≠ internals.size := by omega
+      refine ⟨?_, ?_⟩
+      · show j < ((buildSubtree leaves sorted _ mid hi).1.set!
+          internals.size _).size
+        simp; exact hj_s2
+      · show ((buildSubtree leaves sorted _ mid hi).1.set!
+          internals.size _)[j]'_ = internals[j]
+        rw [Array.getElem_set_ne (h := hne)]
+        exact hbridge
+
 end PbvhTree
