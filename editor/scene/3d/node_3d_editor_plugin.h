@@ -30,7 +30,7 @@
 
 #pragma once
 
-#include "core/math/predictive_bvh.h"
+#include "core/math/predictive_bvh_adapter.h"
 #include "editor/plugins/editor_plugin.h"
 #include "editor/scene/3d/node_3d_editor_gizmos.h"
 #include "editor/themes/editor_scale.h"
