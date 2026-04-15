@@ -612,4 +612,20 @@ theorem buildSubtree_preserves_prefix (leaves : Array PbvhLeaf)
         rw [Array.getElem_set_ne (h := hne)]
         exact hbridge
 
+/-- Root-level skip monotonicity: the root node returned by `buildSubtree`
+    has `root < skip[root] ≤ result.size`. Direct composition of
+    `buildSubtree_root`, `buildSubtree_root_lt_size`, and
+    `buildSubtree_skip_eq_final_size`. This is the form `aabbQueryN.go`'s
+    termination argument consumes at the entry into the root. -/
+theorem buildSubtree_root_skip_monotone (leaves : Array PbvhLeaf)
+    (sorted : Array LeafId) (internals : Array PbvhInternal) (lo hi : Nat) :
+    let res := buildSubtree leaves sorted internals lo hi
+    res.2 < res.1[res.2]!.skip ∧ res.1[res.2]!.skip ≤ res.1.size := by
+  have hroot := buildSubtree_root_lt_size leaves sorted internals lo hi
+  have hskip := buildSubtree_skip_eq_final_size leaves sorted internals lo hi
+  dsimp only at hskip ⊢
+  refine ⟨?_, ?_⟩
+  · rw [hskip]; exact hroot
+  · rw [hskip]; exact Nat.le_refl _
+
 end PbvhTree
