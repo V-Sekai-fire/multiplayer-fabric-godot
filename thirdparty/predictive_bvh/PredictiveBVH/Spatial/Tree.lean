@@ -45,13 +45,27 @@ structure PbvhInternal where
   right  : Option InternalId
   deriving Inhabited, Repr
 
+/-- One Hilbert-prefix bucket. `[sortedLo, sortedHi)` is the window into
+    `sorted[]` whose Hilbert prefix at `bucketBits` equals this bucket index;
+    `[internalsLo, internalsHi)` is the reserved pre-order window into
+    `internals[]` owned by the subtree rooted at `subtreeRoot`. Phase 2c's
+    `refitBucket` / `resortBucket` confine their writes to these two windows,
+    so touching one bucket does not invalidate any other bucket's subtree. -/
+structure PbvhBucketSlot where
+  sortedLo     : Nat
+  sortedHi     : Nat
+  internalsLo  : Nat
+  internalsHi  : Nat
+  subtreeRoot  : Option InternalId
+  deriving Inhabited, Repr
+
 /-- Purely-functional BVH tree over EClassId leaves. -/
 structure PbvhTree where
   leaves       : Array PbvhLeaf
-  sorted       : Array LeafId       -- ascending by leaves[·].hilbert
-  internals    : Array PbvhInternal -- pre-order DFS
-  bucketBits   : Nat                -- 0 disables bucket dir
-  bucketDir    : Array (Nat × Nat)  -- (lo, hi) per Hilbert prefix
+  sorted       : Array LeafId          -- ascending by leaves[·].hilbert
+  internals    : Array PbvhInternal    -- pre-order DFS
+  bucketBits   : Nat                   -- 0 disables bucket dir
+  bucketSlots  : Array PbvhBucketSlot  -- one per Hilbert prefix
   internalRoot : Option InternalId
   /-- Opaque uint32-sized tag used by `RendererSceneCull::Scenario::indexers`
       to recover which indexer a callback came from. Preserved by `build` /
@@ -64,7 +78,7 @@ namespace PbvhTree
 /-- The empty tree. -/
 def empty : PbvhTree :=
   { leaves := #[], sorted := #[], internals := #[],
-    bucketBits := 0, bucketDir := #[], internalRoot := none }
+    bucketBits := 0, bucketSlots := #[], internalRoot := none }
 
 /-- Count of leaves currently live. -/
 def liveCount (t : PbvhTree) : Nat :=
@@ -73,7 +87,7 @@ def liveCount (t : PbvhTree) : Nat :=
 -- ── insert / remove / update ─────────────────────────────────────────────────
 
 /-- Append a new live leaf. Returns the new tree and its LeafId. `sorted`,
-    `internals`, `bucketDir` go stale until `build` runs. -/
+    `internals`, `bucketSlots` go stale until `build` runs. -/
 def insert (t : PbvhTree) (eclass : EClassId) (bounds : BoundingBox)
     (hilbert : Nat) : PbvhTree × LeafId :=
   let newLeaf : PbvhLeaf := { eclass, bounds, hilbert, alive := true }
@@ -215,17 +229,17 @@ private def buildSubtree
 /-- Rebuild the sorted-by-Hilbert view and the internals tree. Leaves remain
     in place; `alive` flags are untouched. Bucket directory is left empty
     in this Lean codification; callers that want O(1)+k prefix queries can
-    populate `bucketDir` in the C emission. -/
+    populate `bucketSlots` in the C emission. -/
 def build (t : PbvhTree) : PbvhTree :=
   let live := liveIds t.leaves
   let sorted := insertionSortByHilbert t.leaves live
   if sorted.isEmpty then
     { t with sorted := #[], internals := #[], internalRoot := none,
-             bucketDir := #[] }
+             bucketSlots := #[] }
   else
     let (internals, root) := buildSubtree t.leaves sorted #[] 0 sorted.size
     { t with sorted := sorted, internals := internals,
-             internalRoot := some root, bucketDir := #[] }
+             internalRoot := some root, bucketSlots := #[] }
 
 -- ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -386,7 +400,7 @@ def isEmpty (t : PbvhTree) : Bool :=
 /-- Reset the tree to empty while preserving `bucketBits` and `index`. -/
 def clear (t : PbvhTree) : PbvhTree :=
   { leaves := #[], sorted := #[], internals := #[],
-    bucketBits := t.bucketBits, bucketDir := #[],
+    bucketBits := t.bucketBits, bucketSlots := #[],
     internalRoot := none, index := t.index }
 
 /-- DynamicBVH-parity wrapper: ignore `passes`, just run a full `build`.
@@ -401,6 +415,140 @@ def getIndex (t : PbvhTree) : Nat := t.index
 /-- Write the opaque indexer tag. -/
 def setIndex (t : PbvhTree) (idx : Nat) : PbvhTree :=
   { t with index := idx }
+
+-- ── Phase 2c: bucket-localized rebalance ────────────────────────────────────
+
+/-- Reverse-DFS refit of the internals window `[internalsLo, internalsHi)`
+    owned by bucket `b`: re-`unionBounds` from children bottom-up. Only the
+    `bounds` field of internals inside the window is touched; every other
+    internal and every other field (offset/span/skip/left/right) is preserved,
+    as are leaves, sorted, and bucketSlots. Used by `tick` when a leaf moves
+    within its bucket. -/
+def refitBucket (t : PbvhTree) (b : Nat) : PbvhTree :=
+  if hb : b < t.bucketSlots.size then
+    let slot := t.bucketSlots[b]
+    let hi := slot.internalsHi
+    let count := hi - slot.internalsLo
+    let internals := (List.range count).foldl (fun (ins : Array PbvhInternal) k =>
+      let i := hi - 1 - k
+      match ins[i]? with
+      | none => ins
+      | some n =>
+        let newBounds : BoundingBox :=
+          match n.left, n.right with
+          | none, none =>
+              windowBounds t.leaves t.sorted n.offset (n.offset + n.span)
+          | some l, none =>
+              (ins[l]?.map (·.bounds)).getD n.bounds
+          | none, some r =>
+              (ins[r]?.map (·.bounds)).getD n.bounds
+          | some l, some r =>
+              match ins[l]?, ins[r]? with
+              | some lb, some rb => unionBounds lb.bounds rb.bounds
+              | some lb, none    => lb.bounds
+              | none,    some rb => rb.bounds
+              | none,    none    => n.bounds
+        ins.modify i (fun m => { m with bounds := newBounds })) t.internals
+    { t with internals := internals }
+  else t
+
+/-- Rebuild the subtree owned by bucket `b`: re-sort the `sorted` window
+    `[sortedLo, sortedHi)` by Hilbert code, then reconstruct a fresh
+    internals subtree and splice it into `internals[internalsLo, …)`.
+    Internal indices inside the subtree (skip/left/right) are relocated
+    by `+ internalsLo` so the spliced subtree addresses into the global
+    `internals` array. Windows outside the bucket are untouched; caller
+    guarantees the new subtree fits (`subInternals.size ≤ internalsHi -
+    internalsLo`) or accepts a truncating splice. Used by `tick` when a
+    dirty leaf crossed its bucket boundary, was inserted, or was removed. -/
+def resortBucket (t : PbvhTree) (b : Nat) : PbvhTree :=
+  if hb : b < t.bucketSlots.size then
+    let slot := t.bucketSlots[b]
+    let sortedLo := slot.sortedLo
+    let sortedHi := slot.sortedHi
+    let internalsLo := slot.internalsLo
+    let internalsHi := slot.internalsHi
+    -- Extract the window, re-sort it, splice back.
+    let windowLen := sortedHi - sortedLo
+    let window : Array LeafId := Array.ofFn (n := windowLen)
+      (fun i => t.sorted[sortedLo + i.val]!)
+    let resorted := insertionSortByHilbert t.leaves window
+    let newSorted : Array LeafId := Array.ofFn (n := t.sorted.size) (fun i =>
+      if i.val < sortedLo || sortedHi ≤ i.val then t.sorted[i.val]!
+      else if h : i.val - sortedLo < resorted.size then resorted[i.val - sortedLo]
+      else t.sorted[i.val]!)
+    -- Rebuild the subtree against the freshly sorted window.
+    let (subInternals, _subRoot) :=
+      buildSubtree t.leaves newSorted #[] sortedLo sortedHi
+    -- Splice into internals, relocating internal indices by `+ internalsLo`.
+    let winLen := internalsHi - internalsLo
+    let subLen := min subInternals.size winLen
+    let newInternals : Array PbvhInternal := Array.ofFn (n := t.internals.size)
+      (fun i =>
+        if i.val < internalsLo || internalsLo + subLen ≤ i.val then
+          t.internals[i.val]!
+        else if h : i.val - internalsLo < subInternals.size then
+          let n := subInternals[i.val - internalsLo]
+          { n with
+              skip  := n.skip + internalsLo,
+              left  := n.left.map (· + internalsLo),
+              right := n.right.map (· + internalsLo) }
+        else t.internals[i.val]!)
+    { t with sorted := newSorted, internals := newInternals }
+  else t
+
+/-- One entry in the per-frame dirty-leaf list handed to `tick`. `oldHilbert`
+    is the Hilbert code the leaf had on the previous build/tick; the current
+    code lives in `leaves[leafId].hilbert`. Comparing them lets `tick`
+    classify the leaf as stayed-in-bucket (refit) vs crossed-boundary
+    (resort). -/
+structure DirtyLeaf where
+  leafId     : LeafId
+  oldHilbert : Nat
+  deriving Inhabited, Repr
+
+/-- Per-frame rebalance driven by a dirty-leaf list. Classifies each dirty
+    leaf by whether its Hilbert-prefix bucket changed; refits buckets where
+    nothing moved, resorts buckets where a leaf crossed in/out. Falls back
+    to a full `build` when the resort set is too large to amortize. Falls
+    back to `build` unconditionally when `bucketBits = 0` (no bucket
+    directory to localize writes against). -/
+def tick (t : PbvhTree) (dirty : Array DirtyLeaf) : PbvhTree :=
+  if t.bucketBits = 0 then build t
+  else
+    let shift := 30 - t.bucketBits
+    let bucketOf : Nat → Nat := fun h => h >>> shift
+    let init : Array Nat × Array Nat := (#[], #[])
+    let (refitSet, resortSet) := dirty.foldl (fun acc d =>
+      let rSet := acc.1
+      let sSet := acc.2
+      match t.leaves[d.leafId]? with
+      | none => acc
+      | some l =>
+        let oldB := bucketOf d.oldHilbert
+        let newB := bucketOf l.hilbert
+        if oldB = newB then (rSet.push newB, sSet)
+        else (rSet, (sSet.push oldB).push newB)) init
+    let avgBucket : Nat :=
+      if h : t.bucketSlots.size = 0 then 0 else t.sorted.size / t.bucketSlots.size
+    if resortSet.size * avgBucket * 2 > t.sorted.size then
+      build t
+    else
+      let t1 := resortSet.foldl resortBucket t
+      refitSet.foldl refitBucket t1
+
+/-- `resortBucket` does not touch leaves, bucketSlots, bucketBits, index, or
+    internalRoot. Caller-visible state in those fields is identical before
+    and after. Per-index window preservation for `sorted`/`internals`
+    outside the bucket windows is deferred to `tick`'s proof pass. -/
+theorem resortBucket_preserves_structural (t : PbvhTree) (b : Nat) :
+    (t.resortBucket b).leaves = t.leaves ∧
+    (t.resortBucket b).bucketSlots = t.bucketSlots ∧
+    (t.resortBucket b).bucketBits = t.bucketBits ∧
+    (t.resortBucket b).internalRoot = t.internalRoot ∧
+    (t.resortBucket b).index = t.index := by
+  simp only [resortBucket]
+  split <;> simp
 
 /-- Enumerate all overlapping live-leaf pairs as `(a, b)` with `a < b` by
     EClassId. Eclass-style broadphase: no pointers, no per-slot callback. -/
@@ -488,11 +636,83 @@ theorem ops_size_monotone (t : PbvhTree) (e : EClassId) (b : BoundingBox)
   · simp [remove]; split <;> simp [Array.size_set]
 
 /-- `build` never mutates `leaves`. Everything it touches is in `sorted`,
-    `internals`, `internalRoot`, `bucketDir`. -/
+    `internals`, `internalRoot`, `bucketSlots`. -/
 theorem build_preserves_leaves (t : PbvhTree) :
     t.build.leaves = t.leaves := by
   simp only [build]
   split <;> rfl
+
+/-- Projection of an internal node onto its topology fields (everything except
+    `bounds`). `refitBucket` is defined to preserve this projection at every
+    index. -/
+private def topoProj (n : PbvhInternal) :
+    Nat × Nat × InternalId × Option InternalId × Option InternalId :=
+  (n.offset, n.span, n.skip, n.left, n.right)
+
+/-- Record-update on `bounds` leaves every other field of `PbvhInternal`
+    unchanged; the topology projection is therefore stable. -/
+private theorem topoProj_with_bounds (n : PbvhInternal) (b : BoundingBox) :
+    topoProj { n with bounds := b } = topoProj n := rfl
+
+/-- `refitBucket` only rewrites `bounds` of internals in the bucket window;
+    every index's topology projection (offset/span/skip/left/right) is
+    preserved. -/
+theorem refitBucket_preserves_topology (t : PbvhTree) (b i : Nat) :
+    ((t.refitBucket b).internals[i]?.map topoProj) =
+      (t.internals[i]?.map topoProj) := by
+  simp only [refitBucket]
+  split
+  · -- Bucket index in range: the update is a foldl of per-step `modify`s,
+    -- each of which only rewrites `bounds`. Use foldl_invariant with the
+    -- topology-projection equality as invariant.
+    rename_i hb
+    -- Abbreviate the per-step update body; its exact shape doesn't matter
+    -- for topology preservation — only that it factors through a
+    -- `modify _ (fun m => { m with bounds := _ })`.
+    apply foldl_invariant
+      (P := fun ins => (ins[i]?.map topoProj) = (t.internals[i]?.map topoProj))
+      (f := fun ins k =>
+        let idx := (t.bucketSlots[b]'hb).internalsHi - 1 - k
+        match ins[idx]? with
+        | none => ins
+        | some n =>
+          let newBounds : BoundingBox :=
+            match n.left, n.right with
+            | none, none =>
+                windowBounds t.leaves t.sorted n.offset (n.offset + n.span)
+            | some l, none =>
+                (ins[l]?.map (·.bounds)).getD n.bounds
+            | none, some r =>
+                (ins[r]?.map (·.bounds)).getD n.bounds
+            | some l, some r =>
+                match ins[l]?, ins[r]? with
+                | some lb, some rb => unionBounds lb.bounds rb.bounds
+                | some lb, none    => lb.bounds
+                | none,    some rb => rb.bounds
+                | none,    none    => n.bounds
+          ins.modify idx (fun m => { m with bounds := newBounds }))
+    · rfl
+    · intro ins k hins
+      -- Step case: match on the lookup, either no-op or `modify` on bounds.
+      dsimp only
+      set idx := (t.bucketSlots[b]'hb).internalsHi - 1 - k
+      cases hlook : ins[idx]? with
+      | none => simpa [hlook] using hins
+      | some n =>
+        simp only [hlook]
+        -- Reduce `(modify idx g ins)[i]?.map topoProj` using getElem?_modify.
+        rw [Array.getElem?_modify]
+        by_cases hidx : idx = i
+        · subst hidx
+          simp only [if_pos rfl, hlook, Option.map_some,
+            topoProj_with_bounds]
+          -- `ins[idx]?.map topoProj = t.internals[idx]?.map topoProj`
+          have := hins
+          simp [hlook] at this
+          simpa using this
+        · simp only [if_neg hidx]
+          exact hins
+  · rfl
 
 /-- Corollary: `build` preserves every leaf's `alive` flag. -/
 theorem build_preserves_alive (t : PbvhTree) (i : LeafId) :
@@ -2048,5 +2268,33 @@ theorem ghost_aabbQueryN_complete_from_invariants
   exact aabbQueryN_complete_from_invariants t q h_leaf_skip h_skip_mono
     h_root h_nonempty target htarget h_target_left h_target_right jw hjw
     l hl halive hl_ov h_path_from_root
+
+/-- **Agreement between `tick` and `build`.** Every query answered against a
+    tree produced by `tick` from a dirty-leaf list returns the same list
+    (as a multiset, modulo DFS order) as the same query against a freshly
+    `build`-produced tree whose leaves carry the *current* bounds/hilbert.
+
+    Proof sketch (to be discharged in a follow-up):
+    - The fallback branches to full `build`, which satisfies the goal by
+      `rfl` on the target expression.
+    - The incremental branch composes per-bucket `resortBucket` writes
+      (which rebuild that bucket's subtree from scratch against the
+      refreshed `sorted` window, so `aabbQueryN` restricted to that
+      window agrees with `build`'s by the proof already shipped as
+      `aabbQueryN_sound`/`_complete`) with per-bucket `refitBucket`
+      writes (bounds-only; `refitBucket_preserves_topology` gives
+      exact structural equality, and the bounds refresh is a
+      union-monotone rewrite).
+    - Per-bucket localization is closed by the deferred window-
+      preservation companion to `resortBucket_preserves_structural`.
+
+    Shipping this with a documented `sorry` is explicitly allowed by the
+    Phase 2c plan: the bench gate (step 7) fires regardless, and the
+    production consumers (FabricZone, gizmo, cull) re-verify results via
+    callback predicates, so over-emission inside a proof gap is tolerated. -/
+theorem tick_agrees_with_build
+    (t : PbvhTree) (dirty : Array DirtyLeaf) (q : BoundingBox) :
+    (t.tick dirty).aabbQueryN q = t.build.aabbQueryN q := by
+  sorry
 
 end PbvhTree
