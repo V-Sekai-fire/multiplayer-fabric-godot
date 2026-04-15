@@ -594,11 +594,57 @@ static inline bool pbvh_tree_is_empty(const pbvh_tree_t *t) {
 \treturn true;
 }
 
-/* DynamicBVH-parity wrapper: ignore `passes`, run a full pbvh_tree_build.
- * Phase 2c will replace this with bucket-localized `pbvh_tree_tick`. */
+/* Phase 2c: per-frame dirty-leaf entry handed to pbvh_tree_tick. old_hilbert
+ * is the Hilbert code the leaf had on the previous build/tick; the current
+ * code lives in t->nodes[leaf_id].hilbert. Comparing the two, masked by
+ * bucket_bits, classifies the leaf as stayed-in-bucket (refit-compatible)
+ * vs crossed-boundary (needs full rebuild). */
+typedef struct pbvh_dirty_leaf {
+\tpbvh_node_id_t leaf_id;
+\tuint32_t old_hilbert;
+} pbvh_dirty_leaf_t;
+
+/* Per-frame rebalance. When every dirty leaf kept its Hilbert-prefix bucket
+ * (so sorted[] order and internals[] topology are still valid), we can skip
+ * the O(N) sort+build and just re-union bounds bottom-up via pbvh_tree_refit
+ * — O(internal_count) sequential reads. Any leaf that crossed a bucket
+ * boundary, or a zero bucket_bits config, forces a full pbvh_tree_build.
+ * Passing (dirty=NULL, dirty_count=0) is an explicit \"reset internals
+ * from current leaves\" request and behaves as pbvh_tree_build. */
+static inline void pbvh_tree_tick(pbvh_tree_t *t,
+\t\tconst pbvh_dirty_leaf_t *dirty, uint32_t dirty_count) {
+\tif (dirty_count == 0u || dirty == NULL || t->bucket_bits == 0u ||
+\t\t\tt->bucket_bits > 30u) {
+\t\tpbvh_tree_build(t);
+\t\treturn;
+\t}
+\tconst uint32_t shift = 30u - t->bucket_bits;
+\tfor (uint32_t i = 0; i < dirty_count; i++) {
+\t\tconst pbvh_dirty_leaf_t *d = &dirty[i];
+\t\tif (d->leaf_id >= t->count) {
+\t\t\tcontinue;
+\t\t}
+\t\tconst pbvh_node_t *n = &t->nodes[d->leaf_id];
+\t\tif (!n->is_leaf) {
+\t\t\t/* Dead / removed → topology changed; fall back. */
+\t\t\tpbvh_tree_build(t);
+\t\t\treturn;
+\t\t}
+\t\tif ((n->hilbert >> shift) != (d->old_hilbert >> shift)) {
+\t\t\tpbvh_tree_build(t);
+\t\t\treturn;
+\t\t}
+\t}
+\t/* All dirty leaves stayed in their bucket: bounds-only refit suffices. */
+\tpbvh_tree_refit(t);
+}
+
+/* DynamicBVH-parity wrapper: ignore `passes`, route through pbvh_tree_tick
+ * with an empty dirty list → pbvh_tree_build. Consumers that want the
+ * Phase 2c fast path call pbvh_tree_tick directly with their dirty list. */
 static inline void pbvh_tree_optimize_incremental(pbvh_tree_t *t, int passes) {
 \t(void)passes;
-\tpbvh_tree_build(t);
+\tpbvh_tree_tick(t, NULL, 0u);
 }
 
 /* Opaque uint32 tag for consumers that multiplex multiple trees (e.g.

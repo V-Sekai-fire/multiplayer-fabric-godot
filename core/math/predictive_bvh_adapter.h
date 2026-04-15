@@ -168,6 +168,32 @@ public:
 		(void)p_passes;
 	}
 
+	// Phase 2c per-frame rebalance. Pass the leaves that moved this frame
+	// paired with their previous Hilbert code; the emitted C tick picks
+	// refit vs full build based on whether any leaf crossed its Hilbert
+	// bucket. tree.bucket_bits must be non-zero for the fast path to
+	// fire; when it is zero (default), tick routes to pbvh_tree_build.
+	struct DirtyLeaf {
+		ID id;
+		uint32_t old_hilbert;
+	};
+
+	void tick(const DirtyLeaf *p_dirty, uint32_t p_count) {
+		if (p_count == 0 || p_dirty == nullptr) {
+			pbvh_tree_tick(&tree, nullptr, 0);
+			dirty = false;
+			return;
+		}
+		LocalVector<pbvh_dirty_leaf_t> scratch;
+		scratch.resize(p_count);
+		for (uint32_t i = 0; i < p_count; i++) {
+			scratch[i].leaf_id = p_dirty[i].id.id;
+			scratch[i].old_hilbert = p_dirty[i].old_hilbert;
+		}
+		pbvh_tree_tick(&tree, scratch.ptr(), p_count);
+		dirty = false;
+	}
+
 	_FORCE_INLINE_ void set_index(uint32_t p_index) { index_slot = p_index; }
 	_FORCE_INLINE_ uint32_t get_index() const { return index_slot; }
 
