@@ -404,4 +404,3 @@ $RECYCLE.BIN/
 
 /*.db*
 thirdparty/uro/cockroach/
-.claude/scheduled_tasks.lock
