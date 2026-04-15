@@ -888,6 +888,78 @@ theorem aabbQueryN_leaf_fold_preserves_sound (t : PbvhTree) (q : BoundingBox)
       · simp only [hlk, halive, Bool.false_and, if_false]
         exact hacc'
 
+/-- Extension lemma: a cons-only foldl preserves every element already in
+    the initial accumulator. The step function `f` is constrained to only
+    *extend* the accumulator — never drop elements. -/
+private theorem foldl_cons_preserves {α β : Type _}
+    (f : List β → α → List β)
+    (hmono : ∀ (acc : List β) (a : α) (x : β), x ∈ acc → x ∈ f acc a) :
+    ∀ (l : List α) (init : List β) (x : β), x ∈ init →
+      x ∈ l.foldl f init := by
+  intro l
+  induction l with
+  | nil => intro _ _ hx; exact hx
+  | cons hd tl ih =>
+    intro init x hx
+    simp only [List.foldl_cons]
+    exact ih (f init hd) x (hmono init hd x hx)
+
+/-- **Leaf-fold completeness.** If position `j < span` resolves to a live
+    leaf whose bounds overlap the query, then the leaf's eclass appears in
+    the fold result. Induction on `span`: at the target step the guard fires
+    so the emission is cons'd in; later steps only extend the list. -/
+theorem aabbQueryN_leaf_fold_emits (t : PbvhTree) (q : BoundingBox)
+    (offset span : Nat) (acc : List EClassId)
+    (j : Nat) (hj : j < span)
+    (l : PbvhLeaf)
+    (hl : t.leaves[t.sorted[offset + j]!]? = some l)
+    (halive : l.alive = true)
+    (hov : aabbOverlapsDec l.bounds q = true) :
+    l.eclass ∈ (List.range span).foldl (fun acc j =>
+      let lid := t.sorted[offset + j]!
+      match t.leaves[lid]? with
+      | some l =>
+        if l.alive && aabbOverlapsDec l.bounds q then
+          l.eclass :: acc else acc
+      | none => acc) acc := by
+  -- Step function is monotone (extension-only).
+  set f : List EClassId → Nat → List EClassId := fun acc j =>
+    let lid := t.sorted[offset + j]!
+    match t.leaves[lid]? with
+    | some l =>
+      if l.alive && aabbOverlapsDec l.bounds q then
+        l.eclass :: acc else acc
+    | none => acc with hf_def
+  have hmono : ∀ (acc : List EClassId) (k : Nat) (x : EClassId),
+      x ∈ acc → x ∈ f acc k := by
+    intro acc k x hx
+    simp only [hf_def]
+    cases hlk : t.leaves[t.sorted[offset + k]!]? with
+    | none => simpa [hlk] using hx
+    | some l' =>
+      by_cases hg : l'.alive && aabbOverlapsDec l'.bounds q
+      · simp only [hlk, hg, if_true]; exact List.mem_cons_of_mem _ hx
+      · simp only [hlk, hg, if_false]; exact hx
+  -- Induct on span.
+  induction span with
+  | zero => exact absurd hj (by omega)
+  | succ n ih =>
+    rw [List.range_succ, List.foldl_append]
+    simp only [List.foldl_cons, List.foldl_nil]
+    by_cases hjn : j = n
+    · -- Target step is the last one: guard fires, emission cons'd.
+      subst hjn
+      have hemit :
+          f ((List.range j).foldl f acc) j =
+          l.eclass :: (List.range j).foldl f acc := by
+        simp only [hf_def, hl, halive, hov, Bool.and_self, if_true]
+      rw [hemit]; exact List.mem_cons_self
+    · -- Target step earlier than last: IH places eclass in acc', then
+      -- the final step preserves it via `hmono`.
+      have hj' : j < n := by omega
+      have hin : l.eclass ∈ (List.range n).foldl f acc := ih hj'
+      exact hmono _ n _ hin
+
 /-- Soundness invariant for `aabbQueryNGo`: if every eclass already in `acc`
     has a sound witness, so does every eclass in the result. Proved by strong
     induction on the termination measure `t.internals.size - i`. At each
