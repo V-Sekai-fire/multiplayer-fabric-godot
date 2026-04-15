@@ -2182,7 +2182,6 @@ theorem aabbQueryN_complete_from_invariants
   · rename_i h; exact absurd h h_nonempty
   · rename_i _hne
     rw [h_root]
-    dsimp only
     exact aabbQueryNGo_visits_overlapping_leaf t q h_leaf_skip h_skip_mono
       target htarget h_target_left h_target_right jw hjw l hl halive hl_ov
       (target - 0) 0 [] rfl (Nat.zero_le _)
