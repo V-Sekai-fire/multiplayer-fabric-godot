@@ -2,6 +2,7 @@
 -- Copyright (c) 2026-present K. S. Ernest (iFire) Lee
 
 import PredictiveBVH.Primitives.Types
+import PredictiveBVH.Formulas.Formula
 import PredictiveBVH.Formulas.LowerBound
 import PredictiveBVH.Spatial.HilbertBroadphase
 
@@ -1832,5 +1833,86 @@ theorem aabbQueryN_complete_from_invariants
       target htarget h_target_left h_target_right jw hjw l hl halive hl_ov
       (target - 0) 0 [] rfl (Nat.zero_le _)
       (fun k _ hk_le => h_path_from_root k hk_le)
+
+/-- The ghost-expanded AABB strictly contains the leaf's original bounds.
+    Direct consequence of `expansion v a k ≥ 0` on every axis: each min
+    shrinks (`minX - ex ≤ minX` since `ex ≥ 0`) and each max grows
+    (`maxX ≤ maxX + ex`), so the original interval sits inside.
+
+    This is the geometric primitive for ghost-query completeness: a
+    caller querying with `expandedBounds ld δ` gets a superset of what
+    they'd get querying with `ld.bounds`, because overlap lifts through
+    containment. -/
+theorem expandedBounds_contains_original (ld : LeafData) (k : Nat) :
+    aabbContains (expandedBounds ld k) ld.bounds := by
+  simp only [aabbContains, expandedBounds]
+  have hx : (0 : Int) ≤ Int.ofNat
+      (expansion ld.velocity[0]!.toNat ld.acceleration[0]!.toNat k) :=
+    Int.natCast_nonneg _
+  have hy : (0 : Int) ≤ Int.ofNat
+      (expansion ld.velocity[1]!.toNat ld.acceleration[1]!.toNat k) :=
+    Int.natCast_nonneg _
+  have hz : (0 : Int) ≤ Int.ofNat
+      (expansion ld.velocity[2]!.toNat ld.acceleration[2]!.toNat k) :=
+    Int.natCast_nonneg _
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩ <;> omega
+
+/-- **Overlap lifts through containment.** If `outer ⊇ inner` and `q`
+    overlaps `inner`, then `q` overlaps `outer`. Decidable version
+    (Bool-valued `aabbOverlapsDec`): direct on each axis. -/
+theorem aabbOverlapsDec_lift_through_contains
+    (q outer inner : BoundingBox) (hc : aabbContains outer inner)
+    (hov : aabbOverlapsDec q inner = true) :
+    aabbOverlapsDec q outer = true := by
+  simp only [aabbOverlapsDec, aabbContains] at *
+  obtain ⟨cx1, cx2, cy1, cy2, cz1, cz2⟩ := hc
+  revert hov
+  grind
+
+/-- **Ghost-query completeness.** Under the structural skip invariants
+    (leaf-block skip = j+1, full-node skip monotonicity), if the query
+    box `q` contains some live leaf's bounds (e.g. `q = expandedBounds ld k`
+    contains `ld.bounds` by `expandedBounds_contains_original`), and the
+    leaf sits in the target leaf-block's window, and every node on the
+    sweep path overlaps `q`, then the leaf's eclass is emitted by
+    `aabbQueryN`.
+
+    Direct composition of `aabbQueryN_complete_from_invariants` with the
+    observation that a live leaf whose bounds are contained in `q`
+    trivially overlaps `q` (overlap is reflexive under containment). -/
+theorem ghost_aabbQueryN_complete_from_invariants
+    (t : PbvhTree) (q : BoundingBox)
+    (h_leaf_skip : ∀ j, j < t.internals.size →
+      (t.internals[j]!).left = none → (t.internals[j]!).right = none →
+        (t.internals[j]!).skip = j + 1)
+    (h_skip_mono : ∀ j, j < t.internals.size →
+      j < (t.internals[j]!).skip ∧
+      (t.internals[j]!).skip ≤ t.internals.size)
+    (h_root : t.internalRoot = some 0)
+    (h_nonempty : ¬ t.internals.isEmpty)
+    (target : Nat) (htarget : target < t.internals.size)
+    (h_target_left : (t.internals[target]!).left = none)
+    (h_target_right : (t.internals[target]!).right = none)
+    (jw : Nat) (hjw : jw < (t.internals[target]!).span)
+    (l : PbvhLeaf)
+    (hl : t.leaves[t.sorted[(t.internals[target]!).offset + jw]!]? = some l)
+    (halive : l.alive = true)
+    -- Ghost premise: query contains leaf's bounds (the "reachable" condition).
+    (hl_contained : aabbContains q l.bounds)
+    -- Well-formedness of leaf bounds (minima ≤ maxima, componentwise).
+    (hl_wf : l.bounds.minX ≤ l.bounds.maxX ∧ l.bounds.minY ≤ l.bounds.maxY ∧
+             l.bounds.minZ ≤ l.bounds.maxZ)
+    (h_path_from_root : ∀ k, k ≤ target →
+      aabbOverlapsDec (t.internals[k]!).bounds q = true) :
+    l.eclass ∈ aabbQueryN t q := by
+  -- Containment + well-formedness ⟹ overlap.
+  have hl_ov : aabbOverlapsDec l.bounds q = true := by
+    simp only [aabbOverlapsDec, aabbContains] at *
+    obtain ⟨cx1, cx2, cy1, cy2, cz1, cz2⟩ := hl_contained
+    obtain ⟨wx, wy, wz⟩ := hl_wf
+    grind
+  exact aabbQueryN_complete_from_invariants t q h_leaf_skip h_skip_mono
+    h_root h_nonempty target htarget h_target_left h_target_right jw hjw
+    l hl halive hl_ov h_path_from_root
 
 end PbvhTree
