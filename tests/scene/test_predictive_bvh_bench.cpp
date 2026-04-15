@@ -859,10 +859,20 @@ TEST_CASE("[PredictiveBVH][Bench] growth rate of insert+tick vs DynamicBVH") {
 		storage.resize(N + 16);
 		Vector<pbvh_node_id_t> sorted_buf;
 		sorted_buf.resize(N + 16);
+		const uint32_t internal_cap = 2u * (N + 16u);
 		Vector<pbvh_internal_t> internals;
-		internals.resize(2 * (N + 16));
+		internals.resize(internal_cap);
 		Vector<uint32_t> bucket_dir;
 		bucket_dir.resize(pbvh_bucket_dir_size(N));
+		Vector<uint32_t> parent_of;
+		parent_of.resize(internal_cap);
+		Vector<uint32_t> leaf_to;
+		leaf_to.resize(N + 16);
+		const uint32_t touched_words = (internal_cap + 63u) / 64u;
+		Vector<uint64_t> touched_bits;
+		touched_bits.resize(touched_words);
+		Vector<uint64_t> touched_meta_bits;
+		touched_meta_bits.resize((touched_words + 63u) / 64u);
 
 		pbvh_tree_t tree = {};
 		tree.nodes = storage.ptrw();
@@ -875,6 +885,10 @@ TEST_CASE("[PredictiveBVH][Bench] growth rate of insert+tick vs DynamicBVH") {
 		tree.internal_root = PBVH_NULL_NODE;
 		tree.bucket_dir = bucket_dir.ptrw();
 		tree.bucket_bits = HILBERT_PREFIX_BITS;
+		tree.parent_of_internal = parent_of.ptrw();
+		tree.leaf_to_internal = leaf_to.ptrw();
+		tree.touched_bits = touched_bits.ptrw();
+		tree.touched_meta_bits = touched_meta_bits.ptrw();
 
 		const uint64_t t_p_ins0 = OS::get_singleton()->get_ticks_usec();
 		for (uint32_t i = 0; i < N; i++) {
