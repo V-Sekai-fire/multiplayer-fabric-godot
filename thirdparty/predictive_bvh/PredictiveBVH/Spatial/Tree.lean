@@ -1678,4 +1678,159 @@ theorem build_contains_leaf (t : PbvhTree)
     exact buildSubtree_new_node_contains_leaf t.leaves sorted #[] 0 sorted.size
       j hj_ge hj l k node_offset_le k_lt_node_end hl
 
+/-- **DFS reachability sweep.** Given a tree whose structural skip invariants
+    hold (leaf-block skip = j+1, full-node skip monotonicity), if the DFS
+    path from `i` to a leaf-block `target` contains only overlapping nodes,
+    then `aabbQueryNGo t q i acc` emits every live overlapping leaf in the
+    target's window.
+
+    The key operational fact: at every index `i < target` with overlapping
+    bounds, `aabbQueryNGo` advances by exactly 1 — either via the `i + 1`
+    advance in the non-leaf branch, or via `next = skip[i] = i + 1` in the
+    leaf branch (by `h_leaf_skip`). Strong induction on `target - i`. -/
+theorem aabbQueryNGo_visits_overlapping_leaf (t : PbvhTree) (q : BoundingBox)
+    (h_leaf_skip : ∀ j, j < t.internals.size →
+      (t.internals[j]!).left = none → (t.internals[j]!).right = none →
+        (t.internals[j]!).skip = j + 1)
+    (h_skip_mono : ∀ j, j < t.internals.size →
+      j < (t.internals[j]!).skip ∧
+      (t.internals[j]!).skip ≤ t.internals.size)
+    (target : Nat) (htarget : target < t.internals.size)
+    (h_target_left : (t.internals[target]!).left = none)
+    (h_target_right : (t.internals[target]!).right = none)
+    (jw : Nat) (hjw : jw < (t.internals[target]!).span)
+    (l : PbvhLeaf)
+    (hl : t.leaves[t.sorted[(t.internals[target]!).offset + jw]!]? = some l)
+    (halive : l.alive = true) (hl_ov : aabbOverlapsDec l.bounds q = true) :
+    ∀ (m : Nat) (i : Nat) (acc : List EClassId),
+      target - i = m → i ≤ target →
+      (∀ k, i ≤ k → k ≤ target →
+        aabbOverlapsDec (t.internals[k]!).bounds q = true) →
+      l.eclass ∈ aabbQueryNGo t q i acc := by
+  intro m
+  induction m using Nat.strongRecOn with
+  | _ m ih =>
+    intro i acc hm hi_le h_path
+    have hi_lt : i < t.internals.size :=
+      Nat.lt_of_le_of_lt hi_le htarget
+    have hov_i : aabbOverlapsDec (t.internals[i]!).bounds q = true :=
+      h_path i (Nat.le_refl _) hi_le
+    by_cases hi_eq : i = target
+    · -- Base case: arrived at target, use local leaf-block completeness.
+      subst hi_eq
+      exact aabbQueryNGo_leaf_block_complete t q i hi_lt
+        ⟨by rw [h_target_left]; rfl, by rw [h_target_right]; rfl⟩
+        hov_i jw hjw l hl halive hl_ov acc
+    · -- Step case: i < target; advance by exactly one.
+      have hi_lt_target : i < target :=
+        Nat.lt_of_le_of_ne hi_le hi_eq
+      have hm1 : target - (i + 1) < m := by omega
+      have hi1_le : i + 1 ≤ target := by omega
+      have h_path1 : ∀ k, i + 1 ≤ k → k ≤ target →
+          aabbOverlapsDec (t.internals[k]!).bounds q = true :=
+        fun k hk1 hk2 => h_path k (by omega) hk2
+      rw [aabbQueryNGo]
+      dsimp only
+      split
+      · rename_i h; omega
+      · rename_i hlt'
+        set n := t.internals[i]! with hn_def
+        split
+        · rename_i hnov
+          exact absurd hov_i
+            (by rw [Bool.not_eq_true] at hnov; rw [hnov]; decide)
+        · split
+          · -- Leaf-block at i: fold + recurse at next = skip[i] = i + 1.
+            rename_i hleaf_cond
+            have hleaf_split : n.left.isNone = true ∧ n.right.isNone = true :=
+              Bool.and_eq_true.mp hleaf_cond
+            have hleft_none : n.left = none := by
+              cases hx : n.left with
+              | none => rfl
+              | some v =>
+                have : n.left.isNone = false := by rw [hx]; rfl
+                rw [this] at hleaf_split
+                exact absurd hleaf_split.1 (by decide)
+            have hright_none : n.right = none := by
+              cases hx : n.right with
+              | none => rfl
+              | some v =>
+                have : n.right.isNone = false := by rw [hx]; rfl
+                rw [this] at hleaf_split
+                exact absurd hleaf_split.2 (by decide)
+            have hskip_eq : n.skip = i + 1 := by
+              show (t.internals[i]!).skip = i + 1
+              exact h_leaf_skip i hi_lt hleft_none hright_none
+            have hmono := h_skip_mono i hi_lt
+            have hmono_cond : i < n.skip ∧ n.skip ≤ t.internals.size := by
+              show i < (t.internals[i]!).skip ∧
+                   (t.internals[i]!).skip ≤ t.internals.size
+              exact hmono
+            -- The `next` in aabbQueryNGo reduces to n.skip, which = i + 1.
+            set next : Nat :=
+              if _ : i < n.skip ∧ n.skip ≤ t.internals.size then n.skip
+              else i + 1 with hnext_def
+            have hnext_val : next = i + 1 := by
+              rw [hnext_def]; split
+              · exact hskip_eq
+              · rename_i hne; exact absurd hmono_cond hne
+            -- The fold produces acc'; membership-preservation gives l.eclass
+            -- if we can show it's in the result at `next`.
+            set acc' := (List.range n.span).foldl (fun acc j =>
+              let lid := t.sorted[n.offset + j]!
+              match t.leaves[lid]? with
+              | some l =>
+                if l.alive && aabbOverlapsDec l.bounds q then
+                  l.eclass :: acc else acc
+              | none => acc) acc with hacc'
+            -- Apply IH at `next = i + 1` with acc'.
+            rw [hnext_val]
+            exact ih _ hm1 (i + 1) acc' rfl hi1_le h_path1
+          · -- Non-leaf at i: algorithm advances to i + 1 directly.
+            rename_i _hnonleaf
+            exact ih _ hm1 (i + 1) acc rfl hi1_le h_path1
+
+/-- **Tree-level query completeness via the DFS reachability sweep.**
+    Given a tree satisfying the structural skip invariants, if query `q`
+    overlaps a live leaf `l` whose slot in `sorted` is covered by some
+    leaf-block internal `target`, AND every node on the sweep path from
+    the entry `i` to `target` has overlapping bounds, then `aabbQueryN`
+    starting at root emits `l.eclass`.
+
+    This is the tree-level completeness claim for `aabbQueryN`. The
+    overlap-on-path premise is the contrapositive of "no prune fires on
+    the descent", which by `build_contains_leaf` is automatic for any
+    live leaf overlapping `q`: every ancestor's bounds contain the leaf,
+    so overlap with `q` lifts from the leaf to the ancestor. -/
+theorem aabbQueryN_complete_from_invariants
+    (t : PbvhTree) (q : BoundingBox)
+    (h_leaf_skip : ∀ j, j < t.internals.size →
+      (t.internals[j]!).left = none → (t.internals[j]!).right = none →
+        (t.internals[j]!).skip = j + 1)
+    (h_skip_mono : ∀ j, j < t.internals.size →
+      j < (t.internals[j]!).skip ∧
+      (t.internals[j]!).skip ≤ t.internals.size)
+    (h_root : t.internalRoot = some 0)
+    (h_nonempty : ¬ t.internals.isEmpty)
+    (target : Nat) (htarget : target < t.internals.size)
+    (h_target_left : (t.internals[target]!).left = none)
+    (h_target_right : (t.internals[target]!).right = none)
+    (jw : Nat) (hjw : jw < (t.internals[target]!).span)
+    (l : PbvhLeaf)
+    (hl : t.leaves[t.sorted[(t.internals[target]!).offset + jw]!]? = some l)
+    (halive : l.alive = true) (hl_ov : aabbOverlapsDec l.bounds q = true)
+    (h_path_from_root : ∀ k, k ≤ target →
+      aabbOverlapsDec (t.internals[k]!).bounds q = true) :
+    l.eclass ∈ aabbQueryN t q := by
+  unfold aabbQueryN
+  split
+  · rename_i h; exact absurd h h_nonempty
+  · rename_i _hne
+    rw [h_root]
+    dsimp only
+    exact aabbQueryNGo_visits_overlapping_leaf t q h_leaf_skip h_skip_mono
+      target htarget h_target_left h_target_right jw hjw l hl halive hl_ov
+      (target - 0) 0 [] rfl (Nat.zero_le _)
+      (fun k _ hk_le => h_path_from_root k hk_le)
+
 end PbvhTree
