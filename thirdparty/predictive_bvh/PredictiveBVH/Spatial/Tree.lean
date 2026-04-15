@@ -789,6 +789,32 @@ theorem buildSubtree_root_bounds
     rw [Array.getElem!_eq_getD, Array.getD, dif_pos (by simp; exact hmyIdx)]
     refine ⟨?_, ?_, ?_⟩ <;> simp
 
+/-- Root-level bound containment: for every live leaf in the window
+    `sorted[lo, hi)`, the root node's bounds contain that leaf's bounds.
+    Direct composition of `buildSubtree_root_bounds` with the
+    `windowBounds_contains_*` lemmas. -/
+theorem buildSubtree_root_contains_leaf
+    (leaves : Array PbvhLeaf) (sorted : Array LeafId)
+    (internals : Array PbvhInternal) (lo hi : Nat)
+    (k : Nat) (hk_lo : lo ≤ k) (hk_hi : k < hi)
+    (l : PbvhLeaf) (hl : leaves[sorted[k]!]? = some l) :
+    let res := buildSubtree leaves sorted internals lo hi
+    aabbContains res.1[res.2]!.bounds l.bounds := by
+  obtain ⟨hb, _, _⟩ := buildSubtree_root_bounds leaves sorted internals lo hi
+  dsimp only at hb ⊢
+  rw [hb]
+  have hlo : lo < hi := by omega
+  by_cases heq : k = lo
+  · subst heq
+    exact windowBounds_contains_init_slot leaves sorted k hi hlo l hl
+  · -- k = lo + (k - lo - 1) + 1, and k - lo - 1 < hi - lo - 1.
+    have hk_gt : lo < k := by omega
+    set j := k - lo - 1 with hj_def
+    have hj_rewrite : lo + j + 1 = k := by omega
+    have hj_lt : j < hi - lo - 1 := by omega
+    rw [← hj_rewrite] at hl
+    exact windowBounds_contains_step_slot leaves sorted lo hi hlo j hj_lt l hl
+
 /-- Root-level skip monotonicity: the root node returned by `buildSubtree`
     has `root < skip[root] ≤ result.size`. Direct composition of
     `buildSubtree_root`, `buildSubtree_root_lt_size`, and
