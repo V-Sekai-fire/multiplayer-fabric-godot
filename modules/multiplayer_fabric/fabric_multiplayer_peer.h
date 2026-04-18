@@ -30,31 +30,54 @@
 
 #pragma once
 
+#include "core/crypto/crypto.h"
 #include "core/templates/hash_map.h"
 #include "scene/main/multiplayer_peer.h"
 
 // Logical channels via set_transfer_channel() + set_transfer_mode().
-// Godot's ENetMultiplayerPeer reserves ENet wire channels 0-1 for system messages.
-// set_transfer_channel(N) → ENet wire channel N+1. Use N≥1 for safe user channels.
-static constexpr int CH_MIGRATION = 1; // → ENet wire ch 2, reliable STAGING intents
-static constexpr int CH_INTEREST = 2; // → ENet wire ch 3, unreliable entity snapshots
-static constexpr int CH_PLAYER = 3; // → ENet wire ch 4, unreliable player state
+// ENet: channel number is carried on the wire by ENet itself.
+// WebTransport: channel is embedded as the first byte of every packet because
+//   WebTransportPeer::get_packet_channel() always returns 0 (QUIC has no
+//   built-in channel concept). FabricMultiplayerPeer strips/prepends this byte
+//   transparently — callers see the same logical channel API either way.
+static constexpr int CH_MIGRATION = 1; // reliable   — STAGING intents
+static constexpr int CH_INTEREST = 2; // unreliable — entity snapshots
+static constexpr int CH_PLAYER = 3; // unreliable — player state
 
 /// Zone-fabric multiplayer peer. Wraps an inner MultiplayerPeer (ENet or
-/// WebRTC) and adds zone-to-zone neighbor connections with channel-sorted
+/// WebTransport) and adds zone-to-zone neighbor connections with channel-sorted
 /// inboxes. One server + one client per neighbor, all on the same port.
 ///
-/// GDScript usage:
+/// ENet usage (default):
 ///   var peer = FabricMultiplayerPeer.new()
 ///   peer.create_server(port)
-///   peer.connect_to_zone(neighbor_zone_id)
-///   peer.poll()
+///
+/// WebTransport usage:
+///   var peer = FabricMultiplayerPeer.new()
+///   peer.transport = FabricMultiplayerPeer.TRANSPORT_WEBTRANSPORT
+///   peer.wt_cert = cert   # Ref<X509Certificate>
+///   peer.wt_key  = key    # Ref<CryptoKey>
+///   peer.create_server(port)
 class FabricMultiplayerPeer : public MultiplayerPeer {
 	GDCLASS(FabricMultiplayerPeer, MultiplayerPeer);
 
+public:
+	enum TransportType {
+		TRANSPORT_ENET,
+		TRANSPORT_WEBTRANSPORT,
+	};
+
+private:
 	String game_id;
 
-	// Inner peer (ENetMultiplayerPeer by default; swap to WebRTC).
+	TransportType transport = TRANSPORT_ENET;
+
+	// WebTransport-mode cert/key — set before create_server().
+	String wt_path = "/wt";
+	Ref<X509Certificate> wt_cert;
+	Ref<CryptoKey> wt_key;
+
+	// Inner peer (ENet or WebTransportPeer depending on transport).
 	Ref<MultiplayerPeer> server_peer;
 
 	struct NeighborConn {
@@ -79,7 +102,9 @@ class FabricMultiplayerPeer : public MultiplayerPeer {
 
 	uint16_t base_port = 0;
 
-	void _poll_peer(Ref<MultiplayerPeer> p_peer);
+	// In WebTransport mode packets carry a 1-byte channel prefix.
+	void _poll_peer(Ref<MultiplayerPeer> p_peer, bool p_channel_prefix);
+	void _send_packet(Ref<MultiplayerPeer> p_peer, int p_channel, const uint8_t *p_data, int p_size);
 
 protected:
 	static void _bind_methods();
@@ -87,6 +112,18 @@ protected:
 public:
 	Error create_server(int p_port, int p_max_clients = 32);
 	Error create_client(const String &p_address, int p_port);
+
+	void set_transport(TransportType p_type);
+	TransportType get_transport() const;
+
+	void set_wt_path(const String &p_path);
+	String get_wt_path() const;
+
+	void set_wt_cert(const Ref<X509Certificate> &p_cert);
+	Ref<X509Certificate> get_wt_cert() const;
+
+	void set_wt_key(const Ref<CryptoKey> &p_key);
+	Ref<CryptoKey> get_wt_key() const;
 
 	void set_game_id(const String &p_id);
 	String get_game_id() const;
@@ -132,3 +169,5 @@ public:
 	FabricMultiplayerPeer() = default;
 	~FabricMultiplayerPeer() = default;
 };
+
+VARIANT_ENUM_CAST(FabricMultiplayerPeer::TransportType);

@@ -8,7 +8,7 @@ env_mf = env_modules.Clone()
 
 # Thirdparty: r128.h (header-only, implementation compiled in r128_impl.cpp)
 
-env_mf.Prepend(CPPPATH=["#thirdparty/misc/", "#thirdparty/predictive_bvh/"])
+env_mf.Prepend(CPPPATH=["#thirdparty/misc/", "#thirdparty/predictive_bvh/", "#thirdparty/webtransportd/"])
 
 # Thirdparty: ENet headers (needed by enet_transport.h which includes enet module headers)
 
@@ -19,5 +19,8 @@ if env["builtin_enet"]:
 
 module_obj = []
 env_mf.add_source_files(module_obj, "*.cpp")
+
+# Thirdparty: webtransportd frame codec (pure C, no dependencies)
+env_mf.add_source_files(module_obj, "#thirdparty/webtransportd/frame.c")
 
 env.modules_sources += module_obj
