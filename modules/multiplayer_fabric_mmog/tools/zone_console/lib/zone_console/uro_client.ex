@@ -11,10 +11,12 @@ defmodule ZoneConsole.UroClient do
 
   def new(base_url), do: %__MODULE__{base_url: String.trim_trailing(base_url, "/")}
 
-  @doc "POST /session — returns {:ok, client} or {:error, reason}."
-  def login(%__MODULE__{} = client, username, password) do
+  @doc "POST /session — accepts email or username. Returns {:ok, client} or {:error, reason}."
+  def login(%__MODULE__{} = client, username_or_email, password) do
+    cred_key = if String.contains?(username_or_email, "@"), do: :email, else: :username
+
     case Req.post("#{client.base_url}/session",
-           json: %{user: %{username: username, password: password}},
+           json: %{user: %{cred_key => username_or_email, password: password}},
            receive_timeout: 10_000
          ) do
       {:ok, %{status: 200, body: %{"data" => data}}} ->
