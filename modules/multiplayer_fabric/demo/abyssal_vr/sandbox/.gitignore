@@ -1,0 +1,13 @@
+# CMake build directory
+.build/
+
+# Intermediate object files produced by Docker build
+*.o
+
+# Generated RISC-V ELF binaries (checked in separately or fetched at runtime)
+jellygrid_swarm
+jellygrid_power_node
+jellygrid_current
+
+# Downloaded CMake artifact
+generated_api.hpp
