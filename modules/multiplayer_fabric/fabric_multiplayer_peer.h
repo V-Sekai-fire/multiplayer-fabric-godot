@@ -30,40 +30,77 @@
 
 #pragma once
 
-#include "core/crypto/crypto.h"
 #include "core/templates/hash_map.h"
+#include "core/variant/callable.h"
 #include "scene/main/multiplayer_peer.h"
 
-// Three independent WebTransportPeer connections per neighbor, one per channel,
-// each on its own port (base+1/+2/+3). Channel identity is known from which peer
-// received the packet — no channel byte in the payload, no QUIC HOL blocking.
+// Three independent peer connections per neighbor, one per channel, each on
+// its own port (base+1/+2/+3). Channel identity is known from which peer
+// received the packet — no channel byte in the payload, no HOL blocking.
 static constexpr int CH_MIGRATION = 1; // reliable   — STAGING intents
 static constexpr int CH_INTEREST = 2; // unreliable — entity snapshots
 static constexpr int CH_PLAYER = 3; // unreliable — player state
 
-/// Zone-fabric multiplayer peer over WebTransport. Adds zone-to-zone neighbor
-/// connections with channel-sorted inboxes.
+/// Zone-fabric multiplayer peer driven by user-supplied peer factories.
+/// Works with any MultiplayerPeer backend (WebTransport, ENet, WebRTC …).
 ///
-///   var peer = FabricMultiplayerPeer.new()
-///   peer.wt_cert = cert   # Ref<X509Certificate>
-///   peer.wt_key  = key    # Ref<CryptoKey>
-///   peer.create_server(port)
-///   # Binds port (game clients) + port+1/+2/+3 (neighbor channels)
+/// Setup (WebTransport example):
+///   var fab = FabricMultiplayerPeer.new()
+///   fab.frame_channels = true          # WT has no native channel concept
+///   fab.server_factory = func(port):
+///       var p = WebTransportPeer.new(); p.create_server(port, "/wt", cert, key); return p
+///   fab.client_factory = func(host, port):
+///       var p = WebTransportPeer.new(); p.create_client(host, port, "/wt"); return p
+///   fab.create_server(7000)
+///   # Binds port 7000 (game clients) + 7001/7002/7003 (per-channel neighbor links)
+///
+/// Setup (ENet example):
+///   fab.frame_channels = false         # ENet carries channel natively
+///   fab.server_factory = func(port):
+///       var p = ENetMultiplayerPeer.new(); p.create_server(port); return p
+///   fab.client_factory = func(host, port):
+///       var p = ENetMultiplayerPeer.new(); p.create_client(host, port); return p
+///   fab.create_server(7000)
+///
+/// Setup (WebSocket example — caveat: CH_INTEREST and CH_PLAYER lose their
+/// unreliable semantics and become reliable because WebSocket (TCP) cannot
+/// drop packets. Each zone-to-zone channel still gets its own connection so
+/// there is no cross-channel HOL, but a stalled CH_INTEREST stream will
+/// back-pressure that connection rather than silently dropping stale snapshots):
+///   fab.frame_channels = true          # WebSocket has no native channels
+///   fab.server_factory = func(port):
+///       var p = WebSocketMultiplayerPeer.new(); p.create_server(port); return p
+///   fab.client_factory = func(host, port):
+///       var p = WebSocketMultiplayerPeer.new()
+///       p.create_client("ws://%s:%d" % [host, port]); return p
+///   fab.create_server(7000)
+///
+/// HOL-free guarantee: each channel gets an independent connection on its own
+/// port, so no channel can stall another. For reliable delivery, the underlying
+/// peer must open independent streams per packet (WebTransport does; ENet has
+/// per-connection in-order delivery, which is acceptable for low-traffic CH_MIGRATION).
 class FabricMultiplayerPeer : public MultiplayerPeer {
 	GDCLASS(FabricMultiplayerPeer, MultiplayerPeer);
 
 private:
 	String game_id;
 
-	// WebTransport cert/key — set before create_server().
-	String wt_path = "/wt";
-	Ref<X509Certificate> wt_cert;
-	Ref<CryptoKey> wt_key;
+	// Factory callables — must be set before create_server() / create_client().
+	// server_factory: (port: int) -> MultiplayerPeer
+	// client_factory: (host: String, port: int) -> MultiplayerPeer
+	Callable server_factory;
+	Callable client_factory;
 
-	// Server peer for game-client connections (base port).
+	// When true the server_peer (game-client side) uses wtd frame encoding to
+	// carry the logical channel, because the underlying transport has no native
+	// channel concept (WebTransport). When false uses set_transfer_channel /
+	// get_packet_channel (ENet and similar native-channel transports).
+	bool frame_channels = false;
+
+	// Game-client server peer (base port).
 	Ref<MultiplayerPeer> server_peer;
-	// One inbound neighbor server per channel on port+1, port+2, port+3.
-	Ref<MultiplayerPeer> wt_channel_servers[3];
+	// Inbound per-channel servers for zone-to-zone neighbor links (port+1/+2/+3).
+	Ref<MultiplayerPeer> channel_servers[3];
 
 	struct NeighborConn {
 		// channel_peers[0]=CH_MIGRATION(port+1), [1]=CH_INTEREST(port+2), [2]=CH_PLAYER(port+3).
@@ -88,13 +125,21 @@ private:
 
 	uint16_t base_port = 0;
 
-	// p_known_channel > 0: all packets from this peer go to that channel inbox
-	//   (neighbor channel_peers — channel identity known from which peer).
-	// p_known_channel == 0: frame-decode the wtd flag byte (game-client server_peer).
+	// p_known_channel > 0: all packets go to that inbox (neighbor channel_peers).
+	// p_known_channel == 0: derive channel per-packet:
+	//   frame_channels=true  → wtd frame decode (WT server_peer)
+	//   frame_channels=false → get_packet_channel() (ENet server_peer)
 	void _poll_peer(Ref<MultiplayerPeer> p_peer, int p_known_channel);
-	// p_use_frame: true for server_peer (wtd frame carries channel for game clients);
-	//   false for neighbor channel_peers (channel implicit from peer identity).
-	void _send_packet(Ref<MultiplayerPeer> p_peer, int p_channel, const uint8_t *p_data, int p_size, bool p_use_frame);
+
+	// Send to a neighbor channel_peer — channel is implicit from peer slot.
+	void _send_to_channel_peer(Ref<MultiplayerPeer> p_peer, int p_channel, const uint8_t *p_data, int p_size);
+
+	// Send to server_peer (game clients), encoding channel appropriately.
+	void _send_to_server_peer(int p_channel, const uint8_t *p_data, int p_size);
+
+	// Instantiate a peer via factory callable with error checking.
+	Ref<MultiplayerPeer> _make_server_peer(int p_port);
+	Ref<MultiplayerPeer> _make_client_peer(const String &p_host, int p_port);
 
 protected:
 	static void _bind_methods();
@@ -103,14 +148,14 @@ public:
 	Error create_server(int p_port);
 	Error create_client(const String &p_address, int p_port);
 
-	void set_wt_path(const String &p_path);
-	String get_wt_path() const;
+	void set_server_factory(const Callable &p_factory);
+	Callable get_server_factory() const;
 
-	void set_wt_cert(const Ref<X509Certificate> &p_cert);
-	Ref<X509Certificate> get_wt_cert() const;
+	void set_client_factory(const Callable &p_factory);
+	Callable get_client_factory() const;
 
-	void set_wt_key(const Ref<CryptoKey> &p_key);
-	Ref<CryptoKey> get_wt_key() const;
+	void set_frame_channels(bool p_enabled);
+	bool get_frame_channels() const;
 
 	void set_game_id(const String &p_id);
 	String get_game_id() const;

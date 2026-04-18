@@ -35,24 +35,22 @@
 #include "core/object/class_db.h"
 #include "core/string/print_string.h"
 
-#include "modules/http3/web_transport_peer.h"
-
 #include <cstring>
 
 void FabricMultiplayerPeer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("create_server", "port"), &FabricMultiplayerPeer::create_server);
 	ClassDB::bind_method(D_METHOD("create_client", "address", "port"), &FabricMultiplayerPeer::create_client);
 
-	ClassDB::bind_method(D_METHOD("set_wt_path", "path"), &FabricMultiplayerPeer::set_wt_path);
-	ClassDB::bind_method(D_METHOD("get_wt_path"), &FabricMultiplayerPeer::get_wt_path);
-	ClassDB::bind_method(D_METHOD("set_wt_cert", "cert"), &FabricMultiplayerPeer::set_wt_cert);
-	ClassDB::bind_method(D_METHOD("get_wt_cert"), &FabricMultiplayerPeer::get_wt_cert);
-	ClassDB::bind_method(D_METHOD("set_wt_key", "key"), &FabricMultiplayerPeer::set_wt_key);
-	ClassDB::bind_method(D_METHOD("get_wt_key"), &FabricMultiplayerPeer::get_wt_key);
+	ClassDB::bind_method(D_METHOD("set_server_factory", "factory"), &FabricMultiplayerPeer::set_server_factory);
+	ClassDB::bind_method(D_METHOD("get_server_factory"), &FabricMultiplayerPeer::get_server_factory);
+	ClassDB::bind_method(D_METHOD("set_client_factory", "factory"), &FabricMultiplayerPeer::set_client_factory);
+	ClassDB::bind_method(D_METHOD("get_client_factory"), &FabricMultiplayerPeer::get_client_factory);
+	ClassDB::bind_method(D_METHOD("set_frame_channels", "enabled"), &FabricMultiplayerPeer::set_frame_channels);
+	ClassDB::bind_method(D_METHOD("get_frame_channels"), &FabricMultiplayerPeer::get_frame_channels);
 
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "wt_path"), "set_wt_path", "get_wt_path");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "wt_cert", PROPERTY_HINT_RESOURCE_TYPE, "X509Certificate"), "set_wt_cert", "get_wt_cert");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "wt_key", PROPERTY_HINT_RESOURCE_TYPE, "CryptoKey"), "set_wt_key", "get_wt_key");
+	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "server_factory"), "set_server_factory", "get_server_factory");
+	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "client_factory"), "set_client_factory", "get_client_factory");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "frame_channels"), "set_frame_channels", "get_frame_channels");
 
 	ClassDB::bind_method(D_METHOD("set_game_id", "id"), &FabricMultiplayerPeer::set_game_id);
 	ClassDB::bind_method(D_METHOD("get_game_id"), &FabricMultiplayerPeer::get_game_id);
@@ -67,61 +65,83 @@ void FabricMultiplayerPeer::_bind_methods() {
 // Property accessors.
 // ---------------------------------------------------------------------------
 
-void FabricMultiplayerPeer::set_wt_path(const String &p_path) {
-	wt_path = p_path;
+void FabricMultiplayerPeer::set_server_factory(const Callable &p_factory) {
+	server_factory = p_factory;
 }
-String FabricMultiplayerPeer::get_wt_path() const {
-	return wt_path;
-}
-
-void FabricMultiplayerPeer::set_wt_cert(const Ref<X509Certificate> &p_cert) {
-	wt_cert = p_cert;
-}
-Ref<X509Certificate> FabricMultiplayerPeer::get_wt_cert() const {
-	return wt_cert;
+Callable FabricMultiplayerPeer::get_server_factory() const {
+	return server_factory;
 }
 
-void FabricMultiplayerPeer::set_wt_key(const Ref<CryptoKey> &p_key) {
-	wt_key = p_key;
+void FabricMultiplayerPeer::set_client_factory(const Callable &p_factory) {
+	client_factory = p_factory;
 }
-Ref<CryptoKey> FabricMultiplayerPeer::get_wt_key() const {
-	return wt_key;
+Callable FabricMultiplayerPeer::get_client_factory() const {
+	return client_factory;
+}
+
+void FabricMultiplayerPeer::set_frame_channels(bool p_enabled) {
+	frame_channels = p_enabled;
+}
+bool FabricMultiplayerPeer::get_frame_channels() const {
+	return frame_channels;
+}
+
+void FabricMultiplayerPeer::set_game_id(const String &p_id) {
+	game_id = p_id;
+}
+String FabricMultiplayerPeer::get_game_id() const {
+	return game_id;
+}
+
+// ---------------------------------------------------------------------------
+// Factory helpers.
+// ---------------------------------------------------------------------------
+
+Ref<MultiplayerPeer> FabricMultiplayerPeer::_make_server_peer(int p_port) {
+	ERR_FAIL_COND_V_MSG(!server_factory.is_valid(), Ref<MultiplayerPeer>(),
+			"FabricMultiplayerPeer: server_factory not set");
+	Variant result = server_factory.call(p_port);
+	Ref<MultiplayerPeer> peer = result;
+	ERR_FAIL_COND_V_MSG(peer.is_null(), Ref<MultiplayerPeer>(),
+			vformat("FabricMultiplayerPeer: server_factory returned null for port %d", p_port));
+	return peer;
+}
+
+Ref<MultiplayerPeer> FabricMultiplayerPeer::_make_client_peer(const String &p_host, int p_port) {
+	ERR_FAIL_COND_V_MSG(!client_factory.is_valid(), Ref<MultiplayerPeer>(),
+			"FabricMultiplayerPeer: client_factory not set");
+	Variant result = client_factory.call(p_host, p_port);
+	Ref<MultiplayerPeer> peer = result;
+	ERR_FAIL_COND_V_MSG(peer.is_null(), Ref<MultiplayerPeer>(),
+			vformat("FabricMultiplayerPeer: client_factory returned null for %s:%d", p_host, p_port));
+	return peer;
 }
 
 // ---------------------------------------------------------------------------
 // create_server / create_client.
-// create_server binds 4 listeners: base_port (game clients) + port+1/+2/+3
-// (one per logical channel for HOL-free zone-to-zone neighbor links).
+// create_server calls server_factory 4×: base_port (game clients) +
+// port+1/+2/+3 (one per logical channel for HOL-free neighbor links).
 // ---------------------------------------------------------------------------
 
 Error FabricMultiplayerPeer::create_server(int p_port) {
-	ERR_FAIL_COND_V_MSG(wt_cert.is_null(), ERR_UNCONFIGURED,
-			"FabricMultiplayerPeer: set wt_cert before create_server()");
-	ERR_FAIL_COND_V_MSG(wt_key.is_null(), ERR_UNCONFIGURED,
-			"FabricMultiplayerPeer: set wt_key before create_server()");
-
-	Ref<WebTransportPeer> wt;
-	wt.instantiate();
-	Error err = wt->create_server(p_port, wt_path, wt_cert, wt_key);
-	if (err != OK) {
-		return err;
+	Ref<MultiplayerPeer> sp = _make_server_peer(p_port);
+	if (sp.is_null()) {
+		return ERR_CANT_CREATE;
 	}
-	server_peer = wt;
+	server_peer = sp;
 
 	for (int i = 0; i < 3; i++) {
-		Ref<WebTransportPeer> wt_ch;
-		wt_ch.instantiate();
-		err = wt_ch->create_server(p_port + 1 + i, wt_path, wt_cert, wt_key);
-		if (err != OK) {
+		Ref<MultiplayerPeer> ch = _make_server_peer(p_port + 1 + i);
+		if (ch.is_null()) {
 			server_peer->close();
 			server_peer.unref();
 			for (int j = 0; j < i; j++) {
-				wt_channel_servers[j]->close();
-				wt_channel_servers[j].unref();
+				channel_servers[j]->close();
+				channel_servers[j].unref();
 			}
-			return err;
+			return ERR_CANT_CREATE;
 		}
-		wt_channel_servers[i] = wt_ch;
+		channel_servers[i] = ch;
 	}
 
 	base_port = (uint16_t)p_port;
@@ -129,23 +149,13 @@ Error FabricMultiplayerPeer::create_server(int p_port) {
 }
 
 Error FabricMultiplayerPeer::create_client(const String &p_address, int p_port) {
-	Ref<WebTransportPeer> wt;
-	wt.instantiate();
-	Error err = wt->create_client(p_address, p_port, wt_path);
-	if (err != OK) {
-		return err;
+	Ref<MultiplayerPeer> sp = _make_client_peer(p_address, p_port);
+	if (sp.is_null()) {
+		return ERR_CANT_CREATE;
 	}
-	server_peer = wt;
+	server_peer = sp;
 	base_port = (uint16_t)p_port;
 	return OK;
-}
-
-void FabricMultiplayerPeer::set_game_id(const String &p_id) {
-	game_id = p_id;
-}
-
-String FabricMultiplayerPeer::get_game_id() const {
-	return game_id;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,16 +185,14 @@ void FabricMultiplayerPeer::connect_to_zone_at(int p_target_zone_id, int p_targe
 
 	NeighborConn conn;
 	for (int i = 0; i < 3; i++) {
-		Ref<WebTransportPeer> wt;
-		wt.instantiate();
-		Error err = wt->create_client("127.0.0.1", p_target_port + 1 + i, wt_path);
-		if (err != OK) {
+		Ref<MultiplayerPeer> peer = _make_client_peer("127.0.0.1", p_target_port + 1 + i);
+		if (peer.is_null()) {
 			for (int j = 0; j < i; j++) {
 				conn.channel_peers[j].unref();
 			}
 			return;
 		}
-		conn.channel_peers[i] = wt;
+		conn.channel_peers[i] = peer;
 	}
 	neighbors.insert(p_target_zone_id, conn);
 }
@@ -196,15 +204,26 @@ bool FabricMultiplayerPeer::is_zone_connected(int p_zone_id) const {
 }
 
 // ---------------------------------------------------------------------------
-// _send_packet — p_use_frame=true encodes channel in wtd frame flag byte
-// (server_peer game clients); false sends raw (neighbor channel_peers).
+// Send helpers.
 // ---------------------------------------------------------------------------
 
-void FabricMultiplayerPeer::_send_packet(Ref<MultiplayerPeer> p_peer, int p_channel,
-		const uint8_t *p_data, int p_size, bool p_use_frame) {
+// Neighbor channel peer: channel is implicit from which slot, just set mode.
+void FabricMultiplayerPeer::_send_to_channel_peer(Ref<MultiplayerPeer> p_peer, int p_channel,
+		const uint8_t *p_data, int p_size) {
 	const bool reliable = (p_channel == CH_MIGRATION);
 	p_peer->set_transfer_mode(reliable ? TRANSFER_MODE_RELIABLE : TRANSFER_MODE_UNRELIABLE);
-	if (p_use_frame) {
+	p_peer->put_packet(p_data, p_size);
+}
+
+// Server peer (game clients): encode channel via wtd frame (WT) or native
+// set_transfer_channel (ENet / any transport with native channel support).
+void FabricMultiplayerPeer::_send_to_server_peer(int p_channel, const uint8_t *p_data, int p_size) {
+	if (!server_peer.is_valid()) {
+		return;
+	}
+	const bool reliable = (p_channel == CH_MIGRATION);
+	server_peer->set_transfer_mode(reliable ? TRANSFER_MODE_RELIABLE : TRANSFER_MODE_UNRELIABLE);
+	if (frame_channels) {
 		uint8_t flag = WTD_FRAME_FLAG(p_channel, reliable);
 		Vector<uint8_t> framed;
 		framed.resize(9 + p_size);
@@ -212,10 +231,11 @@ void FabricMultiplayerPeer::_send_packet(Ref<MultiplayerPeer> p_peer, int p_chan
 		wtd_frame_status_t st = wtd_frame_encode(flag, p_data, (size_t)p_size,
 				framed.ptrw(), (size_t)framed.size(), &out_len);
 		if (st == WTD_FRAME_OK) {
-			p_peer->put_packet(framed.ptr(), (int)out_len);
+			server_peer->put_packet(framed.ptr(), (int)out_len);
 		}
 	} else {
-		p_peer->put_packet(p_data, p_size);
+		server_peer->set_transfer_channel(p_channel);
+		server_peer->put_packet(p_data, p_size);
 	}
 }
 
@@ -271,7 +291,7 @@ void FabricMultiplayerPeer::send_to_zone_raw(int p_target_zone_id, int p_channel
 		return;
 	}
 	conn.channel_peers[idx]->set_target_peer(1);
-	_send_packet(conn.channel_peers[idx], p_channel, p_data, p_size, false);
+	_send_to_channel_peer(conn.channel_peers[idx], p_channel, p_data, p_size);
 }
 
 void FabricMultiplayerPeer::broadcast_raw(int p_channel, const uint8_t *p_data, int p_size) {
@@ -282,10 +302,11 @@ void FabricMultiplayerPeer::broadcast_raw(int p_channel, const uint8_t *p_data, 
 }
 
 void FabricMultiplayerPeer::local_broadcast_raw(int p_channel, const uint8_t *p_data, int p_size) {
-	if (server_peer.is_valid()) {
-		server_peer->set_target_peer(0);
-		_send_packet(server_peer, p_channel, p_data, p_size, true);
+	if (!server_peer.is_valid()) {
+		return;
 	}
+	server_peer->set_target_peer(0);
+	_send_to_server_peer(p_channel, p_data, p_size);
 }
 
 LocalVector<Vector<uint8_t>> FabricMultiplayerPeer::drain_channel_raw(int p_channel) {
@@ -314,8 +335,11 @@ LocalVector<Vector<uint8_t>> FabricMultiplayerPeer::drain_channel_raw(int p_chan
 
 // ---------------------------------------------------------------------------
 // _poll_peer — drain packets into channel-sorted inboxes.
-// p_known_channel > 0: all packets go to that channel (neighbor channel_peers).
-// p_known_channel == 0: frame-decode flag byte to recover channel (server_peer).
+// p_known_channel > 0: all packets go to that channel (neighbor channel_peers
+//   and channel_servers — channel identity from which peer/server slot).
+// p_known_channel == 0: derive channel per-packet for the game-client server_peer:
+//   frame_channels=true  → wtd frame decode (WebTransport, no native channels)
+//   frame_channels=false → get_packet_channel() (ENet, native channel field)
 // ---------------------------------------------------------------------------
 
 void FabricMultiplayerPeer::_poll_peer(Ref<MultiplayerPeer> p_peer, int p_known_channel) {
@@ -343,7 +367,7 @@ void FabricMultiplayerPeer::_poll_peer(Ref<MultiplayerPeer> p_peer, int p_known_
 			ch = p_known_channel;
 			payload = buf;
 			payload_size = size;
-		} else {
+		} else if (frame_channels) {
 			uint8_t flag = 0;
 			const uint8_t *frame_payload = nullptr;
 			size_t frame_payload_len = 0;
@@ -356,6 +380,10 @@ void FabricMultiplayerPeer::_poll_peer(Ref<MultiplayerPeer> p_peer, int p_known_
 			ch = (int)WTD_FRAME_GET_CHANNEL(flag);
 			payload = frame_payload;
 			payload_size = (int)frame_payload_len;
+		} else {
+			ch = p_peer->get_packet_channel();
+			payload = buf;
+			payload_size = size;
 		}
 
 		Vector<uint8_t> pkt;
@@ -385,12 +413,12 @@ void FabricMultiplayerPeer::_poll_peer(Ref<MultiplayerPeer> p_peer, int p_known_
 // ---------------------------------------------------------------------------
 
 void FabricMultiplayerPeer::poll() {
-	static const int wt_channels[3] = { CH_MIGRATION, CH_INTEREST, CH_PLAYER };
+	static const int ch_by_idx[3] = { CH_MIGRATION, CH_INTEREST, CH_PLAYER };
 
 	_poll_peer(server_peer, 0);
 
 	for (int i = 0; i < 3; i++) {
-		_poll_peer(wt_channel_servers[i], wt_channels[i]);
+		_poll_peer(channel_servers[i], ch_by_idx[i]);
 	}
 
 	for (KeyValue<int, NeighborConn> &kv : neighbors) {
@@ -403,9 +431,9 @@ void FabricMultiplayerPeer::poll() {
 			peer->poll();
 			if (!conn.connected[i] && peer->get_connection_status() == CONNECTION_CONNECTED) {
 				conn.connected[i] = true;
-				print_line(vformat("[FabricMultiplayerPeer] zone %d ch%d connected", kv.key, wt_channels[i]));
+				print_line(vformat("[FabricMultiplayerPeer] zone %d ch%d connected", kv.key, ch_by_idx[i]));
 			}
-			_poll_peer(peer, wt_channels[i]);
+			_poll_peer(peer, ch_by_idx[i]);
 		}
 	}
 }
@@ -444,9 +472,9 @@ void FabricMultiplayerPeer::close() {
 		server_peer.unref();
 	}
 	for (int i = 0; i < 3; i++) {
-		if (wt_channel_servers[i].is_valid()) {
-			wt_channel_servers[i]->close();
-			wt_channel_servers[i].unref();
+		if (channel_servers[i].is_valid()) {
+			channel_servers[i]->close();
+			channel_servers[i].unref();
 		}
 	}
 	for (KeyValue<int, NeighborConn> &kv : neighbors) {
