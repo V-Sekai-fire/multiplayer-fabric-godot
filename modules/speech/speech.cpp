@@ -571,7 +571,7 @@ void Speech::vc_debug_printerr(String p_str) const {
 
 void Speech::on_received_audio_packet(int p_peer_id, int p_sequence_id, PackedByteArray p_packet) {
 	// Multiplayer checks for echo prevention
-	if (get_tree() && get_tree()->get_multiplayer().is_valid() && get_tree()->get_multiplayer()->has_multiplayer_peer()) {
+	if (get_tree() && get_tree()->get_multiplayer().ptr() != nullptr && get_tree()->get_multiplayer()->has_multiplayer_peer()) {
 		int local_peer_id = get_tree()->get_multiplayer()->get_unique_id();
 		int immediate_sender_id = get_tree()->get_multiplayer()->get_remote_sender_id(); // Who called this RPC on me
 
@@ -584,7 +584,7 @@ void Speech::on_received_audio_packet(int p_peer_id, int p_sequence_id, PackedBy
 			}
 			return;
 		}
-	} else if (DEBUG && !(get_tree() && get_tree()->get_multiplayer().is_valid() && get_tree()->get_multiplayer()->has_multiplayer_peer())) {
+	} else if (DEBUG && !(get_tree() && get_tree()->get_multiplayer().ptr() != nullptr && get_tree()->get_multiplayer()->has_multiplayer_peer())) {
 		// Log if not in a typical multiplayer setup but packet received, for debugging non-standard uses.
 		// vc_debug_print("Speech: on_received_audio_packet called outside of a fully configured multiplayer context. Processing locally.");
 		// Depending on requirements, you might allow local processing or enforce multiplayer.
