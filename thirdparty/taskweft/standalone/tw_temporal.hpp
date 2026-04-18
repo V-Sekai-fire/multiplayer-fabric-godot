@@ -66,15 +66,15 @@ inline std::string tw_format_duration(double seconds) {
     return s;
 }
 
-// Simple Temporal Network: Floyd-Warshall consistency checking.
-// Constraint representation: d[i][j] = upper bound on (t_j - t_i).
-// A lower-bound lo on (t_j - t_i) is encoded as d[j][i] = -lo.
-struct TwSTN {
+// STN is an implementation detail — hidden from callers.
+// Public interface: TwTemporalStep, TwTemporalResult, tw_check_temporal().
+namespace tw_detail {
+struct STN {
     static constexpr double INF = std::numeric_limits<double>::infinity();
 
-    std::vector<std::string>                   points;
-    std::unordered_map<std::string, size_t>    idx;
-    std::vector<std::vector<double>>           dist;
+    std::vector<std::string>                points;
+    std::unordered_map<std::string, size_t> idx;
+    std::vector<std::vector<double>>        dist;
 
     void add_point(const std::string &p) {
         if (idx.count(p)) return;
@@ -86,17 +86,14 @@ struct TwSTN {
         dist[n][n] = 0.0;
     }
 
-    // Add temporal constraint: lo <= to_pt - from_pt <= hi
     void add_constraint(const std::string &from, const std::string &to,
                         double lo, double hi) {
-        add_point(from);
-        add_point(to);
+        add_point(from); add_point(to);
         size_t fi = idx.at(from), ti = idx.at(to);
         if (hi  < dist[fi][ti]) dist[fi][ti] = hi;
         if (-lo < dist[ti][fi]) dist[ti][fi] = -lo;
     }
 
-    // Check STN consistency (no negative cycles) via Floyd-Warshall.
     bool consistent() const {
         size_t n = points.size();
         if (n == 0) return true;
@@ -115,68 +112,82 @@ struct TwSTN {
         return true;
     }
 };
+} // namespace tw_detail
 
-// Per-step temporal annotation attached to a plan step.
+// Per-step temporal annotation — all time values are ISO 8601 strings.
 struct TwTemporalStep {
     std::string action_name;
-    double      duration_seconds;   // 0.0 if no duration metadata
-    std::string duration_iso;       // original ISO 8601 string, empty if none
+    std::string duration_iso;   // ISO 8601 duration (e.g. "PT10M"), empty if none
+    std::string start_iso;      // ISO 8601 duration from origin (e.g. "PT0S")
+    std::string end_iso;        // ISO 8601 duration from origin (e.g. "PT10M")
 };
 
-// Result of temporal analysis on a plan.
+// Result of temporal analysis on a plan — all time in ISO 8601.
 struct TwTemporalResult {
-    bool   consistent;              // STN consistency check passed
-    double total_seconds;           // sum of all action durations
-    std::string total_iso;          // total duration as ISO 8601
+    bool        consistent;    // STN consistency check passed
+    std::string total_iso;     // total plan duration as ISO 8601 (e.g. "PT20M")
+    std::string origin_iso;    // origin offset supplied by caller (default "PT0S")
     std::vector<TwTemporalStep> steps;
 };
 
 // Build a sequential STN from a plan and return temporal metadata.
 // Sequential assumption: each action starts exactly when the previous ends.
-// Actions with no duration entry are treated as zero-duration.
+// Actions with no duration entry are treated as PT0S.
+// origin_iso: ISO 8601 duration string for the plan start offset (default "PT0S").
+// All start_iso/end_iso values are durations measured from the same zero reference.
 inline TwTemporalResult tw_check_temporal(
         const std::vector<TwCall> &plan,
-        const TwDomain &domain) {
+        const TwDomain            &domain,
+        const std::string         &origin_iso = "PT0S") {
     TwTemporalResult r;
-    r.consistent    = true;
-    r.total_seconds = 0.0;
+    r.consistent = true;
+    r.origin_iso = origin_iso;
+
+    double origin_s = tw_parse_duration(origin_iso);
+    if (origin_s < 0.0) origin_s = 0.0;
 
     if (plan.empty()) {
         r.total_iso = "PT0S";
         return r;
     }
 
-    TwSTN stn;
+    tw_detail::STN stn;
     stn.add_point("t0");
     std::string prev_end = "t0";
+    double current_s     = origin_s;
+    double total_s       = 0.0;
 
     for (size_t i = 0; i < plan.size(); ++i) {
         const std::string &name = plan[i].name;
 
-        double dur = 0.0;
+        double dur_s = 0.0;
         std::string dur_iso;
         std::unordered_map<std::string, std::string>::const_iterator dit =
             domain.action_durations.find(name);
         if (dit != domain.action_durations.end()) {
             dur_iso = dit->second;
             double parsed = tw_parse_duration(dur_iso);
-            if (parsed >= 0.0) dur = parsed;
+            if (parsed >= 0.0) dur_s = parsed;
         }
 
-        r.steps.push_back({name, dur, dur_iso});
-        r.total_seconds += dur;
+        TwTemporalStep step;
+        step.action_name  = name;
+        step.duration_iso = dur_iso.empty() ? "PT0S" : dur_iso;
+        step.start_iso    = tw_format_duration(current_s);
+        step.end_iso      = tw_format_duration(current_s + dur_s);
+        r.steps.push_back(std::move(step));
+
+        current_s += dur_s;
+        total_s   += dur_s;
 
         std::string a_start = "a" + std::to_string(i) + "_start";
         std::string a_end   = "a" + std::to_string(i) + "_end";
-
-        // Sequential: this action starts at exactly the previous action's end
         stn.add_constraint(prev_end, a_start, 0.0, 0.0);
-        // Exact duration: a_end - a_start = dur
-        stn.add_constraint(a_start, a_end, dur, dur);
+        stn.add_constraint(a_start,  a_end,   dur_s, dur_s);
         prev_end = a_end;
     }
 
     r.consistent = stn.consistent();
-    r.total_iso  = tw_format_duration(r.total_seconds);
+    r.total_iso  = tw_format_duration(total_s);
     return r;
 }

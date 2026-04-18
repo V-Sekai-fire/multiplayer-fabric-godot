@@ -102,3 +102,97 @@ inline TwReplanResult tw_replan(
     r.recovered = r.new_plan.has_value();
     return r;
 }
+
+// Incremental replan using a solution tree from a previous tw_plan_with_tree call.
+//
+// Instead of restarting the full search, this locates the nearest T/G ancestor
+// of the failed action in the tree, simulates only the plan prefix before that
+// ancestor's subtree, and replans from there — skipping the method choice that
+// produced the failed plan.  Equivalent to IPyHOP's _post_failure_modify +
+// _backtrack + resume, without requiring a persistent solution-tree object.
+//
+// Returns a full plan (prefix + recovered suffix).
+inline TwReplanResult tw_replan_incremental(
+        std::shared_ptr<TwState>   init_state,
+        const std::vector<TwCall>  &original_plan,
+        const std::vector<TwTask>  &original_tasks,
+        const TwDomain             &domain,
+        const TwSolTree            &sol_tree,
+        int                        fail_step = -1) {
+    TwReplanResult r;
+
+    // Determine fail_step if not given.
+    if (fail_step < 0 || fail_step >= (int)original_plan.size()) {
+        r.simulate = tw_simulate(init_state, original_plan, domain);
+    } else {
+        std::vector<TwCall> pre(original_plan.begin(),
+                                original_plan.begin() + fail_step);
+        TwSimulateResult partial = tw_simulate(init_state, pre, domain);
+        r.simulate.completed_steps = fail_step;
+        r.simulate.fail_step       = fail_step;
+        r.simulate.fail_action     = original_plan[fail_step].name;
+        r.simulate.state           = partial.state;
+    }
+
+    if (r.simulate.fail_step < 0) {
+        // No failure: nothing to do.
+        r.new_plan  = original_plan;
+        r.recovered = true;
+        return r;
+    }
+
+    r.blacklist.insert(tw_call_key(original_plan[r.simulate.fail_step]));
+
+    // Find the nearest T/G ancestor with an untried method alternative.
+    int ancestor = -1;
+    if (r.simulate.fail_step < (int)sol_tree.action_nodes.size())
+        ancestor = sol_tree.nearest_retryable_ancestor(
+                       sol_tree.action_nodes[r.simulate.fail_step], domain);
+
+    if (ancestor < 0) {
+        // No retryable ancestor — fall back to full replan from failure state.
+        std::shared_ptr<TwState> rs = r.simulate.state ? r.simulate.state : init_state;
+        r.new_plan  = tw_plan(rs, original_tasks, domain, &r.blacklist);
+        r.recovered = r.new_plan.has_value();
+        return r;
+    }
+
+    // Simulate the prefix that precedes the ancestor's subtree.
+    int prefix_len = sol_tree.prefix_length(ancestor);
+    std::shared_ptr<TwState> replan_state = init_state;
+    if (prefix_len > 0) {
+        std::vector<TwCall> pre(original_plan.begin(),
+                                original_plan.begin() + prefix_len);
+        TwSimulateResult ps = tw_simulate(init_state, pre, domain);
+        if (ps.state) replan_state = ps.state;
+    }
+
+    // Skip the method that was used at the ancestor.
+    TwMethodSkip skip;
+    {
+        TwCall ac;
+        ac.name = sol_tree.nodes[ancestor].name;
+        ac.args = sol_tree.nodes[ancestor].args;
+        skip[tw_call_key(ac)].insert(sol_tree.nodes[ancestor].method_idx);
+    }
+
+    // Replan from the ancestor's entry state with the method skip + command blacklist.
+    // tw_plan_with_tree builds a fresh tree for the recovered plan.
+    TwSolTree new_tree;
+    std::optional<std::vector<TwCall>> suffix =
+        tw_plan_with_tree(replan_state, original_tasks, domain,
+                          new_tree, &r.blacklist, &skip);
+
+    if (!suffix) {
+        r.recovered = false;
+        return r;
+    }
+
+    // Full plan = already-executed prefix + recovered suffix.
+    std::vector<TwCall> full_plan(original_plan.begin(),
+                                  original_plan.begin() + prefix_len);
+    full_plan.insert(full_plan.end(), suffix->begin(), suffix->end());
+    r.new_plan  = std::move(full_plan);
+    r.recovered = true;
+    return r;
+}
