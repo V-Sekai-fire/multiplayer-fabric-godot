@@ -399,6 +399,73 @@ inline TwGoalMethodFn build_goal_method_alt(const TwValue::Array &goal_param_nam
     };
 }
 
+// Scan method: iterate over all keys of state[over], try each branch with
+// {_key} bound to that key; on first match return branch subtasks + recurse
+// call; if no key matches any branch return done_subtasks.
+inline TwMethodFn build_scan_method(const TwValue::Dict &scan_def,
+        const TwValue::Dict &enums) {
+    // "over" — state variable name to iterate
+    std::string over_var;
+    if (auto it = scan_def.find("over"); it != scan_def.end())
+        over_var = it->second.as_string();
+
+    // "recurse" — task name to append when a branch matches
+    std::string recurse_name;
+    if (auto it = scan_def.find("recurse"); it != scan_def.end())
+        recurse_name = it->second.as_string();
+
+    // "branches" — array of alt-style dicts each with bind/check/subtasks
+    struct Branch {
+        TwValue::Array bind_defs;
+        TwValue::Array check_defs;
+        TwValue::Array subtask_defs;
+    };
+    std::vector<Branch> branches;
+    if (auto it = scan_def.find("branches"); it != scan_def.end() && it->second.is_array()) {
+        for (auto &br : it->second.as_array()) {
+            if (!br.is_dict()) continue;
+            auto get = [&](const char *k) -> TwValue::Array {
+                auto jt = br.as_dict().find(k);
+                return (jt != br.as_dict().end() && jt->second.is_array())
+                    ? jt->second.as_array() : TwValue::Array{};
+            };
+            branches.push_back({get("bind"), get("check"), get("subtasks")});
+        }
+    }
+
+    // "done_subtasks" — returned when no key matches any branch
+    TwValue::Array done_subtasks;
+    if (auto it = scan_def.find("done_subtasks"); it != scan_def.end() && it->second.is_array())
+        done_subtasks = it->second.as_array();
+
+    return [over_var, recurse_name, branches, done_subtasks, enums](
+            std::shared_ptr<TwState> state, std::vector<TwValue> /*args*/)
+            -> std::optional<std::vector<TwTask>> {
+        // Collect current keys of the scanned variable.
+        std::vector<std::string> keys;
+        if (auto it = state->vars.find(over_var); it != state->vars.end() && it->second.is_dict())
+            for (auto &[k, _] : it->second.as_dict()) keys.push_back(k);
+
+        // Branch-priority ordering: for each branch, scan ALL keys before
+        // trying the next branch. Matches Python gltf_domain_interpreter.py.
+        for (auto &br : branches) {
+            for (auto &key : keys) {
+                Params params;
+                params["_key"] = TwValue(key);
+                run_binds(br.bind_defs, params, *state);
+                if (!run_checks(br.check_defs, params, *state, enums)) continue;
+                auto subtasks = expand_subtasks(br.subtask_defs, params);
+                if (!recurse_name.empty())
+                    subtasks.push_back(TwCall{recurse_name, {}});
+                return subtasks;
+            }
+        }
+        // All branches x keys exhausted -- done.
+        Params empty;
+        return expand_subtasks(done_subtasks, empty);
+    };
+}
+
 // ---- Main loader -----------------------------------------------------------
 
 struct TwLoaded {
@@ -451,6 +518,14 @@ inline TwLoaded load_domain(const TwValue &data) {
         for (auto &[task_name, group] : it->second.as_dict()) {
             if (!group.is_dict()) continue;
             const auto &gd = group.as_dict();
+
+            // Scan method: single fn that iterates over a state-variable's keys.
+            if (auto sit = gd.find("scan"); sit != gd.end() && sit->second.is_dict()) {
+                result.domain.task_methods[task_name] = {
+                    build_scan_method(sit->second.as_dict(), enums)
+                };
+                continue;
+            }
 
             TwValue::Array param_names;
             if (auto pit = gd.find("params"); pit != gd.end() && pit->second.is_array())
@@ -515,6 +590,31 @@ inline TwLoaded load_file(const std::string &path) {
     std::ostringstream oss;
     oss << f.rdbuf();
     return load_json(oss.str());
+}
+
+// Load domain and problem from separate files.
+// The domain supplies actions/methods/goals; the problem supplies variables/tasks.
+// State variables from the problem override those from the domain.
+inline TwLoaded load_file_pair(const std::string &domain_path, const std::string &problem_path) {
+    TwLoaded dom = load_file(domain_path);
+    if (!dom.state) return TwLoaded{};
+    TwLoaded prob = load_file(problem_path);
+    if (!prob.state) return TwLoaded{};
+
+    // Merge state: problem values override domain defaults.
+    for (auto &[k, v] : prob.state->vars)
+        dom.state->vars[k] = v;
+    // Merge methods/goals: problem may define extra or override domain methods.
+    for (auto &[k, v] : prob.domain.task_methods)
+        dom.domain.task_methods[k] = v;
+    for (auto &[k, v] : prob.domain.goal_methods)
+        dom.domain.goal_methods[k] = v;
+    for (auto &[k, v] : prob.domain.actions)
+        dom.domain.actions[k] = v;
+    if (!prob.tasks.empty())
+        dom.tasks = prob.tasks;
+
+    return dom;
 }
 
 // Serialise a plan as a JSON array string.

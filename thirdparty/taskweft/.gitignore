@@ -1,10 +1,10 @@
 # CLI build directories
 cli/.build_native/
 cli/.build_riscv/
-cli/taskweft_riscv64
 
-# Native CLI binary in-tree (built by cmake)
+# Built binaries
 cli/taskweft
+cli/taskweft_riscv64
 
 # Python cache
 __pycache__/

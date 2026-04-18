@@ -1,12 +1,14 @@
 // Taskweft planning state — pure C++20, no Godot dependency.
+// Uses tsl::ordered_map to preserve JSON insertion order for deterministic
+// key iteration (matches Python dict ordering).
 #pragma once
 #include "tw_value.hpp"
+#include "thirdparty/tsl_ordered_map.h"
 #include <memory>
 #include <string>
-#include <unordered_map>
 
 struct TwState {
-    std::unordered_map<std::string, TwValue> vars;
+    tsl::ordered_map<std::string, TwValue> vars;
 
     void set_var(const std::string &key, TwValue val) { vars[key] = std::move(val); }
 
@@ -45,5 +47,18 @@ struct TwState {
         auto c = std::make_shared<TwState>();
         c->vars = vars;
         return c;
+    }
+
+    // Deterministic string fingerprint for cycle detection.
+    std::string signature() const {
+        std::string s;
+        std::vector<std::string> keys;
+        keys.reserve(vars.size());
+        for (auto &[k, _] : vars) keys.push_back(k);
+        std::sort(keys.begin(), keys.end());
+        for (auto &k : keys) {
+            s += k; s += '='; s += vars.at(k).to_string(); s += ';';
+        }
+        return s;
     }
 };

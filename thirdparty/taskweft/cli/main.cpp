@@ -1,7 +1,8 @@
 // Taskweft CLI — load a JSON-LD domain and print the plan.
 // Usage:
-//   taskweft <domain.jsonld>          plan from file
-//   taskweft --hrr <word> [dim]       print HRR atom phases for a word
+//   taskweft <domain.jsonld>                     plan from self-contained file
+//   taskweft --problem <domain> <problem>        plan from split domain + problem files
+//   taskweft --hrr <word> [dim]                  print HRR atom phases for a word
 #include "../standalone/tw_loader.hpp"
 #include "../standalone/tw_planner.hpp"
 #include "../standalone/tw_hrr.hpp"
@@ -27,7 +28,13 @@ int main(int argc, char **argv) {
 
     TwLoader::TwLoaded loaded;
 
-    if (argc >= 2) {
+    if (argc >= 4 && std::string(argv[1]) == "--problem") {
+        loaded = TwLoader::load_file_pair(argv[2], argv[3]);
+        if (!loaded.state) {
+            std::cerr << "taskweft: cannot read domain=" << argv[2] << " or problem=" << argv[3] << "\n";
+            return 1;
+        }
+    } else if (argc >= 2) {
         loaded = TwLoader::load_file(argv[1]);
         if (!loaded.state) {
             std::cerr << "taskweft: cannot read " << argv[1] << "\n";

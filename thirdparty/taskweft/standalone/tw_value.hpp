@@ -1,19 +1,21 @@
 // Recursive tagged-union value type for Taskweft standalone library.
 // No Godot dependency — pure C++20.
+// Uses tsl::ordered_map (github.com/Tessil/ordered-map) for Dict so that
+// key iteration order matches Python dict insertion order exactly.
 #pragma once
+#include "thirdparty/tsl_ordered_map.h"
 #include <cmath>
 #include <cstdint>
 #include <memory>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 class TwValue {
 public:
     enum class Type { NIL, BOOL, INT, FLOAT, STRING, ARRAY, DICT };
     using Array = std::vector<TwValue>;
-    using Dict  = std::unordered_map<std::string, TwValue>;
+    using Dict  = tsl::ordered_map<std::string, TwValue>;
 
 private:
     Type    _type = Type::NIL;
