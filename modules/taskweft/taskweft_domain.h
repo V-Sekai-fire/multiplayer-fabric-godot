@@ -16,6 +16,7 @@ class TaskweftDomain : public RefCounted {
 
 	HashMap<String, Callable>       _actions;
 	HashMap<String, Array>          _task_methods;
+	HashMap<String, Array>          _goal_methods;
 
 protected:
 	static void _bind_methods();
@@ -28,6 +29,12 @@ public:
 	void  declare_task_methods(const String &p_task, const Array &p_methods);
 	bool  has_task(const String &p_task) const;
 	Array get_task_methods(const String &p_task) const;
+
+	// Goal methods are indexed by state variable name.
+	// Each callable: fn(state, desired_value) -> Array[subtask] | null
+	void  declare_goal_methods(const String &p_var, const Array &p_methods);
+	bool  has_goal_methods(const String &p_var) const;
+	Array get_goal_methods(const String &p_var) const;
 
 	TaskweftDomain() {}
 };

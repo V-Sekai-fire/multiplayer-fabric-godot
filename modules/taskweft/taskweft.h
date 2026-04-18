@@ -4,6 +4,7 @@
 #pragma once
 
 #include "taskweft_domain.h"
+#include "taskweft_goal.h"
 #include "taskweft_state.h"
 
 #include "core/object/ref_counted.h"

@@ -6,6 +6,7 @@
 #include "core/object/class_db.h"
 #include "taskweft.h"
 #include "taskweft_domain.h"
+#include "taskweft_goal.h"
 #include "taskweft_state.h"
 
 void initialize_taskweft_module(ModuleInitializationLevel p_level) {
@@ -14,6 +15,7 @@ void initialize_taskweft_module(ModuleInitializationLevel p_level) {
 	}
 	ClassDB::register_class<TaskweftState>();
 	ClassDB::register_class<TaskweftDomain>();
+	ClassDB::register_class<TaskweftGoal>();
 	ClassDB::register_class<Taskweft>();
 }
 

@@ -17,26 +17,80 @@ Ref<TaskweftDomain> Taskweft::get_domain() const {
 
 Variant Taskweft::_seek_plan(Ref<TaskweftState> p_state, const Array &p_tasks, int p_depth) const {
 	if (p_depth > MAX_DEPTH) {
-		return Variant(); // null — depth limit
+		return Variant();
 	}
 
-	// Base case: no tasks left → success with empty plan.
 	if (p_tasks.is_empty()) {
 		return Array();
 	}
 
 	ERR_FAIL_COND_V(_domain.is_null(), Variant());
 
-	Array task = p_tasks[0];
-	ERR_FAIL_COND_V(task.is_empty(), Variant());
-
-	String task_name = task[0];
-
-	// Build remaining tasks (everything after the first).
+	// Build remaining tasks (everything after the first) — used by all branches.
 	Array remaining_tasks;
 	for (int i = 1; i < p_tasks.size(); ++i) {
 		remaining_tasks.push_back(p_tasks[i]);
 	}
+
+	// --- Goal item ---
+	if (p_tasks[0].get_type() == Variant::OBJECT) {
+		Ref<TaskweftGoal> goal = p_tasks[0];
+		if (goal.is_valid()) {
+			// Already satisfied: drop it and continue.
+			if (goal->is_satisfied(p_state)) {
+				return _seek_plan(p_state, remaining_tasks, p_depth + 1);
+			}
+
+			// Pick the first unsatisfied variable and try goal methods for it.
+			Dictionary unmet = goal->unsatisfied(p_state);
+			Array unmet_keys = unmet.keys();
+			ERR_FAIL_COND_V(unmet_keys.is_empty(), Variant());
+			String goal_var = unmet_keys[0];
+			Variant desired = unmet[goal_var];
+
+			if (!_domain->has_goal_methods(goal_var)) {
+				return Variant();
+			}
+
+			Array goal_methods = _domain->get_goal_methods(goal_var);
+			for (int method_index = 0; method_index < goal_methods.size(); ++method_index) {
+				Callable method = goal_methods[method_index];
+
+				Array call_args;
+				call_args.push_back(p_state);
+				call_args.push_back(desired);
+
+				Variant subtasks_variant = method.callv(call_args);
+				if (subtasks_variant.get_type() == Variant::NIL) {
+					continue;
+				}
+
+				Array subtasks = subtasks_variant;
+
+				// subtasks + goal (re-check after subtasks) + remaining
+				Array new_tasks;
+				for (int i = 0; i < subtasks.size(); ++i) {
+					new_tasks.push_back(subtasks[i]);
+				}
+				new_tasks.push_back(goal);
+				for (int i = 0; i < remaining_tasks.size(); ++i) {
+					new_tasks.push_back(remaining_tasks[i]);
+				}
+
+				Variant result = _seek_plan(p_state, new_tasks, p_depth + 1);
+				if (result.get_type() != Variant::NIL) {
+					return result;
+				}
+			}
+			return Variant();
+		}
+	}
+
+	// --- Primitive action or compound task ---
+	Array task = p_tasks[0];
+	ERR_FAIL_COND_V(task.is_empty(), Variant());
+
+	String task_name = task[0];
 
 	// Build task arguments (task[1..]).
 	Array task_args;
@@ -48,7 +102,6 @@ Variant Taskweft::_seek_plan(Ref<TaskweftState> p_state, const Array &p_tasks, i
 	if (_domain->has_action(task_name)) {
 		Callable action = _domain->get_action(task_name);
 
-		// Call: action(state_copy, arg1, arg2, ...)
 		Array call_args;
 		Ref<TaskweftState> state_copy = p_state->copy();
 		call_args.push_back(state_copy);
@@ -58,7 +111,6 @@ Variant Taskweft::_seek_plan(Ref<TaskweftState> p_state, const Array &p_tasks, i
 
 		Variant new_state_variant = action.callv(call_args);
 
-		// Action returns null → precondition failed, backtrack.
 		if (new_state_variant.get_type() == Variant::NIL) {
 			return Variant();
 		}
@@ -71,7 +123,6 @@ Variant Taskweft::_seek_plan(Ref<TaskweftState> p_state, const Array &p_tasks, i
 			return Variant();
 		}
 
-		// Prepend this action to the sub-plan.
 		Array plan;
 		plan.push_back(task);
 		Array sub_plan_array = sub_plan;
@@ -96,14 +147,12 @@ Variant Taskweft::_seek_plan(Ref<TaskweftState> p_state, const Array &p_tasks, i
 
 			Variant subtasks_variant = method.callv(call_args);
 
-			// Method returns null → not applicable, try next.
 			if (subtasks_variant.get_type() == Variant::NIL) {
 				continue;
 			}
 
 			Array subtasks = subtasks_variant;
 
-			// Prepend subtasks to the remaining tasks.
 			Array new_tasks;
 			for (int i = 0; i < subtasks.size(); ++i) {
 				new_tasks.push_back(subtasks[i]);
@@ -116,10 +165,9 @@ Variant Taskweft::_seek_plan(Ref<TaskweftState> p_state, const Array &p_tasks, i
 			if (result.get_type() != Variant::NIL) {
 				return result;
 			}
-			// This method failed — try the next one.
 		}
 
-		return Variant(); // All methods failed.
+		return Variant();
 	}
 
 	// Unknown task name.
