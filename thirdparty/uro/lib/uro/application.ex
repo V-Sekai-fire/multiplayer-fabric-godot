@@ -17,7 +17,7 @@ defmodule Uro.Application do
           {Phoenix.PubSub, [name: Uro.PubSub, adapter: Phoenix.PubSub.PG2]},
           Uro.Endpoint,
           Uro.VSekai.ShardJanitor,
-          {Redix, {Application.get_env(:uro, Redix)[:url], [name: :redix]}},
+          Pow.Store.Backend.MnesiaCache,
           ExMarcel.TableWrapper,
 
           # ExMarcel

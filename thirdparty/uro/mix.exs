@@ -46,7 +46,6 @@ defmodule Uro.MixProject do
       {:phoenix_live_view, "~> 0.20.3"},
       {:phoenix_view, "~> 2.0"},
       {:ecto_sql, "~> 3.11"},
-      {:redix, "~> 0.9.2"},
       {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 3.3"},
       {:cors_plug, "~> 3.0"},
