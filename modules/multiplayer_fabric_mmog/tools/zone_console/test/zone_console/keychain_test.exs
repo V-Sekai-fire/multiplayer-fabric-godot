@@ -43,8 +43,13 @@ defmodule ZoneConsole.KeychainTest do
   end
 
   property "set is idempotent — last write wins" do
-    forall [pkg <- package(), svc <- service(), u <- user(),
-            pw1 <- password(), pw2 <- password()] do
+    forall [
+      pkg <- package(),
+      svc <- service(),
+      u <- user(),
+      pw1 <- password(),
+      pw2 <- password()
+    ] do
       Mock.reset()
       :ok = Keychain.set_password(pkg, svc, u, pw1)
       :ok = Keychain.set_password(pkg, svc, u, pw2)
@@ -70,8 +75,13 @@ defmodule ZoneConsole.KeychainTest do
   end
 
   property "entries under different (package, service, user) tuples are isolated" do
-    forall [pkg1 <- package(), pkg2 <- package(),
-            svc <- service(), u <- user(), pw <- password()] do
+    forall [
+      pkg1 <- package(),
+      pkg2 <- package(),
+      svc <- service(),
+      u <- user(),
+      pw <- password()
+    ] do
       implies pkg1 != pkg2 do
         Mock.reset()
         :ok = Keychain.set_password(pkg1, svc, u, pw)

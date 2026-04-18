@@ -133,6 +133,17 @@ defmodule Uro.Router do
 
   resources("/shards", Uro.ShardController, only: [:index, :create, :update, :delete])
 
+  # Entity lifecycle — zones call these at spawn (GET) and despawn (PUT).
+  # Teleport registers a C3 spatial discontinuity so the receiving zone
+  # can reconstruct the entity without a physics violation.
+  scope "/entities" do
+    pipe_through([:authenticated])
+
+    get "/:global_id", Uro.EntityController, :show
+    put "/:global_id", Uro.EntityController, :update
+    post "/:global_id/teleport", Uro.EntityController, :teleport
+  end
+
   scope "/zones" do
     pipe_through([:authenticated])
 

@@ -55,14 +55,16 @@ defmodule ZoneConsole.FabricMMOGKeyStore do
   Mirrors FabricMMOGKeyStore::get.
   """
   @spec get(String.t()) ::
-          {:ok, binary(), binary()} | {:error, :not_found | :expired | {:invalid | :os_error, String.t()}}
+          {:ok, binary(), binary()}
+          | {:error, :not_found | :expired | {:invalid | :os_error, String.t()}}
   def get(asset_uuid) do
     get_with_clock(asset_uuid, System.os_time(:second))
   end
 
   @doc "Like get/1 but with an injected unix timestamp for TTL testing."
   @spec get_with_clock(String.t(), integer()) ::
-          {:ok, binary(), binary()} | {:error, :not_found | :expired | {:invalid | :os_error, String.t()}}
+          {:ok, binary(), binary()}
+          | {:error, :not_found | :expired | {:invalid | :os_error, String.t()}}
   def get_with_clock(asset_uuid, now) do
     case Keychain.get_password(@package, @service, asset_uuid) do
       {:error, :not_found} -> {:error, :not_found}
@@ -121,9 +123,7 @@ defmodule ZoneConsole.FabricMMOGKeyStore do
         {:ok, bytes}
 
       {:ok, bytes} ->
-        {:error,
-         {:invalid,
-          "stored #{field_name} length #{byte_size(bytes)} != #{expected_len}"}}
+        {:error, {:invalid, "stored #{field_name} length #{byte_size(bytes)} != #{expected_len}"}}
 
       :error ->
         {:error, {:invalid, "stored #{field_name} is not valid base64"}}

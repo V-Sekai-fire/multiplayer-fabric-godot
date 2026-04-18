@@ -19,7 +19,8 @@ defmodule ZoneConsole.CLI do
     IO.puts("Uro: #{uro_url}")
 
     authed =
-      with {:cached, {:ok, token}} <- {:cached, Keychain.get_password(@kc_package, @kc_service, @kc_account)},
+      with {:cached, {:ok, token}} <-
+             {:cached, Keychain.get_password(@kc_package, @kc_service, @kc_account)},
            client = %UroClient{base_url: uro_url, access_token: token},
            {:ok, verified} <- UroClient.current_user(client) do
         IO.puts("(session restored from keychain)")
@@ -36,11 +37,11 @@ defmodule ZoneConsole.CLI do
   defp fresh_login(uro_url) do
     username =
       System.get_env("URO_USERNAME") ||
-        (IO.gets("username: ") |> String.trim())
+        IO.gets("username: ") |> String.trim()
 
     password =
       System.get_env("URO_PASSWORD") ||
-        (IO.gets("password: ") |> String.trim())
+        IO.gets("password: ") |> String.trim()
 
     case UroClient.login(UroClient.new(uro_url), username, password) do
       {:ok, authed} ->

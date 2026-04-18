@@ -33,8 +33,12 @@ defmodule ZoneConsole.Keychain.Mock do
 
   def delete_password(service, user) do
     case :ets.lookup(@table, {service, user}) do
-      [] -> {:error, :not_found}
-      _ -> :ets.delete(@table, {service, user}); :ok
+      [] ->
+        {:error, :not_found}
+
+      _ ->
+        :ets.delete(@table, {service, user})
+        :ok
     end
   end
 end
