@@ -178,7 +178,6 @@ void SQLite::close() {
 		if (query != nullptr) {
 			query->finalize();
 		} else {
-			memdelete(queries[i - 1]);
 			queries.remove_at(i - 1);
 		}
 	}
@@ -475,9 +474,9 @@ Ref<SQLiteQuery> SQLite::create_query(String p_query) {
 	query.instantiate();
 	query->init(this, p_query);
 
-	WeakRef *wr = memnew(WeakRef);
-	wr->set_obj(query.ptr());
-	queries.push_back(wr);
+	Ref<WeakRef> weak_ref = memnew(WeakRef);
+	weak_ref->set_obj(query.ptr());
+	queries.push_back(weak_ref);
 
 	return query;
 }
