@@ -164,6 +164,26 @@ config :waffle,
 
 # storage_dir: "uploads"
 
+# OpenTelemetry — exports traces via OTLP to OTEL_EXPORTER_OTLP_ENDPOINT.
+# When that env var is absent the SDK runs with a no-op exporter; no errors
+# are raised and no spans are dropped. Wire in an agent by setting the variable.
+config :opentelemetry,
+  processors: [
+    # Batch-export to OTLP (no-op when OTEL_EXPORTER_OTLP_ENDPOINT is unset)
+    {:otel_batch_processor, %{exporter: {:opentelemetry_exporter, %{}}}},
+    # Mirror every completed span into the in-app ETS span store
+    {Uro.Telemetry.SpanProcessor, %{}}
+  ]
+
+config :opentelemetry_exporter,
+  otlp_protocol: :http_protobuf
+
+# SpanStore time window — keep spans for this many minutes in the ETS buffer.
+# Increase if you want a longer trace history at the cost of memory.
+config :uro, Uro.Telemetry.SpanStore,
+  ttl_ms: :timer.minutes(5),
+  sweep_interval_ms: :timer.seconds(30)
+
 import_config "#{Mix.env()}.exs"
 
 if Mix.env() == "dev" do

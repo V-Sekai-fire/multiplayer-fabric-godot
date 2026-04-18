@@ -76,7 +76,18 @@ defmodule Uro.MixProject do
       {:scrivener_ecto, "~> 2.7"},
       {:ex_marcel, "~> 0.1.0"},
       {:wtransport, git: "https://github.com/bugnano/wtransport-elixir.git"},
-      {:erlexec, "~> 2.0"}
+      {:erlexec, "~> 2.0"},
+      # OpenTelemetry
+      {:opentelemetry_api, "~> 1.5"},
+      {:opentelemetry, "~> 1.7"},
+      {:opentelemetry_exporter, "~> 1.10"},
+      {:opentelemetry_phoenix, "~> 2.0"},
+      {:opentelemetry_ecto, "~> 1.2"},
+      {:opentelemetry_logger_metadata, "~> 0.2"},
+      # In-app telemetry dashboard
+      {:phoenix_live_dashboard, "~> 0.8"},
+      {:telemetry_metrics, "~> 1.0"},
+      {:telemetry_poller, "~> 1.0"}
     ]
   end
 

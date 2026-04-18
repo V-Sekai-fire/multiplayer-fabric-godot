@@ -29,7 +29,9 @@ ssl_opts =
     false
   end
 
-if database_url = System.get_env("DATABASE_URL") do
+db_url_key = if config_env() == :test, do: "TEST_DATABASE_URL", else: "DATABASE_URL"
+
+if database_url = System.get_env(db_url_key) do
   repo_config =
     [url: database_url, migration_lock: false]
     |> then(fn cfg ->
@@ -37,4 +39,17 @@ if database_url = System.get_env("DATABASE_URL") do
     end)
 
   config :uro, Uro.Repo, repo_config
+end
+
+# OpenTelemetry OTLP endpoint — read at runtime so the same release works
+# with and without an agent.  When OTEL_EXPORTER_OTLP_ENDPOINT is set (e.g.
+# http://jaeger:4318 inside Docker), spans are shipped; otherwise no-op.
+if otlp_endpoint = System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT") do
+  config :opentelemetry_exporter,
+    otlp_protocol: :http_protobuf,
+    otlp_endpoint: otlp_endpoint
+end
+
+if service_name = System.get_env("OTEL_SERVICE_NAME") do
+  config :opentelemetry, resource: %{service: %{name: service_name}}
 end
