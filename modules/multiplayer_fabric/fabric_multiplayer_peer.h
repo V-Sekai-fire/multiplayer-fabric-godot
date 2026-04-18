@@ -34,58 +34,39 @@
 #include "core/templates/hash_map.h"
 #include "scene/main/multiplayer_peer.h"
 
-// Logical channels via set_transfer_channel() + set_transfer_mode().
-// ENet: channel number is carried on the wire by ENet itself.
-// WebTransport: three independent WebTransportPeer connections per neighbor,
-//   one per channel, each on its own port (base+1/+2/+3). Channel identity
-//   is known from which peer received the packet — no channel byte needed.
-//   This avoids QUIC head-of-line blocking across channels.
+// Three independent WebTransportPeer connections per neighbor, one per channel,
+// each on its own port (base+1/+2/+3). Channel identity is known from which peer
+// received the packet — no channel byte in the payload, no QUIC HOL blocking.
 static constexpr int CH_MIGRATION = 1; // reliable   — STAGING intents
 static constexpr int CH_INTEREST = 2; // unreliable — entity snapshots
 static constexpr int CH_PLAYER = 3; // unreliable — player state
 
-/// Zone-fabric multiplayer peer. Wraps an inner MultiplayerPeer (ENet or
-/// WebTransport) and adds zone-to-zone neighbor connections with channel-sorted
-/// inboxes.
+/// Zone-fabric multiplayer peer over WebTransport. Adds zone-to-zone neighbor
+/// connections with channel-sorted inboxes.
 ///
-/// ENet usage (default):
 ///   var peer = FabricMultiplayerPeer.new()
-///   peer.create_server(port)
-///
-/// WebTransport usage:
-///   var peer = FabricMultiplayerPeer.new()
-///   peer.transport = FabricMultiplayerPeer.TRANSPORT_WEBTRANSPORT
 ///   peer.wt_cert = cert   # Ref<X509Certificate>
 ///   peer.wt_key  = key    # Ref<CryptoKey>
 ///   peer.create_server(port)
-///   # Creates 4 servers: port (game clients), port+1/+2/+3 (neighbor channels)
+///   # Binds port (game clients) + port+1/+2/+3 (neighbor channels)
 class FabricMultiplayerPeer : public MultiplayerPeer {
 	GDCLASS(FabricMultiplayerPeer, MultiplayerPeer);
-
-public:
-	enum TransportType {
-		TRANSPORT_ENET,
-		TRANSPORT_WEBTRANSPORT,
-	};
 
 private:
 	String game_id;
 
-	TransportType transport = TRANSPORT_ENET;
-
-	// WebTransport-mode cert/key — set before create_server().
+	// WebTransport cert/key — set before create_server().
 	String wt_path = "/wt";
 	Ref<X509Certificate> wt_cert;
 	Ref<CryptoKey> wt_key;
 
-	// Inner peer for game-client connections (base port).
+	// Server peer for game-client connections (base port).
 	Ref<MultiplayerPeer> server_peer;
-	// WT mode: one inbound server per channel on port+1, port+2, port+3.
+	// One inbound neighbor server per channel on port+1, port+2, port+3.
 	Ref<MultiplayerPeer> wt_channel_servers[3];
 
 	struct NeighborConn {
-		// ENet: only channel_peers[0] used.
-		// WT:   channel_peers[0]=CH_MIGRATION(port+1), [1]=CH_INTEREST(port+2), [2]=CH_PLAYER(port+3).
+		// channel_peers[0]=CH_MIGRATION(port+1), [1]=CH_INTEREST(port+2), [2]=CH_PLAYER(port+3).
 		Ref<MultiplayerPeer> channel_peers[3];
 		bool connected[3] = { false, false, false };
 	};
@@ -107,23 +88,20 @@ private:
 
 	uint16_t base_port = 0;
 
-	// p_known_channel: 0 = derive from packet (frame-decode for WT game-client peer,
-	//   get_packet_channel for ENet); CH_MIGRATION/INTEREST/PLAYER = fixed channel
-	//   (WT neighbor peers where channel identity is known from which peer).
+	// p_known_channel > 0: all packets from this peer go to that channel inbox
+	//   (neighbor channel_peers — channel identity known from which peer).
+	// p_known_channel == 0: frame-decode the wtd flag byte (game-client server_peer).
 	void _poll_peer(Ref<MultiplayerPeer> p_peer, int p_known_channel);
-	// p_use_frame: true for WT game-client server_peer (encodes channel in wtd frame flag);
-	//   false for WT neighbor peers (channel carried implicitly by peer identity) and ENet.
+	// p_use_frame: true for server_peer (wtd frame carries channel for game clients);
+	//   false for neighbor channel_peers (channel implicit from peer identity).
 	void _send_packet(Ref<MultiplayerPeer> p_peer, int p_channel, const uint8_t *p_data, int p_size, bool p_use_frame);
 
 protected:
 	static void _bind_methods();
 
 public:
-	Error create_server(int p_port, int p_max_clients = 32);
+	Error create_server(int p_port);
 	Error create_client(const String &p_address, int p_port);
-
-	void set_transport(TransportType p_type);
-	TransportType get_transport() const;
 
 	void set_wt_path(const String &p_path);
 	String get_wt_path() const;
@@ -178,5 +156,3 @@ public:
 	FabricMultiplayerPeer() = default;
 	~FabricMultiplayerPeer() = default;
 };
-
-VARIANT_ENUM_CAST(FabricMultiplayerPeer::TransportType);
