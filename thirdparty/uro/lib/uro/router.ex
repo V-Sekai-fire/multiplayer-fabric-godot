@@ -131,6 +131,14 @@ defmodule Uro.Router do
 
   resources("/shards", Uro.ShardController, only: [:index, :create, :update, :delete])
 
+  scope "/zones" do
+    pipe_through([:authenticated])
+
+    get "/", Uro.ZoneController, :index
+    post "/", Uro.ZoneController, :create
+    delete "/:shard_id/:port", Uro.ZoneController, :delete
+  end
+
   scope "/backpacks" do
     pipe_through([:authenticated])
 

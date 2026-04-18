@@ -100,6 +100,60 @@ defmodule ZoneConsole.UroClient do
     end
   end
 
+  @doc "GET /zones?shard_id=<id> — returns {:ok, [zone]} or {:error, reason}."
+  def list_zones(%__MODULE__{} = client, shard_id \\ nil) do
+    url =
+      if shard_id,
+        do: "#{client.base_url}/zones?shard_id=#{shard_id}",
+        else: "#{client.base_url}/zones"
+
+    case Req.get(url, headers: auth_headers(client), receive_timeout: 10_000) do
+      {:ok, %{status: 200, body: %{"data" => %{"zones" => zones}}}} ->
+        {:ok, zones}
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, "HTTP #{status}: #{inspect(body)}"}
+
+      {:error, reason} ->
+        {:error, inspect(reason)}
+    end
+  end
+
+  @doc "POST /zones — spawn a zone process. Returns {:ok, map} or {:error, reason}."
+  def spawn_zone(%__MODULE__{} = client, shard_id, port) do
+    case Req.post("#{client.base_url}/zones",
+           json: %{shard_id: shard_id, port: port},
+           headers: auth_headers(client),
+           receive_timeout: 10_000
+         ) do
+      {:ok, %{status: 200, body: %{"data" => data}}} ->
+        {:ok, data}
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, "HTTP #{status}: #{inspect(body)}"}
+
+      {:error, reason} ->
+        {:error, inspect(reason)}
+    end
+  end
+
+  @doc "DELETE /zones/:shard_id/:port — stop a zone process. Returns :ok or {:error, reason}."
+  def stop_zone(%__MODULE__{} = client, shard_id, port) do
+    case Req.delete("#{client.base_url}/zones/#{shard_id}/#{port}",
+           headers: auth_headers(client),
+           receive_timeout: 10_000
+         ) do
+      {:ok, %{status: 200}} ->
+        :ok
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, "HTTP #{status}: #{inspect(body)}"}
+
+      {:error, reason} ->
+        {:error, inspect(reason)}
+    end
+  end
+
   defp auth_headers(%__MODULE__{access_token: nil}), do: []
   defp auth_headers(%__MODULE__{access_token: tok}), do: [{"authorization", "Bearer #{tok}"}]
 end

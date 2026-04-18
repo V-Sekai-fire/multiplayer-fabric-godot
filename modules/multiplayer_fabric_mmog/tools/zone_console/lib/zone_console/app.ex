@@ -16,7 +16,9 @@ defmodule ZoneConsole.App do
     {"register <addr> <port> <map> <name>", "register a new shard"},
     {"unregister <name|index>",      "delete a shard from Uro"},
     {"heartbeat",                    "send keepalive for connected shard"},
-    {"zones",                        "list Hilbert zones within connected shard"},
+    {"start <port>",                 "spawn a Godot zone on the connected shard"},
+    {"stop <port>",                  "stop a running zone on the connected shard"},
+    {"zones",                        "list running zones for connected shard"},
     {"status",                       "show connected shard details"},
     {"entities [n]",                 "list live jellyfish (default 20)"},
     {"kick <id>",                    "force-migrate entity out of zone"},
@@ -275,14 +277,71 @@ defmodule ZoneConsole.App do
     end)
   end
 
+  defp run_command(state, "start " <> port_str) do
+    require_shard(state, fn s ->
+      case Integer.parse(String.trim(port_str)) do
+        {port, ""} ->
+          case UroClient.spawn_zone(state.uro, s["id"], port) do
+            {:ok, data} ->
+              append_many(state, [
+                line(:ok,  "Zone spawning on shard #{s["name"]} port #{port}"),
+                line(:dim, "  status: #{data["status"]}"),
+                line(:dim, "  run 'zones' to monitor progress"),
+              ])
+
+            {:error, reason} ->
+              append(state, line(:err, "Spawn failed: #{reason}"))
+          end
+
+        _ ->
+          append(state, line(:err, "usage: start <port>"))
+      end
+    end)
+  end
+
+  defp run_command(state, "stop " <> port_str) do
+    require_shard(state, fn s ->
+      case Integer.parse(String.trim(port_str)) do
+        {port, ""} ->
+          case UroClient.stop_zone(state.uro, s["id"], port) do
+            :ok ->
+              append(state, line(:ok, "Zone #{s["name"]}:#{port} stopped"))
+
+            {:error, reason} ->
+              append(state, line(:err, "Stop failed: #{reason}"))
+          end
+
+        _ ->
+          append(state, line(:err, "usage: stop <port>"))
+      end
+    end)
+  end
+
   defp run_command(state, "zones") do
     require_shard(state, fn s ->
-      append_many(state, [
-        line(:info, "Zones in #{s["name"]} (Hilbert-coded):"),
-        line(:dim,  "  Hilbert zone boundaries are computed client-side from"),
-        line(:dim,  "  the shard's simulation grid — no separate zone registry."),
-        line(:dim,  "  MIGRATION_HEADROOM = 400  |  map: #{s["map"]}"),
-      ])
+      case UroClient.list_zones(state.uro, s["id"]) do
+        {:ok, []} ->
+          append_many(state, [
+            line(:warn, "No running zones for shard #{s["name"]}."),
+            line(:dim,  "  Use 'start <port>' to spawn one."),
+          ])
+
+        {:ok, zones} ->
+          header = line(:dim, "  #{String.pad_trailing("id", 38)} port   status    cert_hash")
+          rows = Enum.map(zones, fn z ->
+            cert = String.slice(z["cert_hash"] || "-", 0, 12)
+            line(:dim,
+              "  #{String.pad_trailing(z["id"] || "?", 38)} " <>
+              "#{String.pad_trailing(to_string(z["port"] || "?"), 6)} " <>
+              "#{String.pad_trailing(z["status"] || "?", 9)} " <>
+              cert
+            )
+          end)
+          append_many(state, [line(:info, "Zones for #{s["name"]}:"), header | rows])
+
+        {:error, reason} ->
+          append(state, line(:err, "Error: #{reason}"))
+      end
     end)
   end
 
