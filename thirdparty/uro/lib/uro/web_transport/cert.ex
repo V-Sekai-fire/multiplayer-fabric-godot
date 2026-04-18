@@ -9,20 +9,29 @@ defmodule Uro.WebTransport.Cert do
 
   require Record
 
-  for name <- [
-        :"OTPTBSCertificate",
-        :"OTPSubjectPublicKeyInfo",
-        :"PublicKeyAlgorithm",
-        :"SignatureAlgorithm",
-        :"Validity",
-        :"Extension",
-        :"AttributeTypeAndValue",
-        :"ECPrivateKey"
-      ] do
-    Record.defrecordp(name, name,
-      Record.extract(name, from_lib: "public_key/include/public_key.hrl")
-    )
-  end
+  Record.defrecordp :ec_private_key, :"ECPrivateKey",
+    Record.extract(:"ECPrivateKey", from_lib: "public_key/include/public_key.hrl")
+
+  Record.defrecordp :otp_tbs_certificate, :"OTPTBSCertificate",
+    Record.extract(:"OTPTBSCertificate", from_lib: "public_key/include/public_key.hrl")
+
+  Record.defrecordp :otp_spki, :"OTPSubjectPublicKeyInfo",
+    Record.extract(:"OTPSubjectPublicKeyInfo", from_lib: "public_key/include/public_key.hrl")
+
+  Record.defrecordp :pubkey_algo, :"PublicKeyAlgorithm",
+    Record.extract(:"PublicKeyAlgorithm", from_lib: "public_key/include/public_key.hrl")
+
+  Record.defrecordp :sig_algo, :"SignatureAlgorithm",
+    Record.extract(:"SignatureAlgorithm", from_lib: "public_key/include/public_key.hrl")
+
+  Record.defrecordp :validity, :"Validity",
+    Record.extract(:"Validity", from_lib: "public_key/include/public_key.hrl")
+
+  Record.defrecordp :extension, :"Extension",
+    Record.extract(:"Extension", from_lib: "public_key/include/public_key.hrl")
+
+  Record.defrecordp :attr_type_val, :"AttributeTypeAndValue",
+    Record.extract(:"AttributeTypeAndValue", from_lib: "public_key/include/public_key.hrl")
 
   @curve :secp256r1
   @curve_oid {1, 2, 840, 10045, 3, 1, 7}
@@ -34,7 +43,7 @@ defmodule Uro.WebTransport.Cert do
     {pub_bytes, priv_bytes} = :crypto.generate_key(:ecdh, @curve)
 
     ec_priv =
-      :"ECPrivateKey"(
+      ec_private_key(
         version: 1,
         privateKey: priv_bytes,
         parameters: {:namedCurve, @curve_oid},
@@ -45,24 +54,16 @@ defmodule Uro.WebTransport.Cert do
     not_after = DateTime.add(now, @validity_days * 86_400, :second)
 
     tbs =
-      :"OTPTBSCertificate"(
+      otp_tbs_certificate(
         version: :v3,
         serialNumber: serial(),
-        signature: :"SignatureAlgorithm"(algorithm: @ecdsa_sha256_oid, parameters: :asn1_NOVALUE),
+        signature: sig_algo(algorithm: @ecdsa_sha256_oid, parameters: :asn1_NOVALUE),
         issuer: rdn("uro"),
-        validity:
-          :"Validity"(
-            notBefore: {:generalTime, fmt_time(now)},
-            notAfter: {:generalTime, fmt_time(not_after)}
-          ),
+        validity: validity(notBefore: {:generalTime, fmt_time(now)}, notAfter: {:generalTime, fmt_time(not_after)}),
         subject: rdn("uro"),
         subjectPublicKeyInfo:
-          :"OTPSubjectPublicKeyInfo"(
-            algorithm:
-              :"PublicKeyAlgorithm"(
-                algorithm: @ec_pub_oid,
-                parameters: {:namedCurve, @curve_oid}
-              ),
+          otp_spki(
+            algorithm: pubkey_algo(algorithm: @ec_pub_oid, parameters: {:namedCurve, @curve_oid}),
             subjectPublicKey: {:ECPoint, pub_bytes}
           ),
         extensions: [san_extension(san_dns, san_ips)]
@@ -87,8 +88,7 @@ defmodule Uro.WebTransport.Cert do
   defp fmt_time(%DateTime{} = dt), do: Calendar.strftime(dt, "%Y%m%d%H%M%SZ")
 
   defp rdn(cn) do
-    {:rdnSequence,
-     [[:"AttributeTypeAndValue"(type: {2, 5, 4, 3}, value: {:utf8String, cn})]]}
+    {:rdnSequence, [[attr_type_val(type: {2, 5, 4, 3}, value: {:utf8String, cn})]]}
   end
 
   defp san_extension(dns_names, ip_addrs) do
@@ -101,7 +101,7 @@ defmodule Uro.WebTransport.Cert do
 
     {:ok, san_der} = :public_key.der_encode(:"SubjectAltName", entries)
 
-    :"Extension"(extnID: {2, 5, 29, 17}, critical: false, extnValue: san_der)
+    extension(extnID: {2, 5, 29, 17}, critical: false, extnValue: san_der)
   end
 
   defp ip_to_bytes({a, b, c, d}), do: [a, b, c, d]

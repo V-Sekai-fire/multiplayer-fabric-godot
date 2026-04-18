@@ -1,28 +1,31 @@
 defmodule Uro.WebTransport.StreamHandler do
-  @moduledoc """
-  Handles reliable ordered streams from Godot clients.
-
-  Incoming stream data is published to PubSub so game logic can
-  subscribe without coupling to the transport layer.
-  """
-
-  @behaviour Wtransport.StreamHandler
+  use Wtransport.StreamHandler
 
   require Logger
 
   @impl true
   def handle_stream(stream, state) do
-    Logger.debug("WebTransport stream opened: #{inspect(stream.id)} session=#{state.session_id}")
-    {:ok, Map.put(state, :stream_id, stream.id)}
+    {:continue, Map.put(state, :stream_id, stream.id)}
   end
 
   @impl true
-  def handle_data(data, state) do
+  def handle_data(data, _stream, state) do
     Phoenix.PubSub.broadcast(
       Uro.PubSub,
       "webtransport:session:#{state.session_id}:streams",
       {:stream_data, state.stream_id, data}
     )
-    {:ok, state}
+    {:continue, state}
+  end
+
+  @impl true
+  def handle_close(_stream, state) do
+    {:continue, state}
+  end
+
+  @impl true
+  def handle_error(reason, _stream, _state) do
+    Logger.warning("WebTransport stream error: #{inspect(reason)}")
+    :ok
   end
 end
