@@ -1,0 +1,27 @@
+{
+  "@context": {"khr": "https://registry.khronos.org/glTF/extensions/2.0/KHR_interactivity/", "domain": "khr:planning/domain/"},
+  "@type": "domain:Problem",
+  "name": "entity_caps_goal",
+  "source": "entity_capabilities",
+  "description": "Goal-directed multi-agent dispatch: send every drone to mountain (1), every boat to harbor (2), every human to city (4), and amphibious_1 to island (6). Each agent uses its own capability (fly/swim/walk). Uses the loc goal method to decompose each binding independently with backtracking.",
+  "variables": [
+    {
+      "name": "loc",
+      "init": {
+        "drone_1": 0, "drone_2": 0,
+        "boat_1": 2, "boat_2": 2,
+        "human_1": 0, "human_2": 0,
+        "amphibious_1": 5
+      }
+    }
+  ],
+  "goals": [
+    {"pointer": "/loc/drone_1",      "eq": 1},
+    {"pointer": "/loc/drone_2",      "eq": 1},
+    {"pointer": "/loc/boat_1",       "eq": 2},
+    {"pointer": "/loc/boat_2",       "eq": 2},
+    {"pointer": "/loc/human_1",      "eq": 4},
+    {"pointer": "/loc/human_2",      "eq": 4},
+    {"pointer": "/loc/amphibious_1", "eq": 6}
+  ]
+}

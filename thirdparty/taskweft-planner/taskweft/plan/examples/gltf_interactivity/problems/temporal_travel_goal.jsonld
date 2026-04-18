@@ -1,0 +1,16 @@
+{
+  "@context": {"khr": "https://registry.khronos.org/glTF/extensions/2.0/KHR_interactivity/", "domain": "khr:planning/domain/"},
+  "@type": "domain:Problem",
+  "name": "temporal_travel_goal",
+  "source": "temporal_travel",
+  "description": "Goal-directed travel: get both alice and bob to park (loc 2). Uses the loc goal method to decompose each binding. With default cash levels alice walks (cheaper path first) and bob also walks. Total wall-clock time bounded by action durations: a_walk = PT10M per trip.",
+  "variables": [
+    {"name": "loc",  "init": {"alice": 0, "bob": 1, "taxi1": 2, "taxi2": 3}},
+    {"name": "cash", "init": {"alice": 20.0, "bob": 15.0}},
+    {"name": "owe",  "init": {"alice": 0.0, "bob": 0.0}}
+  ],
+  "goals": [
+    {"pointer": "/loc/alice", "eq": 2},
+    {"pointer": "/loc/bob",   "eq": 2}
+  ]
+}

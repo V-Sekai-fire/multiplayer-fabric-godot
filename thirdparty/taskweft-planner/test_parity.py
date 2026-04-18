@@ -60,33 +60,25 @@ def run_python(dom_def: dict, prob_def: dict) -> list:
 
     merged = merge_domain_problem(dom_def, prob_def)
 
-    # Problem-level "goals" array → single-tuple tasks in the form
-    # (var, key, desired) which IPyHOP treats as a goal task.
+    # Problem-level "goals" array → individual (var, key, desired) goal tuples,
+    # which IPyHOP processes by calling goal_methods[var](state, key, desired).
+    # Already-satisfied bindings are skipped by the planner automatically.
     goals_array = prob_def.get("goals") if isinstance(prob_def.get("goals"), list) else None
     if goals_array:
-        from ipyhop import MultiGoal
-        # Build a MultiGoal from the problem's goals array.
-        mg = MultiGoal(merged.get("name", "goal"))
+        goal_tasks = []
         for entry in goals_array:
             ptr = entry.get("pointer", "")
             desired = entry.get("eq")
             parts = ptr.lstrip("/").split("/")
             if len(parts) >= 2:
-                var, key = parts[0], parts[1]
-                d = getattr(mg, var, {})
-                if not isinstance(d, dict):
-                    d = {}
-                d[key] = desired
-                setattr(mg, var, d)
-        # Replace task list with the multigoal.
-        merged["tasks"] = [{"multigoal": {
-            var: getattr(mg, var)
-            for var in vars(mg)
-            if not var.startswith("_") and var != "goal_tag"
-        }}]
+                goal_tasks.append([parts[0], parts[1], desired])
+        if goal_tasks:
+            merged["tasks"] = goal_tasks
 
-    actions, methods, state, task_list, _ = build_domain(merged)
-    planner = IPyHOP(methods, actions)
+    actions, methods, state, task_list, entity_caps = build_domain(merged)
+    # Pass entity_caps so the planner enforces capability-based action filtering
+    # (mirrors IPyHOP-temporal EntityCapabilities / ReBAC filtering).
+    planner = IPyHOP(methods, actions, entity_capabilities=entity_caps)
     return planner.plan(state, task_list, verbose=0)
 
 

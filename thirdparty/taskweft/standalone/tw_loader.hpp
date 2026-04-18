@@ -528,11 +528,64 @@ inline TwLoaded load_domain(const TwValue &data) {
         }
     }
 
-    // Actions
+    // Capabilities: build _cap_<cap> state vars and wrap action fns with
+    // capability guards so only entities holding the required capability
+    // can execute each action (mirrors IPyHOP EntityCapabilities filtering).
+    // Must run before Actions so the guards wrap freshly-built fns.
+    // The _cap_* vars are also stored in state for completeness.
+    std::unordered_map<std::string, std::vector<std::string>> action_required_caps;
+    {
+        TwValue::Dict::const_iterator cap_it = d.find("capabilities");
+        if (cap_it != d.end() && cap_it->second.is_dict()) {
+            const TwValue::Dict &caps = cap_it->second.as_dict();
+
+            // entities: {entity: [cap, ...]} → state var _cap_<cap>[entity] = true
+            TwValue::Dict::const_iterator ent_it = caps.find("entities");
+            if (ent_it != caps.end() && ent_it->second.is_dict()) {
+                for (const std::pair<const std::string, TwValue> &ep : ent_it->second.as_dict()) {
+                    if (!ep.second.is_array()) continue;
+                    for (const TwValue &cv : ep.second.as_array()) {
+                        std::string cap_var = "_cap_" + cv.as_string();
+                        result.state->set_nested(cap_var, TwValue(ep.first), TwValue(true));
+                    }
+                }
+            }
+
+            // actions: {action: [cap, ...]} → record required caps per action
+            TwValue::Dict::const_iterator act_cap_it = caps.find("actions");
+            if (act_cap_it != caps.end() && act_cap_it->second.is_dict()) {
+                for (const std::pair<const std::string, TwValue> &ap : act_cap_it->second.as_dict()) {
+                    if (!ap.second.is_array()) continue;
+                    std::vector<std::string> &req = action_required_caps[ap.first];
+                    for (const TwValue &cv : ap.second.as_array())
+                        req.push_back("_cap_" + cv.as_string());
+                }
+            }
+        }
+    }
+
+    // Actions — build fns, then wrap with capability guards if needed
     if (auto it = d.find("actions"); it != d.end() && it->second.is_dict()) {
-        for (auto &[name, def] : it->second.as_dict()) {
-            if (!def.is_dict()) continue;
-            result.domain.actions[name] = build_action(def.as_dict(), enums);
+        for (const std::pair<const std::string, TwValue> &np : it->second.as_dict()) {
+            if (!np.second.is_dict()) continue;
+            TwActionFn fn = build_action(np.second.as_dict(), enums);
+
+            std::unordered_map<std::string, std::vector<std::string>>::const_iterator rc_it =
+                action_required_caps.find(np.first);
+            if (rc_it != action_required_caps.end() && !rc_it->second.empty()) {
+                // Wrap: first arg is agent; check all _cap_<cap>[agent] == true.
+                std::vector<std::string> req_caps = rc_it->second;
+                TwActionFn orig = std::move(fn);
+                fn = [orig, req_caps](std::shared_ptr<TwState> state, std::vector<TwValue> args)
+                        -> std::shared_ptr<TwState> {
+                    if (args.empty()) return nullptr;
+                    for (const std::string &cap_var : req_caps)
+                        if (state->get_nested(cap_var, args[0]) != TwValue(true)) return nullptr;
+                    return orig(state, args);
+                };
+            }
+
+            result.domain.actions[np.first] = std::move(fn);
         }
     }
 
