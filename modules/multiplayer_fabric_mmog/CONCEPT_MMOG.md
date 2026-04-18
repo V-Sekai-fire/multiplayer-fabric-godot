@@ -11,7 +11,7 @@ Fetch a player-uploaded jellyfish asset from Uro by hash, instance it inside the
 1. `jellyfish_asset_loader.gd` resolves the Uro manifest (`/storage/:uuid/manifest`) and downloads the Godot scene.
 2. The loaded scene is instanced into the existing xr-grid scene.
 3. Player sees the UGC jellyfish appear in VR.
-4. Jellyfish bobs and drifts via a GDScript float controller — sine-wave vertical bob, slow random horizontal drift, spring return toward spawn origin.
+4. Jellyfish movement driven by `JellygridSwarm::tick()` and `JellygridCurrent` flow field — phase-based pulse bob, grid-sampled current drift, predator flee, rip current events.
 
 ---
 
@@ -55,11 +55,10 @@ Every jellyfish is a content-addressed asset bundle in Uro. The bundle packs a b
 | Asset streaming    | In progress | jellyfish_asset_loader.gd → FabricMMOGAsset → Uro |
 | VR interface       | Testing     | xr-grid project                                   |
 | ReBAC permissions  | Working     | Uro.Acl — creator remix/export control            |
-| Float/drift        | In scope    | GDScript: sine-wave bob + slow drift + return-to-origin |
-| Behavior scripts   | ~~Tombstoned~~ | godot-sandbox / RISC-V ELF — not in scope      |
+| Swarm physics      | In scope    | jellygrid_swarm_sim.hpp — pure C++, no sandbox needed   |
+| Current simulation | In scope    | jellygrid_current_sim.hpp — pure C++, no sandbox needed |
+| Behavior scripts   | ~~Tombstoned~~ | godot-sandbox / RISC-V ELF deployment — not in scope |
 | HTN planning       | ~~Tombstoned~~ | taskweft — not in scope                        |
-| Swarm physics      | ~~Tombstoned~~ | jellygrid_swarm.cpp sandbox program            |
-| Current simulation | ~~Tombstoned~~ | jellygrid_current.cpp sandbox program          |
 | Pulse waveform     | ~~Tombstoned~~ | dropped from asset bundle for now              |
 | Remix system       | ~~Tombstoned~~ | clone + fork provenance chain                  |
 | Moderation layer   | ~~Tombstoned~~ | Uro ACL + operator tombstone endpoint          |
