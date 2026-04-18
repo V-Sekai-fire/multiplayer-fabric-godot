@@ -5,8 +5,27 @@
 /*                             GODOT ENGINE                               */
 /*                        https://godotengine.org                         */
 /**************************************************************************/
-/* SPDX-License-Identifier: MIT                                           */
-/* Copyright (c) 2026-present K. S. Ernest (iFire) Lee                    */
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
 #pragma once
@@ -24,7 +43,23 @@
 #include "core/templates/local_vector.h"
 #include "core/typedefs.h"
 
-#include "thirdparty/predictive_bvh/predictive_bvh.h"
+#include <thirdparty/predictive_bvh/predictive_bvh.h>
+
+// Portable count-leading-zeros for uint64_t.
+// MSVC lacks __builtin_clzll; use _BitScanReverse64 instead.
+#if defined(_MSC_VER)
+#include <intrin.h>
+static inline uint32_t _pbvh_clzll(uint64_t x) {
+	unsigned long idx = 0;
+	_BitScanReverse64(&idx, x);
+	return 63u - (uint32_t)idx;
+}
+#else
+// NOLINTNEXTLINE — __builtin_clzll is intentional here; not a recursive call.
+static inline uint32_t _pbvh_clzll(uint64_t x) {
+	return (uint32_t)__builtin_clzll(x); // NOLINT
+}
+#endif
 
 // ─────────────────────────────────────────────────────────────────────────────
 // pbvh_real_t — R128-backed scalar with a real_t-shaped C++ interface.
@@ -76,10 +111,14 @@ struct pbvh_real_t {
 // without knowing about the R128 representation.
 // ─────────────────────────────────────────────────────────────────────────────
 template <typename T>
-struct pbvh_backend { using type = T; };
+struct pbvh_backend {
+	using type = T;
+};
 
 template <>
-struct pbvh_backend<real_t> { using type = pbvh_real_t; };
+struct pbvh_backend<real_t> {
+	using type = pbvh_real_t;
+};
 
 // Convenience alias: pbvh_tree_for<real_t> → pbvh_tree<pbvh_real_t>, etc.
 template <typename T>
@@ -92,8 +131,8 @@ template <typename T>
 using AabbFor = AabbT<typename pbvh_backend<T>::type>;
 
 // Named aliases for the two concrete instantiations.
-using AabbReal     = AabbFor<real_t>;   // AabbT<pbvh_real_t>  — R128 precision
-using AabbI64      = AabbFor<int64_t>;  // AabbT<int64_t>      — integer coords
+using AabbReal = AabbFor<real_t>; // AabbT<pbvh_real_t>  — R128 precision
+using AabbI64 = AabbFor<int64_t>; // AabbT<int64_t>      — integer coords
 
 // Float-AABB constructor glue. Non-templated boilerplate, so it lives here per
 // the codegen discipline in thirdparty/predictive_bvh/CONTRIBUTING.md rather
@@ -276,18 +315,27 @@ inline uint32_t hilbert_of_aabb(const Aabb *b, const Aabb *scene) {
 	int64_t sw = scene->max_x - scene->min_x;
 	int64_t sh = scene->max_y - scene->min_y;
 	int64_t sd = scene->max_z - scene->min_z;
-	if (sw <= 0) { sw = 1; }
-	if (sh <= 0) { sh = 1; }
-	if (sd <= 0) { sd = 1; }
+	if (sw <= 0) {
+		sw = 1;
+	}
+	if (sh <= 0) {
+		sh = 1;
+	}
+	if (sd <= 0) {
+		sd = 1;
+	}
 	int64_t cx = (b->min_x + b->max_x) / 2;
 	int64_t cy = (b->min_y + b->max_y) / 2;
 	int64_t cz = (b->min_z + b->max_z) / 2;
 	int64_t nxi = (cx - scene->min_x) * 1024 / sw;
 	int64_t nyi = (cy - scene->min_y) * 1024 / sh;
 	int64_t nzi = (cz - scene->min_z) * 1024 / sd;
-	uint32_t nx = (uint32_t)(nxi < 0 ? 0 : nxi > 1023 ? 1023 : nxi);
-	uint32_t ny = (uint32_t)(nyi < 0 ? 0 : nyi > 1023 ? 1023 : nyi);
-	uint32_t nz = (uint32_t)(nzi < 0 ? 0 : nzi > 1023 ? 1023 : nzi);
+	uint32_t nx = (uint32_t)(nxi < 0 ? 0 : nxi > 1023 ? 1023
+													  : nxi);
+	uint32_t ny = (uint32_t)(nyi < 0 ? 0 : nyi > 1023 ? 1023
+													  : nyi);
+	uint32_t nz = (uint32_t)(nzi < 0 ? 0 : nzi > 1023 ? 1023
+													  : nzi);
 	uint32_t h = hilbert3d(nx, ny, nz);
 	/* Witness check: inverse(forward(x,y,z)) == (x,y,z) */
 	uint32_t rx, ry, rz;
@@ -354,9 +402,15 @@ inline Aabb hilbert_cell_of(uint32_t code, uint32_t prefix_depth, const Aabb *sc
 	int64_t sw = scene->max_x - scene->min_x;
 	int64_t sh = scene->max_y - scene->min_y;
 	int64_t sd = scene->max_z - scene->min_z;
-	if (sw <= 0) { sw = 1; }
-	if (sh <= 0) { sh = 1; }
-	if (sd <= 0) { sd = 1; }
+	if (sw <= 0) {
+		sw = 1;
+	}
+	if (sh <= 0) {
+		sh = 1;
+	}
+	if (sd <= 0) {
+		sd = 1;
+	}
 	uint32_t shift = (prefix_depth < 10) ? 10 - prefix_depth : 0;
 	int64_t cell = 1LL << shift;
 	uint32_t x0 = (cx >> shift) << shift;
@@ -381,18 +435,42 @@ inline Aabb hilbert_cell_of(uint32_t code, uint32_t prefix_depth, const Aabb *sc
 inline uint32_t per_entity_delta_poly(R128 v_r, R128 a_half_r) {
 	pbvh_real_t v(v_r), a(a_half_r);
 	const R128 R = r128_from_int(5000000LL);
-	if (r128_le(delta_cost_120(v, a), R)) { return 120; }
-	if (r128_le(delta_cost_100(v, a), R)) { return 100; }
-	if (r128_le(delta_cost_80(v, a), R)) { return 80; }
-	if (r128_le(delta_cost_64(v, a), R)) { return 64; }
-	if (r128_le(delta_cost_48(v, a), R)) { return 48; }
-	if (r128_le(delta_cost_32(v, a), R)) { return 32; }
-	if (r128_le(delta_cost_24(v, a), R)) { return 24; }
-	if (r128_le(delta_cost_16(v, a), R)) { return 16; }
-	if (r128_le(delta_cost_8(v, a), R)) { return 8; }
-	if (r128_le(delta_cost_4(v, a), R)) { return 4; }
-	if (r128_le(delta_cost_2(v, a), R)) { return 2; }
-	if (r128_le(delta_cost_1(v, a), R)) { return 1; }
+	if (r128_le(delta_cost_120(v, a), R)) {
+		return 120;
+	}
+	if (r128_le(delta_cost_100(v, a), R)) {
+		return 100;
+	}
+	if (r128_le(delta_cost_80(v, a), R)) {
+		return 80;
+	}
+	if (r128_le(delta_cost_64(v, a), R)) {
+		return 64;
+	}
+	if (r128_le(delta_cost_48(v, a), R)) {
+		return 48;
+	}
+	if (r128_le(delta_cost_32(v, a), R)) {
+		return 32;
+	}
+	if (r128_le(delta_cost_24(v, a), R)) {
+		return 24;
+	}
+	if (r128_le(delta_cost_16(v, a), R)) {
+		return 16;
+	}
+	if (r128_le(delta_cost_8(v, a), R)) {
+		return 8;
+	}
+	if (r128_le(delta_cost_4(v, a), R)) {
+		return 4;
+	}
+	if (r128_le(delta_cost_2(v, a), R)) {
+		return 2;
+	}
+	if (r128_le(delta_cost_1(v, a), R)) {
+		return 1;
+	}
 	return 1;
 }
 
@@ -640,7 +718,9 @@ inline void pbvh_tree_refit(pbvh_tree_t *t) {
  * Falls back to pbvh_tree_refit when any sidecar is NULL. */
 inline void pbvh_tree_refit_incremental_(pbvh_tree_t *t,
 		const pbvh_dirty_leaf_t *dirty, uint32_t dirty_count) {
-	if (t->internal_count == 0u) { return; }
+	if (t->internal_count == 0u) {
+		return;
+	}
 	if (dirty == NULL || dirty_count == 0u ||
 			t->parent_of_internal == NULL || t->leaf_to_internal == NULL ||
 			t->touched_bits == NULL || t->touched_meta_bits == NULL) {
@@ -658,7 +738,9 @@ inline void pbvh_tree_refit_incremental_(pbvh_tree_t *t,
 	uint32_t max_meta = 0u;
 	for (uint32_t d = 0u; d < dirty_count; d++) {
 		const pbvh_node_id_t leaf_id = dirty[d].leaf_id;
-		if (leaf_id >= t->count) { continue; }
+		if (leaf_id >= t->count) {
+			continue;
+		}
 		const Aabb new_leaf = t->nodes[leaf_id].bounds;
 		uint32_t i = t->leaf_to_internal[leaf_id];
 		while (i != PBVH_NULL_NODE && i < t->internal_count) {
@@ -676,18 +758,26 @@ inline void pbvh_tree_refit_incremental_(pbvh_tree_t *t,
 			 * reaches P's child I (already marked by A) and would dedup-break,
 			 * silently skipping P even though B's bounds exceed P's. Spec:
 			 * RefitIncremental.lean markAncestors / refitIncrementalSpec. */
-			if (aabb_contains(&t->internals[i].bounds, &new_leaf)) { break; }
+			if (aabb_contains(&t->internals[i].bounds, &new_leaf)) {
+				break;
+			}
 			const uint32_t w = i >> 6;
 			const uint64_t mask = 1ull << (i & 63u);
 			t->touched_bits[w] |= mask;
 			const uint32_t mw = w >> 6;
 			t->touched_meta_bits[mw] |= 1ull << (w & 63u);
-			if (mw < min_meta) { min_meta = mw; }
-			if (mw > max_meta) { max_meta = mw; }
+			if (mw < min_meta) {
+				min_meta = mw;
+			}
+			if (mw > max_meta) {
+				max_meta = mw;
+			}
 			i = t->parent_of_internal[i];
 		}
 	}
-	if (min_meta > max_meta) { return; }
+	if (min_meta > max_meta) {
+		return;
+	}
 	/* Refit phase: iterate meta-words from max_meta down to min_meta, and
 	 * within each, pop set bits highest-to-lowest via clzll to get the
 	 * (also-descending) indices of non-empty touched_bits words. Within
@@ -697,23 +787,25 @@ inline void pbvh_tree_refit_incremental_(pbvh_tree_t *t,
 	 * reads already-refit children. Zero sort steps, zero wasted probes —
 	 * empty touched_bits words are never even loaded. Bits self-clear
 	 * as consumed. */
-	for (uint32_t mw = max_meta + 1u; mw > min_meta; ) {
+	for (uint32_t mw = max_meta + 1u; mw > min_meta;) {
 		mw--;
 		uint64_t meta = t->touched_meta_bits[mw];
 		while (meta != 0ull) {
-			const uint32_t mb = 63u - (uint32_t)__builtin_clzll(meta);
+			const uint32_t mb = 63u - (uint32_t)_pbvh_clzll(meta);
 			meta &= ~(1ull << mb);
 			const uint32_t w = (mw << 6) | mb;
 			uint64_t bits = t->touched_bits[w];
 			while (bits != 0ull) {
-				const uint32_t b = 63u - (uint32_t)__builtin_clzll(bits);
+				const uint32_t b = 63u - (uint32_t)_pbvh_clzll(bits);
 				bits &= ~(1ull << b);
 				const uint32_t idx = (w << 6) | b;
 				pbvh_internal_t *n = &t->internals[idx];
 				if (n->left == PBVH_NULL_NODE && n->right == PBVH_NULL_NODE) {
 					const uint32_t o = n->offset;
 					const uint32_t s = n->span;
-					if (s == 0u) { continue; }
+					if (s == 0u) {
+						continue;
+					}
 					Aabb acc = t->nodes[t->sorted[o]].bounds;
 					for (uint32_t j = o + 1u; j < o + s; j++) {
 						acc = aabb_union(&acc, &t->nodes[t->sorted[j]].bounds);
@@ -755,7 +847,9 @@ inline void pbvh_tree_build(pbvh_tree_t *t) {
 		pbvh_node_id_t *dst = scratch;
 		for (uint32_t pass = 0u; pass < 4u; pass++) {
 			uint32_t count_bin[256];
-			for (uint32_t b = 0u; b < 256u; b++) { count_bin[b] = 0u; }
+			for (uint32_t b = 0u; b < 256u; b++) {
+				count_bin[b] = 0u;
+			}
 			const uint32_t shift = pass * 8u;
 			for (uint32_t i = 0u; i < k; i++) {
 				uint32_t b = (t->nodes[src[i]].hilbert >> shift) & 0xFFu;
@@ -771,7 +865,9 @@ inline void pbvh_tree_build(pbvh_tree_t *t) {
 				uint32_t b = (t->nodes[src[i]].hilbert >> shift) & 0xFFu;
 				dst[count_bin[b]++] = src[i];
 			}
-			pbvh_node_id_t *tmp = src; src = dst; dst = tmp;
+			pbvh_node_id_t *tmp = src;
+			src = dst;
+			dst = tmp;
 		}
 	} else if (k > 1u) {
 		/* Fallback insertion sort when no internals scratch is attached.
@@ -1065,9 +1161,15 @@ inline void pbvh_tree_ray_query(pbvh_tree_t *t,
  * comparison (not a ring op). */
 inline bool pbvh_half_space_keeps_(const pbvh_plane_t *p, const Aabb *b) {
 	const R128 zero = r128_from_int(0);
-	R128 xs[2]; xs[0] = r128_from_int(b->min_x); xs[1] = r128_from_int(b->max_x);
-	R128 ys[2]; ys[0] = r128_from_int(b->min_y); ys[1] = r128_from_int(b->max_y);
-	R128 zs[2]; zs[0] = r128_from_int(b->min_z); zs[1] = r128_from_int(b->max_z);
+	R128 xs[2];
+	xs[0] = r128_from_int(b->min_x);
+	xs[1] = r128_from_int(b->max_x);
+	R128 ys[2];
+	ys[0] = r128_from_int(b->min_y);
+	ys[1] = r128_from_int(b->max_y);
+	R128 zs[2];
+	zs[0] = r128_from_int(b->min_z);
+	zs[1] = r128_from_int(b->max_z);
 	for (int ix = 0; ix < 2; ix++) {
 		for (int iy = 0; iy < 2; iy++) {
 			for (int iz = 0; iz < 2; iz++) {
@@ -1101,7 +1203,8 @@ inline void pbvh_tree_convex_query(pbvh_tree_t *t,
 		const pbvh_plane_t *planes, uint32_t plane_count,
 		const R128 *points, uint32_t point_count,
 		int (*cb)(pbvh_eclass_id_t, void *), void *ud) {
-	(void)points; (void)point_count;
+	(void)points;
+	(void)point_count;
 	if (t->internal_root == PBVH_NULL_NODE || plane_count == 0u) {
 		return;
 	}
