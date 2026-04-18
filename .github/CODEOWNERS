@@ -131,6 +131,7 @@
 /modules/multiplayer_fabric_mmog/             @fire
 /modules/multiplayer/editor/                  @godotengine/network @godotengine/editor
 /modules/multiplayer/tests/                   @godotengine/network @godotengine/tests
+/modules/http3/                               @godotengine/network
 /modules/upnp/                                @godotengine/network
 /modules/upnp/doc_classes/                    @godotengine/network @godotengine/documentation
 /modules/webrtc/                              @godotengine/network
