@@ -8,8 +8,8 @@ A social world and UGC platform. Players design bioluminescent jellyfish and rel
 
 Fetch a player-uploaded jellyfish asset from Uro by hash, instance it inside the XR grid scene, and have it visible in VR.
 
-1. `jellyfish_asset_loader.gd` resolves the Uro manifest (`/storage/:uuid/manifest`) and downloads the Godot scene + pulse waveform.
-2. The loaded mesh is instanced into the existing xr-grid scene.
+1. `jellyfish_asset_loader.gd` resolves the Uro manifest (`/storage/:uuid/manifest`) and downloads the Godot scene.
+2. The loaded scene is instanced into the existing xr-grid scene.
 3. Player sees the UGC jellyfish appear in VR.
 
 ---
@@ -40,19 +40,28 @@ No external DCC tools required. The baked scene is the canonical asset; clients 
 
 ## UGC Asset Pipeline (Uro)
 
-Every jellyfish is a content-addressed asset bundle in Uro. The bundle packs a baked Godot mesh scene alongside a pulse waveform. Clients fetch by chunk hash at runtime and only download jellyfish within their AOI. The manifest endpoint resolves the full asset list in one round trip. Chunks are cached on disk so repeat visits cost no bandwidth. ReBAC permissions give creators control over who can remix or export their designs.
+Every jellyfish is a content-addressed asset bundle in Uro. The bundle packs a baked Godot mesh scene. Clients fetch by chunk hash at runtime and only download jellyfish within their AOI. The manifest endpoint resolves the full asset list in one round trip. Chunks are cached on disk so repeat visits cost no bandwidth.
 
 ---
 
 ## Implementation Status
 
-| Component        | Status      | Notes                                              |
-| ---------------- | ----------- | -------------------------------------------------- |
-| Zone networking  | Working     | fabric_zone.cpp                                    |
-| Entity migration | Working     | SCENARIO_JELLYFISH_ZONE_CROSSING                   |
-| Jellyfish creator | In scope   | CSG design → bake mesh → save Godot scene → Uro    |
-| Asset streaming  | In progress | jellyfish_asset_loader.gd → FabricMMOGAsset → Uro  |
-| VR interface     | Testing     | xr-grid project                                    |
+| Component          | Status      | Notes                                             |
+| ------------------ | ----------- | ------------------------------------------------- |
+| Zone networking    | Working     | fabric_zone.cpp                                   |
+| Entity migration   | Working     | SCENARIO_JELLYFISH_ZONE_CROSSING                  |
+| Jellyfish creator  | In scope    | CSG design → bake mesh → save Godot scene → Uro   |
+| Asset streaming    | In progress | jellyfish_asset_loader.gd → FabricMMOGAsset → Uro |
+| VR interface       | Testing     | xr-grid project                                   |
+| Behavior scripts   | ~~Tombstoned~~ | godot-sandbox / RISC-V ELF — not in scope      |
+| HTN planning       | ~~Tombstoned~~ | taskweft — not in scope                        |
+| Swarm physics      | ~~Tombstoned~~ | jellygrid_swarm.cpp sandbox program            |
+| Current simulation | ~~Tombstoned~~ | jellygrid_current.cpp sandbox program          |
+| Pulse waveform     | ~~Tombstoned~~ | dropped from asset bundle for now              |
+| Remix system       | ~~Tombstoned~~ | clone + fork provenance chain                  |
+| Moderation layer   | ~~Tombstoned~~ | Uro ACL + operator tombstone endpoint          |
+| ReBAC permissions  | ~~Tombstoned~~ | creator remix/export control                   |
+| Environmental FX   | ~~Tombstoned~~ | currents, rip events, bloom dynamics           |
 
 ---
 
