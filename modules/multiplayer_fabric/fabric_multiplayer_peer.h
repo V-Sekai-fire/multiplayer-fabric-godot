@@ -36,17 +36,17 @@
 
 // Logical channels via set_transfer_channel() + set_transfer_mode().
 // ENet: channel number is carried on the wire by ENet itself.
-// WebTransport: channel is embedded as the first byte of every packet because
-//   WebTransportPeer::get_packet_channel() always returns 0 (QUIC has no
-//   built-in channel concept). FabricMultiplayerPeer strips/prepends this byte
-//   transparently — callers see the same logical channel API either way.
+// WebTransport: three independent WebTransportPeer connections per neighbor,
+//   one per channel, each on its own port (base+1/+2/+3). Channel identity
+//   is known from which peer received the packet — no channel byte needed.
+//   This avoids QUIC head-of-line blocking across channels.
 static constexpr int CH_MIGRATION = 1; // reliable   — STAGING intents
 static constexpr int CH_INTEREST = 2; // unreliable — entity snapshots
 static constexpr int CH_PLAYER = 3; // unreliable — player state
 
 /// Zone-fabric multiplayer peer. Wraps an inner MultiplayerPeer (ENet or
 /// WebTransport) and adds zone-to-zone neighbor connections with channel-sorted
-/// inboxes. One server + one client per neighbor, all on the same port.
+/// inboxes.
 ///
 /// ENet usage (default):
 ///   var peer = FabricMultiplayerPeer.new()
@@ -58,6 +58,7 @@ static constexpr int CH_PLAYER = 3; // unreliable — player state
 ///   peer.wt_cert = cert   # Ref<X509Certificate>
 ///   peer.wt_key  = key    # Ref<CryptoKey>
 ///   peer.create_server(port)
+///   # Creates 4 servers: port (game clients), port+1/+2/+3 (neighbor channels)
 class FabricMultiplayerPeer : public MultiplayerPeer {
 	GDCLASS(FabricMultiplayerPeer, MultiplayerPeer);
 
@@ -77,12 +78,16 @@ private:
 	Ref<X509Certificate> wt_cert;
 	Ref<CryptoKey> wt_key;
 
-	// Inner peer (ENet or WebTransportPeer depending on transport).
+	// Inner peer for game-client connections (base port).
 	Ref<MultiplayerPeer> server_peer;
+	// WT mode: one inbound server per channel on port+1, port+2, port+3.
+	Ref<MultiplayerPeer> wt_channel_servers[3];
 
 	struct NeighborConn {
-		Ref<MultiplayerPeer> peer;
-		bool connected = false;
+		// ENet: only channel_peers[0] used.
+		// WT:   channel_peers[0]=CH_MIGRATION(port+1), [1]=CH_INTEREST(port+2), [2]=CH_PLAYER(port+3).
+		Ref<MultiplayerPeer> channel_peers[3];
+		bool connected[3] = { false, false, false };
 	};
 	HashMap<int, NeighborConn> neighbors;
 
@@ -102,9 +107,13 @@ private:
 
 	uint16_t base_port = 0;
 
-	// In WebTransport mode packets carry a 1-byte channel prefix.
-	void _poll_peer(Ref<MultiplayerPeer> p_peer, bool p_channel_prefix);
-	void _send_packet(Ref<MultiplayerPeer> p_peer, int p_channel, const uint8_t *p_data, int p_size);
+	// p_known_channel: 0 = derive from packet (frame-decode for WT game-client peer,
+	//   get_packet_channel for ENet); CH_MIGRATION/INTEREST/PLAYER = fixed channel
+	//   (WT neighbor peers where channel identity is known from which peer).
+	void _poll_peer(Ref<MultiplayerPeer> p_peer, int p_known_channel);
+	// p_use_frame: true for WT game-client server_peer (encodes channel in wtd frame flag);
+	//   false for WT neighbor peers (channel carried implicitly by peer identity) and ENet.
+	void _send_packet(Ref<MultiplayerPeer> p_peer, int p_channel, const uint8_t *p_data, int p_size, bool p_use_frame);
 
 protected:
 	static void _bind_methods();

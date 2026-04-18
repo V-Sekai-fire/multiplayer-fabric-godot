@@ -104,6 +104,8 @@ Ref<CryptoKey> FabricMultiplayerPeer::get_wt_key() const {
 
 // ---------------------------------------------------------------------------
 // create_server / create_client — dispatches on transport type.
+// WT mode creates 4 listeners: base_port (game clients) + port+1/+2/+3
+// (one per logical channel for HOL-free zone-to-zone links).
 // ---------------------------------------------------------------------------
 
 Error FabricMultiplayerPeer::create_server(int p_port, int p_max_clients) {
@@ -112,6 +114,7 @@ Error FabricMultiplayerPeer::create_server(int p_port, int p_max_clients) {
 				"FabricMultiplayerPeer: set wt_cert before create_server() in WebTransport mode");
 		ERR_FAIL_COND_V_MSG(wt_key.is_null(), ERR_UNCONFIGURED,
 				"FabricMultiplayerPeer: set wt_key before create_server() in WebTransport mode");
+
 		Ref<WebTransportPeer> wt;
 		wt.instantiate();
 		Error err = wt->create_server(p_port, wt_path, wt_cert, wt_key);
@@ -119,6 +122,23 @@ Error FabricMultiplayerPeer::create_server(int p_port, int p_max_clients) {
 			return err;
 		}
 		server_peer = wt;
+
+		// Per-channel servers for zone-to-zone neighbor links (HOL-free).
+		for (int i = 0; i < 3; i++) {
+			Ref<WebTransportPeer> wt_ch;
+			wt_ch.instantiate();
+			err = wt_ch->create_server(p_port + 1 + i, wt_path, wt_cert, wt_key);
+			if (err != OK) {
+				server_peer->close();
+				server_peer.unref();
+				for (int j = 0; j < i; j++) {
+					wt_channel_servers[j]->close();
+					wt_channel_servers[j].unref();
+				}
+				return err;
+			}
+			wt_channel_servers[i] = wt_ch;
+		}
 	} else {
 		Ref<ENetMultiplayerPeer> enet;
 		enet.instantiate();
@@ -173,24 +193,35 @@ void FabricMultiplayerPeer::connect_to_zone(int p_target_zone_id) {
 void FabricMultiplayerPeer::connect_to_zone_at(int p_target_zone_id, int p_target_port) {
 	HashMap<int, NeighborConn>::Iterator it = neighbors.find(p_target_zone_id);
 	if (it != neighbors.end()) {
-		if (it->value.connected) {
-			return; // Already connected.
+		bool any_active = false;
+		for (int i = 0; i < 3; i++) {
+			if (it->value.channel_peers[i].is_valid() &&
+					it->value.channel_peers[i]->get_connection_status() != CONNECTION_DISCONNECTED) {
+				any_active = true;
+				break;
+			}
 		}
-		if (it->value.peer.is_valid() &&
-				it->value.peer->get_connection_status() != CONNECTION_DISCONNECTED) {
+		if (any_active) {
 			return;
 		}
 		neighbors.remove(it);
 	}
-	Ref<MultiplayerPeer> peer;
+
+	NeighborConn conn;
 	if (transport == TRANSPORT_WEBTRANSPORT) {
-		Ref<WebTransportPeer> wt;
-		wt.instantiate();
-		Error err = wt->create_client("127.0.0.1", p_target_port, wt_path);
-		if (err != OK) {
-			return;
+		// Three independent WT connections, one per channel, on target_port+1/+2/+3.
+		for (int i = 0; i < 3; i++) {
+			Ref<WebTransportPeer> wt;
+			wt.instantiate();
+			Error err = wt->create_client("127.0.0.1", p_target_port + 1 + i, wt_path);
+			if (err != OK) {
+				for (int j = 0; j < i; j++) {
+					conn.channel_peers[j].unref();
+				}
+				return;
+			}
+			conn.channel_peers[i] = wt;
 		}
-		peer = wt;
 	} else {
 		Ref<ENetMultiplayerPeer> enet;
 		enet.instantiate();
@@ -198,29 +229,34 @@ void FabricMultiplayerPeer::connect_to_zone_at(int p_target_zone_id, int p_targe
 		if (err != OK) {
 			return;
 		}
-		peer = enet;
+		conn.channel_peers[0] = enet;
 	}
-	NeighborConn conn;
-	conn.peer = peer;
 	neighbors.insert(p_target_zone_id, conn);
 }
 
 bool FabricMultiplayerPeer::is_zone_connected(int p_zone_id) const {
 	HashMap<int, NeighborConn>::ConstIterator it = neighbors.find(p_zone_id);
-	return it != neighbors.end() && it->value.connected;
+	if (it == neighbors.end()) {
+		return false;
+	}
+	if (transport == TRANSPORT_WEBTRANSPORT) {
+		return it->value.connected[0] && it->value.connected[1] && it->value.connected[2];
+	}
+	return it->value.connected[0];
 }
 
 // ---------------------------------------------------------------------------
-// _send_packet — in WebTransport mode, wraps the payload in a wtd frame so
-// the receiver can recover the logical channel via WTD_FRAME_GET_CHANNEL().
-// ENet mode uses the native ENet channel mechanism instead.
+// _send_packet — helper shared by server_peer sends and ENet neighbor sends.
+// p_use_frame: true for WT game-client server_peer (wtd frame carries channel);
+//   false for WT neighbor channel_peers (channel implicit from peer identity)
+//   and all ENet sends (ENet carries channel natively).
 // ---------------------------------------------------------------------------
 
 void FabricMultiplayerPeer::_send_packet(Ref<MultiplayerPeer> p_peer, int p_channel,
-		const uint8_t *p_data, int p_size) {
+		const uint8_t *p_data, int p_size, bool p_use_frame) {
 	const bool reliable = (p_channel == CH_MIGRATION);
 	p_peer->set_transfer_mode(reliable ? TRANSFER_MODE_RELIABLE : TRANSFER_MODE_UNRELIABLE);
-	if (transport == TRANSPORT_WEBTRANSPORT) {
+	if (p_use_frame) {
 		uint8_t flag = WTD_FRAME_FLAG(p_channel, reliable);
 		// frame = 1-byte flag + varint len + payload (max overhead: 9 bytes)
 		Vector<uint8_t> framed;
@@ -232,31 +268,19 @@ void FabricMultiplayerPeer::_send_packet(Ref<MultiplayerPeer> p_peer, int p_chan
 			p_peer->put_packet(framed.ptr(), (int)out_len);
 		}
 	} else {
-		p_peer->set_transfer_channel(p_channel);
+		if (transport == TRANSPORT_ENET) {
+			p_peer->set_transfer_channel(p_channel);
+		}
 		p_peer->put_packet(p_data, p_size);
 	}
 }
 
 void FabricMultiplayerPeer::send_to_zone(int p_target_zone_id, int p_channel, const PackedByteArray &p_data) {
-	HashMap<int, NeighborConn>::Iterator it = neighbors.find(p_target_zone_id);
-	if (it == neighbors.end() || !it->value.connected) {
-		return;
-	}
-	Ref<MultiplayerPeer> peer = it->value.peer;
-	peer->set_target_peer(1);
-	_send_packet(peer, p_channel, p_data.ptr(), p_data.size());
+	send_to_zone_raw(p_target_zone_id, p_channel, p_data.ptr(), p_data.size());
 }
 
 void FabricMultiplayerPeer::broadcast_to_zones(int p_channel, const PackedByteArray &p_data) {
-	for (KeyValue<int, NeighborConn> &kv : neighbors) {
-		if (kv.value.connected) {
-			send_to_zone(kv.key, p_channel, p_data);
-		}
-	}
-	if (server_peer.is_valid()) {
-		server_peer->set_target_peer(0);
-		_send_packet(server_peer, p_channel, p_data.ptr(), p_data.size());
-	}
+	broadcast_raw(p_channel, p_data.ptr(), p_data.size());
 }
 
 Array FabricMultiplayerPeer::drain_channel(int p_channel) {
@@ -294,19 +318,29 @@ Array FabricMultiplayerPeer::drain_channel(int p_channel) {
 
 void FabricMultiplayerPeer::send_to_zone_raw(int p_target_zone_id, int p_channel, const uint8_t *p_data, int p_size) {
 	HashMap<int, NeighborConn>::Iterator it = neighbors.find(p_target_zone_id);
-	if (it == neighbors.end() || !it->value.connected) {
+	if (it == neighbors.end()) {
 		return;
 	}
-	Ref<MultiplayerPeer> peer = it->value.peer;
-	peer->set_target_peer(1);
-	_send_packet(peer, p_channel, p_data, p_size);
+	NeighborConn &conn = it->value;
+	if (transport == TRANSPORT_WEBTRANSPORT) {
+		int idx = p_channel - 1; // CH_MIGRATION=1→0, CH_INTEREST=2→1, CH_PLAYER=3→2
+		if (idx < 0 || idx >= 3 || !conn.connected[idx] || conn.channel_peers[idx].is_null()) {
+			return;
+		}
+		conn.channel_peers[idx]->set_target_peer(1);
+		_send_packet(conn.channel_peers[idx], p_channel, p_data, p_size, false);
+	} else {
+		if (!conn.connected[0] || conn.channel_peers[0].is_null()) {
+			return;
+		}
+		conn.channel_peers[0]->set_target_peer(1);
+		_send_packet(conn.channel_peers[0], p_channel, p_data, p_size, false);
+	}
 }
 
 void FabricMultiplayerPeer::broadcast_raw(int p_channel, const uint8_t *p_data, int p_size) {
 	for (KeyValue<int, NeighborConn> &kv : neighbors) {
-		if (kv.value.connected) {
-			send_to_zone_raw(kv.key, p_channel, p_data, p_size);
-		}
+		send_to_zone_raw(kv.key, p_channel, p_data, p_size);
 	}
 	local_broadcast_raw(p_channel, p_data, p_size);
 }
@@ -314,7 +348,7 @@ void FabricMultiplayerPeer::broadcast_raw(int p_channel, const uint8_t *p_data, 
 void FabricMultiplayerPeer::local_broadcast_raw(int p_channel, const uint8_t *p_data, int p_size) {
 	if (server_peer.is_valid()) {
 		server_peer->set_target_peer(0);
-		_send_packet(server_peer, p_channel, p_data, p_size);
+		_send_packet(server_peer, p_channel, p_data, p_size, transport == TRANSPORT_WEBTRANSPORT);
 	}
 }
 
@@ -344,11 +378,14 @@ LocalVector<Vector<uint8_t>> FabricMultiplayerPeer::drain_channel_raw(int p_chan
 
 // ---------------------------------------------------------------------------
 // _poll_peer — drain packets from a peer into channel-sorted inboxes.
-// p_channel_prefix: true when in WebTransport mode — first byte is the
-//   logical channel tag written by _send_packet; strip it to route the packet.
+// p_known_channel > 0 : all packets from this peer go to that channel inbox
+//   (WT neighbor channel_peers — channel identified by which peer it is).
+// p_known_channel == 0 : derive channel per-packet:
+//   WT server_peer: wtd frame decode extracts channel from flag byte.
+//   ENet:           peer->get_packet_channel().
 // ---------------------------------------------------------------------------
 
-void FabricMultiplayerPeer::_poll_peer(Ref<MultiplayerPeer> p_peer, bool p_channel_prefix) {
+void FabricMultiplayerPeer::_poll_peer(Ref<MultiplayerPeer> p_peer, int p_known_channel) {
 	if (p_peer.is_null() || p_peer->get_connection_status() == MultiplayerPeer::CONNECTION_DISCONNECTED) {
 		return;
 	}
@@ -368,7 +405,14 @@ void FabricMultiplayerPeer::_poll_peer(Ref<MultiplayerPeer> p_peer, bool p_chann
 		int ch;
 		const uint8_t *payload;
 		int payload_size;
-		if (p_channel_prefix) {
+
+		if (p_known_channel > 0) {
+			// Channel known from peer identity — no frame decode needed.
+			ch = p_known_channel;
+			payload = buf;
+			payload_size = size;
+		} else if (transport == TRANSPORT_WEBTRANSPORT) {
+			// Game-client WT peer: channel carried in wtd frame flag byte.
 			uint8_t flag = 0;
 			const uint8_t *frame_payload = nullptr;
 			size_t frame_payload_len = 0;
@@ -382,6 +426,7 @@ void FabricMultiplayerPeer::_poll_peer(Ref<MultiplayerPeer> p_peer, bool p_chann
 			payload = frame_payload;
 			payload_size = (int)frame_payload_len;
 		} else {
+			// ENet: channel from native ENet channel field.
 			ch = p_peer->get_packet_channel();
 			payload = buf;
 			payload_size = size;
@@ -414,20 +459,46 @@ void FabricMultiplayerPeer::_poll_peer(Ref<MultiplayerPeer> p_peer, bool p_chann
 // ---------------------------------------------------------------------------
 
 void FabricMultiplayerPeer::poll() {
-	const bool prefix = (transport == TRANSPORT_WEBTRANSPORT);
-	_poll_peer(server_peer, prefix);
+	// Game-client server: channel from frame (WT) or ENet native channel.
+	_poll_peer(server_peer, 0);
+
+	if (transport == TRANSPORT_WEBTRANSPORT) {
+		// Inbound zone-to-zone neighbor connections per channel (HOL-free).
+		static const int wt_channels[3] = { CH_MIGRATION, CH_INTEREST, CH_PLAYER };
+		for (int i = 0; i < 3; i++) {
+			_poll_peer(wt_channel_servers[i], wt_channels[i]);
+		}
+	}
+
+	// Outgoing neighbor connections.
 	for (KeyValue<int, NeighborConn> &kv : neighbors) {
 		NeighborConn &conn = kv.value;
-		if (conn.peer.is_null() || conn.peer->get_connection_status() == MultiplayerPeer::CONNECTION_DISCONNECTED) {
-			continue;
+		if (transport == TRANSPORT_WEBTRANSPORT) {
+			static const int wt_channels[3] = { CH_MIGRATION, CH_INTEREST, CH_PLAYER };
+			for (int i = 0; i < 3; i++) {
+				Ref<MultiplayerPeer> &peer = conn.channel_peers[i];
+				if (peer.is_null() || peer->get_connection_status() == MultiplayerPeer::CONNECTION_DISCONNECTED) {
+					continue;
+				}
+				peer->poll();
+				if (!conn.connected[i] && peer->get_connection_status() == CONNECTION_CONNECTED) {
+					conn.connected[i] = true;
+					print_line(vformat("[FabricMultiplayerPeer] zone %d ch%d connected", kv.key, wt_channels[i]));
+				}
+				_poll_peer(peer, wt_channels[i]);
+			}
+		} else {
+			Ref<MultiplayerPeer> &peer = conn.channel_peers[0];
+			if (peer.is_null() || peer->get_connection_status() == MultiplayerPeer::CONNECTION_DISCONNECTED) {
+				continue;
+			}
+			peer->poll();
+			if (!conn.connected[0] && peer->get_connection_status() == CONNECTION_CONNECTED) {
+				conn.connected[0] = true;
+				print_line(vformat("[FabricMultiplayerPeer] connected to zone %d", kv.key));
+			}
+			_poll_peer(peer, 0);
 		}
-		conn.peer->poll();
-		if (!conn.connected &&
-				conn.peer->get_connection_status() == CONNECTION_CONNECTED) {
-			conn.connected = true;
-			print_line(vformat("[FabricMultiplayerPeer] connected to zone %d", kv.key));
-		}
-		_poll_peer(conn.peer, prefix);
 	}
 }
 
@@ -464,9 +535,17 @@ void FabricMultiplayerPeer::close() {
 		server_peer->close();
 		server_peer.unref();
 	}
+	for (int i = 0; i < 3; i++) {
+		if (wt_channel_servers[i].is_valid()) {
+			wt_channel_servers[i]->close();
+			wt_channel_servers[i].unref();
+		}
+	}
 	for (KeyValue<int, NeighborConn> &kv : neighbors) {
-		if (kv.value.peer.is_valid()) {
-			kv.value.peer->close();
+		for (int i = 0; i < 3; i++) {
+			if (kv.value.channel_peers[i].is_valid()) {
+				kv.value.channel_peers[i]->close();
+			}
 		}
 	}
 	neighbors.clear();
