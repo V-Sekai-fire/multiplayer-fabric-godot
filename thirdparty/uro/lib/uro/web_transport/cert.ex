@@ -72,10 +72,14 @@ defmodule Uro.WebTransport.Cert do
     cert_der = :public_key.pkix_sign(tbs, ec_priv)
     cert_pem = :public_key.pem_encode([{:Certificate, cert_der, :not_encrypted}])
 
-    {:ok, key_der} = :public_key.der_encode(:"ECPrivateKey", ec_priv)
+    key_der = case :public_key.der_encode(:"ECPrivateKey", ec_priv) do
+      {:ok, der} -> der
+      der when is_binary(der) -> der
+    end
     key_pem = :public_key.pem_encode([{:"ECPrivateKey", key_der, :not_encrypted}])
 
-    cert_hash = cert_der |> :crypto.hash(:sha256) |> Base.encode64()
+
+    cert_hash = :crypto.hash(:sha256, cert_der) |> Base.encode64()
 
     {:ok, cert_pem, key_pem, cert_hash}
   end
@@ -99,9 +103,7 @@ defmodule Uro.WebTransport.Cert do
           {:iPAddress, ip_to_bytes(addr)}
         end)
 
-    {:ok, san_der} = :public_key.der_encode(:"SubjectAltName", entries)
-
-    extension(extnID: {2, 5, 29, 17}, critical: false, extnValue: san_der)
+    extension(extnID: {2, 5, 29, 17}, critical: false, extnValue: entries)
   end
 
   defp ip_to_bytes({a, b, c, d}), do: [a, b, c, d]

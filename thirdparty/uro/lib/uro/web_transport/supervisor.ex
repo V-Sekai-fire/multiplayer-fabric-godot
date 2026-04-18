@@ -18,8 +18,8 @@ defmodule Uro.WebTransport.Supervisor do
            [
              host: Keyword.get(config, :host, "0.0.0.0"),
              port: Keyword.get(config, :port, 4433),
-             cert: cert_path,
-             key: key_path,
+             certfile: cert_path,
+             keyfile: key_path,
              connection_handler: Uro.WebTransport.ConnectionHandler,
              stream_handler: Uro.WebTransport.StreamHandler
            ]
