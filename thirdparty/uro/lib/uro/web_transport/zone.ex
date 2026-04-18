@@ -12,6 +12,9 @@ defmodule Uro.WebTransport.Zone do
   Godot stdout protocol (one JSON line each):
     ready:     {"event":"ready","port":N,"cert_hash":"<base64>"}
     (all other stdout is logged at debug level and ignored)
+
+  Process management uses erlexec (:exec.run/2) so that :exec.kill/2 can
+  deliver signals to the Godot OS process by PID.
   """
 
   use GenServer, restart: :transient
@@ -40,10 +43,11 @@ defmodule Uro.WebTransport.Zone do
 
   @impl true
   def init({shard_id, port}) do
+    Process.flag(:trap_exit, true)
     {:ok, zone} = VSekai.create_zone(%{shard_id: shard_id, address: "0.0.0.0", port: port, status: "starting"})
-    godot_port = open_godot_port(port, shard_id)
+    {:ok, exec_pid, os_pid} = start_godot(port, shard_id)
     schedule_ping()
-    {:ok, %{zone_id: zone.id, shard_id: shard_id, port: port, godot_port: godot_port, buffer: ""}}
+    {:ok, %{zone_id: zone.id, shard_id: shard_id, port: port, exec_pid: exec_pid, os_pid: os_pid, buffer: ""}}
   end
 
   @impl true
@@ -57,14 +61,19 @@ defmodule Uro.WebTransport.Zone do
     end
   end
 
-  def handle_info({port, {:data, data}}, %{godot_port: port} = state) do
+  def handle_info({:stdout, os_pid, data}, %{os_pid: os_pid} = state) do
     {lines, rest} = split_lines(state.buffer <> data)
     state = Enum.reduce(lines, state, &handle_line/2)
     {:noreply, %{state | buffer: rest}}
   end
 
-  def handle_info({port, {:exit_status, code}}, %{godot_port: port} = state) do
-    Logger.warning("Godot zone #{state.zone_id} exited with code #{code}")
+  def handle_info({:stderr, os_pid, data}, %{os_pid: os_pid} = state) do
+    Logger.debug("Zone #{state.zone_id} stderr: #{String.trim(data)}")
+    {:noreply, state}
+  end
+
+  def handle_info({:DOWN, os_pid, :process, _exec_pid, reason}, %{os_pid: os_pid} = state) do
+    Logger.warning("Godot zone #{state.zone_id} (OS PID #{os_pid}) exited: #{inspect(reason)}")
     mark_stopping(state.zone_id)
     {:stop, :normal, state}
   end
@@ -73,33 +82,44 @@ defmodule Uro.WebTransport.Zone do
 
   @impl true
   def terminate(_reason, state) do
-    if state.godot_port && Port.info(state.godot_port) != nil,
-      do: Port.close(state.godot_port)
-
+    kill_godot(state.os_pid)
     mark_stopping(state.zone_id)
     :ok
   end
 
   # ── private ─────────────────────────────────────────────────────────────────
 
-  defp open_godot_port(port, shard_id) do
+  defp start_godot(port, shard_id) do
     godot_bin = System.get_env("GODOT_BIN", "godot")
     godot_exe = System.find_executable(godot_bin) || raise "GODOT_BIN not found: #{godot_bin}"
     project_dir = System.get_env("GODOT_PROJECT", File.cwd!())
 
-    Port.open(
-      {:spawn_executable, godot_exe},
-      [
-        :binary,
-        :exit_status,
-        {:cd, to_charlist(project_dir)},
-        args: ["--headless", "--script", @zone_script],
-        env: [
-          {~c"ZONE_PORT", ~c"#{port}"},
-          {~c"ZONE_SHARD_ID", ~c"#{shard_id}"}
-        ]
-      ]
-    )
+    cmd = "#{godot_exe} --headless --script #{@zone_script}"
+
+    :exec.run(cmd, [
+      :monitor,
+      {:stdout, self()},
+      {:stderr, self()},
+      {:cd, project_dir},
+      {:env, [{"ZONE_PORT", "#{port}"}, {"ZONE_SHARD_ID", "#{shard_id}"}]}
+    ])
+  end
+
+  defp kill_godot(nil), do: :ok
+
+  defp kill_godot(os_pid) do
+    Logger.info("Sending SIGTERM to Godot OS PID #{os_pid} via erlexec")
+
+    case :exec.kill(os_pid, 15) do
+      :ok ->
+        Logger.info("SIGTERM delivered to Godot PID #{os_pid}")
+
+      {:error, reason} ->
+        Logger.warning("SIGTERM failed (#{inspect(reason)}), sending SIGKILL to #{os_pid}")
+        :exec.kill(os_pid, 9)
+    end
+  rescue
+    e -> Logger.error("kill_godot failed: #{inspect(e)}")
   end
 
   defp schedule_ping, do: Process.send_after(self(), :ping, @ping_interval)
