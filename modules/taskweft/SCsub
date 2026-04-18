@@ -1,0 +1,4 @@
+Import("env")
+from misc.utility.scons_hints import *
+
+env.add_source_files(env.modules_sources, "*.cpp")
