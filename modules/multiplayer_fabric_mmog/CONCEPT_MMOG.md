@@ -53,6 +53,7 @@ Every jellyfish is a content-addressed asset bundle in Uro. The bundle packs a b
 | Entity migration   | Working     | SCENARIO_JELLYFISH_ZONE_CROSSING                  |
 | Jellyfish creator  | In scope    | CSG design → bake mesh → save Godot scene → Uro   |
 | Asset streaming    | In progress | jellyfish_asset_loader.gd → FabricMMOGAsset → Uro |
+| Zone console       | In progress | tools/zone_console — Elixir TUI (ExRatatui), auth + shard list via Uro REST |
 | VR interface       | Testing     | xr-grid project                                   |
 | ReBAC permissions  | Working     | Uro.Acl — creator remix/export control            |
 | Swarm physics      | In scope    | jellygrid_swarm_sim.hpp — pure C++, no sandbox needed   |
