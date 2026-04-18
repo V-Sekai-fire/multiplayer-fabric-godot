@@ -23,6 +23,11 @@ public:
 	bool      has_var(const String &p_key) const;
 	Dictionary get_vars() const;
 
+	// Nested dict-of-dict access: state[var][key] = value
+	void    set_nested(const String &p_var, const Variant &p_key, const Variant &p_value);
+	Variant get_nested(const String &p_var, const Variant &p_key) const;
+	bool    has_nested(const String &p_var, const Variant &p_key) const;
+
 	Ref<TaskweftState> copy() const;
 
 	TaskweftState() {}

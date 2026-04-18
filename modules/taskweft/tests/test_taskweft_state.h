@@ -42,4 +42,29 @@ TEST_CASE("[Taskweft][State] has_var returns true only for set variables") {
 	CHECK_FALSE(state.has_var("b"));
 }
 
+// Cycle 16: set_nested / get_nested / has_nested for dict-of-dict state
+TEST_CASE("[Taskweft][State] set_nested and get_nested store and retrieve inner key") {
+	TaskweftState state;
+	state.set_nested("loc", "alice", 2);
+	CHECK(state.get_nested("loc", "alice") == Variant(2));
+	CHECK(state.get_nested("loc", "bob") == Variant());
+}
+
+TEST_CASE("[Taskweft][State] has_nested returns true only for set inner keys") {
+	TaskweftState state;
+	state.set_nested("loc", "alice", 0);
+	CHECK(state.has_nested("loc", "alice"));
+	CHECK_FALSE(state.has_nested("loc", "bob"));
+	CHECK_FALSE(state.has_nested("cash", "alice"));
+}
+
+TEST_CASE("[Taskweft][State] copy deep-copies nested dicts") {
+	TaskweftState state;
+	state.set_nested("loc", "alice", 0);
+	Ref<TaskweftState> copy = state.copy();
+	copy->set_nested("loc", "alice", 99);
+	CHECK(state.get_nested("loc", "alice") == Variant(0));
+	CHECK(copy->get_nested("loc", "alice") == Variant(99));
+}
+
 } // namespace TestTaskweftState
