@@ -10,13 +10,13 @@ services:
     image: v-sekai/cockroach:latest
     restart: always
     shm_size: 128mb
-    command: start-single-node --accept-sql-without-tls
+    command: start-single-node --certs-dir=/cockroach/cockroach-certs
     environment:
       COCKROACH_DATABASE: vsekai
       COCKROACH_USER: vsekai
-      COCKROACH_PASSWORD: vsekai
     volumes:
       - "./cockroach:/cockroach/cockroach-data"
+      - "./certs:/cockroach/cockroach-certs:ro"
     ports:
       - "26257:26257"
       - "127.0.0.1:8082:8080"  # Dashboard

@@ -55,3 +55,7 @@ result
 .envrc
 .elixir_ls
 .elixir-tools
+
+# CockroachDB cert private keys
+certs/*.key
+certs/ca.key
