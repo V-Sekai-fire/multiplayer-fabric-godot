@@ -63,14 +63,16 @@ The Uro integration handles:
 
 ## Implementation Status
 
-| Component        | Status      | Implementation Notes              |
-| ---------------- | ----------- | --------------------------------- |
-| Zone networking  | Working     | fabric_zone.cpp                   |
-| Entity migration | Working     | SCENARIO_JELLYFISH_ZONE_CROSSING  |
-| VR interface     | Testing     | Hand-based current placement      |
-| Asset streaming  | In progress | Jellyfish meshes and biome assets |
-| Power simulation | Prototype   | Custom Node3D scripts             |
-| Current visuals  | Not started | Procedural generation             |
+| Component        | Status      | Implementation Notes                                        |
+| ---------------- | ----------- | ----------------------------------------------------------- |
+| Zone networking  | Working     | fabric_zone.cpp                                             |
+| Entity migration | Working     | SCENARIO_JELLYFISH_ZONE_CROSSING                            |
+| VR interface     | Testing     | Hand-based current placement                                |
+| Asset streaming  | In progress | jellyfish_asset_loader.gd → FabricMMOGAsset → uro manifest |
+| Power simulation | Sandbox     | sandbox/jellygrid_power_node.cpp (ELF guest program)        |
+| Current routing  | Sandbox     | sandbox/jellygrid_current.cpp (ELF guest program)           |
+| Swarm physics    | Sandbox     | sandbox/jellygrid_swarm.cpp (ELF guest program)             |
+| Current visuals  | Not started | Procedural generation                                       |
 
 ---
 
