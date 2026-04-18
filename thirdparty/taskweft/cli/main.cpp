@@ -16,32 +16,6 @@
 #include <sstream>
 #include <string>
 
-// Emit a plan as JSON (reused in multiple modes).
-static void print_plan_json(const std::vector<TwCall> &plan) {
-    std::cout << TwLoader::plan_to_json(plan) << "\n";
-}
-
-// Emit a TwTemporalResult as JSON — all time values are ISO 8601.
-static void print_temporal_json(const std::vector<TwCall> &plan,
-                                const TwTemporalResult &tr) {
-    std::cout << "{\n";
-    std::cout << "  \"plan\": " << TwLoader::plan_to_json(plan) << ",\n";
-    std::cout << "  \"temporal\": {\n";
-    std::cout << "    \"consistent\": " << (tr.consistent ? "true" : "false") << ",\n";
-    std::cout << "    \"origin\": \"" << tr.origin_iso << "\",\n";
-    std::cout << "    \"total\": \"" << tr.total_iso << "\",\n";
-    std::cout << "    \"steps\": [";
-    for (size_t i = 0; i < tr.steps.size(); ++i) {
-        if (i) std::cout << ", ";
-        std::cout << "{\"action\": \"" << tr.steps[i].action_name
-                  << "\", \"duration\": \"" << tr.steps[i].duration_iso
-                  << "\", \"start\": \"" << tr.steps[i].start_iso
-                  << "\", \"end\": \"" << tr.steps[i].end_iso << "\"}";
-    }
-    std::cout << "]\n";
-    std::cout << "  }\n";
-    std::cout << "}\n";
-}
 
 int main(int argc, char **argv) {
     // HRR sub-command
@@ -73,7 +47,7 @@ int main(int argc, char **argv) {
         auto plan = tw_plan(loaded.state, loaded.tasks, loaded.domain);
         if (!plan) { std::cout << "null\n"; return 1; }
         TwTemporalResult tr = tw_check_temporal(*plan, loaded.domain);
-        print_temporal_json(*plan, tr);
+        std::cout << tw_temporal_to_json(*plan, tr, TwLoader::plan_to_json(*plan)) << "\n";
         return 0;
     }
 
@@ -91,12 +65,7 @@ int main(int argc, char **argv) {
         auto plan = tw_plan(loaded.state, loaded.tasks, loaded.domain);
         if (!plan) { std::cout << "null\n"; return 1; }
         TwSimulateResult sr = tw_simulate(loaded.state, *plan, loaded.domain);
-        std::cout << "{\n";
-        std::cout << "  \"plan\": " << TwLoader::plan_to_json(*plan) << ",\n";
-        std::cout << "  \"completed_steps\": " << sr.completed_steps << ",\n";
-        std::cout << "  \"fail_step\": " << sr.fail_step << ",\n";
-        std::cout << "  \"success\": " << (sr.fail_step < 0 ? "true" : "false") << "\n";
-        std::cout << "}\n";
+        std::cout << tw_simulate_to_json(*plan, sr, TwLoader::plan_to_json(*plan)) << "\n";
         return 0;
     }
 
@@ -116,16 +85,11 @@ int main(int argc, char **argv) {
         if (!plan) { std::cout << "null\n"; return 1; }
         TwReplanResult rr = tw_replan(loaded.state, *plan, loaded.tasks,
                                       loaded.domain, fail_step);
-        std::cout << "{\n";
-        std::cout << "  \"original_plan\": " << TwLoader::plan_to_json(*plan) << ",\n";
-        std::cout << "  \"fail_step\": " << fail_step << ",\n";
-        std::cout << "  \"completed_steps\": " << rr.simulate.completed_steps << ",\n";
-        std::cout << "  \"recovered\": " << (rr.recovered ? "true" : "false") << ",\n";
-        if (rr.recovered)
-            std::cout << "  \"new_plan\": " << TwLoader::plan_to_json(*rr.new_plan) << "\n";
-        else
-            std::cout << "  \"new_plan\": null\n";
-        std::cout << "}\n";
+        std::string new_plan_json = rr.recovered
+            ? TwLoader::plan_to_json(*rr.new_plan) : "null";
+        std::cout << tw_replan_to_json(fail_step, rr,
+                                        TwLoader::plan_to_json(*plan),
+                                        new_plan_json) << "\n";
         return 0;
     }
 
@@ -146,16 +110,11 @@ int main(int argc, char **argv) {
         if (!plan) { std::cout << "null\n"; return 1; }
         TwReplanResult rr = tw_replan_incremental(loaded.state, *plan, loaded.tasks,
                                                    loaded.domain, tree, fail_step);
-        std::cout << "{\n";
-        std::cout << "  \"original_plan\": " << TwLoader::plan_to_json(*plan) << ",\n";
-        std::cout << "  \"fail_step\": " << fail_step << ",\n";
-        std::cout << "  \"completed_steps\": " << rr.simulate.completed_steps << ",\n";
-        std::cout << "  \"recovered\": " << (rr.recovered ? "true" : "false") << ",\n";
-        if (rr.recovered)
-            std::cout << "  \"new_plan\": " << TwLoader::plan_to_json(*rr.new_plan) << "\n";
-        else
-            std::cout << "  \"new_plan\": null\n";
-        std::cout << "}\n";
+        std::string new_plan_json = rr.recovered
+            ? TwLoader::plan_to_json(*rr.new_plan) : "null";
+        std::cout << tw_replan_to_json(fail_step, rr,
+                                        TwLoader::plan_to_json(*plan),
+                                        new_plan_json) << "\n";
         return 0;
     }
 

@@ -6,6 +6,7 @@
 #include "tw_planner.hpp"
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -195,4 +196,35 @@ inline TwReplanResult tw_replan_incremental(
     r.new_plan  = std::move(full_plan);
     r.recovered = true;
     return r;
+}
+
+// Serialise a TwSimulateResult as a JSON object.
+inline std::string tw_simulate_to_json(const std::vector<TwCall> &plan,
+                                        const TwSimulateResult    &sr,
+                                        const std::string         &plan_json) {
+    std::ostringstream o;
+    o << "{\n";
+    o << "  \"plan\": " << plan_json << ",\n";
+    o << "  \"completed_steps\": " << sr.completed_steps << ",\n";
+    o << "  \"fail_step\": " << sr.fail_step << ",\n";
+    o << "  \"success\": " << (sr.fail_step < 0 ? "true" : "false") << "\n";
+    o << "}";
+    return o.str();
+}
+
+// Serialise a TwReplanResult as a JSON object.
+// plan_json / new_plan_json: pre-serialised plan arrays from TwLoader::plan_to_json.
+inline std::string tw_replan_to_json(int               fail_step,
+                                      const TwReplanResult &rr,
+                                      const std::string &original_plan_json,
+                                      const std::string &new_plan_json) {
+    std::ostringstream o;
+    o << "{\n";
+    o << "  \"original_plan\": " << original_plan_json << ",\n";
+    o << "  \"fail_step\": " << fail_step << ",\n";
+    o << "  \"completed_steps\": " << rr.simulate.completed_steps << ",\n";
+    o << "  \"recovered\": " << (rr.recovered ? "true" : "false") << ",\n";
+    o << "  \"new_plan\": " << new_plan_json << "\n";
+    o << "}";
+    return o.str();
 }

@@ -3,6 +3,7 @@
 #pragma once
 #include "tw_domain.hpp"
 #include <cmath>
+#include <sstream>
 #include <limits>
 #include <string>
 #include <unordered_map>
@@ -190,4 +191,29 @@ inline TwTemporalResult tw_check_temporal(
     r.consistent = stn.consistent();
     r.total_iso  = tw_format_duration(total_s);
     return r;
+}
+
+// Serialise a plan + TwTemporalResult as a JSON object.
+inline std::string tw_temporal_to_json(const std::vector<TwCall> &plan,
+                                        const TwTemporalResult   &tr,
+                                        const std::string        &plan_json) {
+    std::ostringstream o;
+    o << "{\n";
+    o << "  \"plan\": " << plan_json << ",\n";
+    o << "  \"temporal\": {\n";
+    o << "    \"consistent\": " << (tr.consistent ? "true" : "false") << ",\n";
+    o << "    \"origin\": \"" << tr.origin_iso << "\",\n";
+    o << "    \"total\": \"" << tr.total_iso << "\",\n";
+    o << "    \"steps\": [";
+    for (size_t i = 0; i < tr.steps.size(); ++i) {
+        if (i) o << ", ";
+        o << "{\"action\": \"" << tr.steps[i].action_name
+          << "\", \"duration\": \"" << tr.steps[i].duration_iso
+          << "\", \"start\": \"" << tr.steps[i].start_iso
+          << "\", \"end\": \"" << tr.steps[i].end_iso << "\"}";
+    }
+    o << "]\n";
+    o << "  }\n";
+    o << "}";
+    return o.str();
 }
