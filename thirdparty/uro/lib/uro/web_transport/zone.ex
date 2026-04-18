@@ -22,7 +22,6 @@ defmodule Uro.WebTransport.Zone do
   alias Uro.VSekai
   alias Uro.VSekai.Zone, as: ZoneSchema
 
-  @godot_bin System.get_env("GODOT_BIN", "godot")
   @zone_script "modules/http3/demo/wt_server_demo.gd"
   @ping_interval :timer.seconds(10)
 
@@ -84,15 +83,20 @@ defmodule Uro.WebTransport.Zone do
   # ── private ─────────────────────────────────────────────────────────────────
 
   defp open_godot_port(port, shard_id) do
+    godot_bin = System.get_env("GODOT_BIN", "godot")
+    godot_exe = System.find_executable(godot_bin) || raise "GODOT_BIN not found: #{godot_bin}"
+    project_dir = System.get_env("GODOT_PROJECT", File.cwd!())
+
     Port.open(
-      {:spawn_executable, System.find_executable(@godot_bin)},
+      {:spawn_executable, godot_exe},
       [
         :binary,
         :exit_status,
+        {:cd, to_charlist(project_dir)},
         args: ["--headless", "--script", @zone_script],
         env: [
-          {~c"ZONE_PORT", to_charlist(Integer.to_string(port))},
-          {~c"ZONE_SHARD_ID", to_charlist(shard_id)}
+          {~c"ZONE_PORT", ~c"#{port}"},
+          {~c"ZONE_SHARD_ID", ~c"#{shard_id}"}
         ]
       ]
     )

@@ -162,6 +162,11 @@ config :uro, Uro.WebTransport,
   cert: Helpers.get_env("WT_CERT", "/run/secrets/wt_cert.pem"),
   key: Helpers.get_env("WT_KEY", "/run/secrets/wt_key.pem")
 
+# Zone supervisor: path to the Godot project root and binary.
+# GODOT_BIN  – executable name or absolute path (default: "godot")
+# GODOT_PROJECT – absolute path to the Godot project directory so the
+#                 zone script can be resolved as a relative path from it.
+
 config :waffle,
   storage: Waffle.Storage.Local
 
