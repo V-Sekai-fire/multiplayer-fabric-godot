@@ -15,23 +15,30 @@ struct TwCall {
     std::vector<TwValue> args;
 };
 
-// Conjunctive goal: {state_var: desired_value, ...}
-// The planner keeps it in the task list until every binding is satisfied.
+// One binding in a conjunctive goal: state[var][key] == desired.
+// Matches JSON Pointer "/var/key" with an eq condition.
+struct TwGoalBinding {
+    std::string var;
+    std::string key;
+    TwValue     desired;
+};
+
+// Conjunctive goal: a list of (var, key, desired) bindings.
+// The planner keeps it in the task list until every binding is satisfied,
+// trying each unsatisfied binding as a subtask (with backtracking over ordering).
 struct TwGoal {
-    std::unordered_map<std::string, TwValue> bindings;
+    std::vector<TwGoalBinding> bindings;
 
     bool is_satisfied(const TwState &state) const {
-        for (auto &[var, desired] : bindings) {
-            if (state.get_var(var) != desired) return false;
-        }
+        for (auto &b : bindings)
+            if (state.get_nested(b.var, TwValue(b.key)) != b.desired) return false;
         return true;
     }
 
-    std::unordered_map<std::string, TwValue> unsatisfied(const TwState &state) const {
-        std::unordered_map<std::string, TwValue> unmet;
-        for (auto &[var, desired] : bindings) {
-            if (state.get_var(var) != desired) unmet[var] = desired;
-        }
+    std::vector<TwGoalBinding> unsatisfied(const TwState &state) const {
+        std::vector<TwGoalBinding> unmet;
+        for (auto &b : bindings)
+            if (state.get_nested(b.var, TwValue(b.key)) != b.desired) unmet.push_back(b);
         return unmet;
     }
 };
@@ -47,9 +54,9 @@ using TwActionFn =
 using TwMethodFn =
     std::function<std::optional<std::vector<TwTask>>(std::shared_ptr<TwState>, std::vector<TwValue>)>;
 
-// Goal method: (state, desired_value) → subtask_list | nullopt
-using TwGoalMethodFn =
-    std::function<std::optional<std::vector<TwTask>>(std::shared_ptr<TwState>, TwValue)>;
+// Goal method: (state, args=[key, desired]) → subtask_list | nullopt.
+// Same signature as TwMethodFn — called with [key, desired] as args.
+using TwGoalMethodFn = TwMethodFn;
 
 struct TwDomain {
     std::unordered_map<std::string, TwActionFn>              actions;

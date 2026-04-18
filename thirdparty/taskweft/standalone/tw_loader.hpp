@@ -387,12 +387,11 @@ inline TwGoalMethodFn build_goal_method_alt(const TwValue::Array &goal_param_nam
     TwValue::Array check_defs   = get_arr("check");
     TwValue::Array subtask_defs = get_arr("subtasks");
 
+    // goal_param_names are e.g. ["block", "dest"]; args=[key, desired].
     return [goal_param_names, bind_defs, check_defs, subtask_defs, enums](
-            std::shared_ptr<TwState> state, TwValue desired)
+            std::shared_ptr<TwState> state, std::vector<TwValue> args)
             -> std::optional<std::vector<TwTask>> {
-        Params params;
-        if (!goal_param_names.empty())
-            params[goal_param_names[0].as_string()] = desired;
+        Params params = build_params(goal_param_names, args);
         run_binds(bind_defs, params, *state);
         if (!run_checks(check_defs, params, *state, enums)) return std::nullopt;
         return expand_subtasks(subtask_defs, params);
@@ -543,25 +542,48 @@ inline TwLoaded load_domain(const TwValue &data) {
         }
     }
 
-    // Goal methods
-    if (auto it = d.find("goals"); it != d.end() && it->second.is_dict()) {
-        for (auto &[goal_var, group] : it->second.as_dict()) {
-            if (!group.is_dict()) continue;
-            const auto &gd = group.as_dict();
+    // Goal methods (domain: "goals" is a dict) or goal bindings (problem: "goals" is an array).
+    if (auto it = d.find("goals"); it != d.end()) {
+        if (it->second.is_dict()) {
+            // Domain-style: dict of goal method definitions keyed by state var name.
+            for (auto &[goal_var, group] : it->second.as_dict()) {
+                if (!group.is_dict()) continue;
+                const auto &gd = group.as_dict();
 
-            TwValue::Array goal_params;
-            if (auto pit = gd.find("params"); pit != gd.end() && pit->second.is_array())
-                goal_params = pit->second.as_array();
+                TwValue::Array goal_params;
+                if (auto pit = gd.find("params"); pit != gd.end() && pit->second.is_array())
+                    goal_params = pit->second.as_array();
 
-            auto alts_it = gd.find("alternatives");
-            if (alts_it == gd.end() || !alts_it->second.is_array()) continue;
+                auto alts_it = gd.find("alternatives");
+                if (alts_it == gd.end() || !alts_it->second.is_array()) continue;
 
-            std::vector<TwGoalMethodFn> fns;
-            for (auto &alt : alts_it->second.as_array()) {
-                if (!alt.is_dict()) continue;
-                fns.push_back(build_goal_method_alt(goal_params, alt.as_dict(), enums));
+                std::vector<TwGoalMethodFn> fns;
+                for (auto &alt : alts_it->second.as_array()) {
+                    if (!alt.is_dict()) continue;
+                    fns.push_back(build_goal_method_alt(goal_params, alt.as_dict(), enums));
+                }
+                result.domain.goal_methods[goal_var] = std::move(fns);
             }
-            result.domain.goal_methods[goal_var] = std::move(fns);
+        } else if (it->second.is_array()) {
+            // Problem-style: array of {pointer, eq} bindings → single TwGoal task.
+            TwGoal goal;
+            for (auto &entry : it->second.as_array()) {
+                if (!entry.is_dict()) continue;
+                const auto &ed = entry.as_dict();
+                auto ptr_it = ed.find("pointer");
+                auto eq_it  = ed.find("eq");
+                if (ptr_it == ed.end() || eq_it == ed.end()) continue;
+                Params empty_params;
+                auto [var, key] = parse_pointer(ptr_it->second.as_string(), empty_params);
+                if (var.empty()) continue;
+                TwGoalBinding b;
+                b.var     = var;
+                b.key     = key.to_string();
+                b.desired = eq_it->second;
+                goal.bindings.push_back(std::move(b));
+            }
+            if (!goal.bindings.empty())
+                result.tasks.push_back(std::move(goal));
         }
     }
 

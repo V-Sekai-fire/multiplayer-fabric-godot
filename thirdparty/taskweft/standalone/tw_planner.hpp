@@ -3,6 +3,7 @@
 #pragma once
 #include "tw_domain.hpp"
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 static constexpr int TW_MAX_DEPTH = 256;
@@ -19,26 +20,29 @@ inline std::optional<std::vector<TwCall>> tw_seek_plan(
     std::vector<TwTask> remaining(tasks.begin() + 1, tasks.end());
 
     // --- Conjunctive goal item ---
-    if (auto *goal = std::get_if<TwGoal>(&tasks[0])) {
+    if (TwGoal *goal = std::get_if<TwGoal>(&tasks[0])) {
         if (goal->is_satisfied(*state))
             return tw_seek_plan(state, remaining, domain, depth + 1);
 
-        auto unmet = goal->unsatisfied(*state);
+        std::vector<TwGoalBinding> unmet = goal->unsatisfied(*state);
         if (unmet.empty()) return std::nullopt;
-        auto [goal_var, desired] = *unmet.begin();
 
-        auto git = domain.goal_methods.find(goal_var);
+        // Pick first unsatisfied binding (IPyHOP _mg style).
+        const TwGoalBinding &b = unmet[0];
+        std::unordered_map<std::string, std::vector<TwGoalMethodFn>>::const_iterator git =
+            domain.goal_methods.find(b.var);
         if (git == domain.goal_methods.end()) return std::nullopt;
 
-        for (auto &method : git->second) {
-            auto subs = method(state, desired);
+        std::vector<TwValue> goal_args = {TwValue(b.key), b.desired};
+        for (const TwGoalMethodFn &method : git->second) {
+            std::optional<std::vector<TwTask>> subs = method(state, goal_args);
             if (!subs) continue;
             std::vector<TwTask> new_tasks;
             new_tasks.insert(new_tasks.end(), subs->begin(), subs->end());
             new_tasks.push_back(*goal);
             new_tasks.insert(new_tasks.end(), remaining.begin(), remaining.end());
-            if (auto result = tw_seek_plan(state, new_tasks, domain, depth + 1))
-                return result;
+            std::optional<std::vector<TwCall>> result = tw_seek_plan(state, new_tasks, domain, depth + 1);
+            if (result) return result;
         }
         return std::nullopt;
     }
