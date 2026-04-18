@@ -19,7 +19,7 @@ inline std::optional<std::vector<TwCall>> tw_seek_plan(
 
     std::vector<TwTask> remaining(tasks.begin() + 1, tasks.end());
 
-    // --- Conjunctive goal item ---
+    // --- Conjunctive goal (unigoal) ---
     if (TwGoal *goal = std::get_if<TwGoal>(&tasks[0])) {
         if (goal->is_satisfied(*state))
             return tw_seek_plan(state, remaining, domain, depth + 1);
@@ -27,7 +27,7 @@ inline std::optional<std::vector<TwCall>> tw_seek_plan(
         std::vector<TwGoalBinding> unmet = goal->unsatisfied(*state);
         if (unmet.empty()) return std::nullopt;
 
-        // Pick first unsatisfied binding (IPyHOP _mg style).
+        // Pick first unsatisfied binding; try all goal methods for its var.
         const TwGoalBinding &b = unmet[0];
         std::unordered_map<std::string, std::vector<TwGoalMethodFn>>::const_iterator git =
             domain.goal_methods.find(b.var);
@@ -47,15 +47,39 @@ inline std::optional<std::vector<TwCall>> tw_seek_plan(
         return std::nullopt;
     }
 
+    // --- Multigoal (RECTGTN 'N'): backtrack over which binding to satisfy first ---
+    if (TwMultiGoal *mg = std::get_if<TwMultiGoal>(&tasks[0])) {
+        if (mg->is_satisfied(*state))
+            return tw_seek_plan(state, remaining, domain, depth + 1);
+
+        std::vector<TwGoalBinding> unmet = mg->unsatisfied(*state);
+        if (unmet.empty()) return std::nullopt;
+
+        // Try each unsatisfied binding as the next thing to satisfy (IPyHOP _mg).
+        for (size_t idx = 0; idx < unmet.size(); ++idx) {
+            TwGoal sub_goal;
+            sub_goal.bindings = {unmet[idx]};
+
+            std::vector<TwTask> new_tasks;
+            new_tasks.push_back(sub_goal);
+            new_tasks.push_back(*mg);
+            new_tasks.insert(new_tasks.end(), remaining.begin(), remaining.end());
+            std::optional<std::vector<TwCall>> result = tw_seek_plan(state, new_tasks, domain, depth + 1);
+            if (result) return result;
+        }
+        return std::nullopt;
+    }
+
     // --- Primitive action or compound task ---
-    auto &call = std::get<TwCall>(tasks[0]);
+    TwCall &call = std::get<TwCall>(tasks[0]);
 
     // Primitive action
-    auto ait = domain.actions.find(call.name);
+    std::unordered_map<std::string, TwActionFn>::const_iterator ait =
+        domain.actions.find(call.name);
     if (ait != domain.actions.end()) {
-        auto new_state = ait->second(state->copy(), call.args);
+        std::shared_ptr<TwState> new_state = ait->second(state->copy(), call.args);
         if (!new_state) return std::nullopt;
-        auto sub = tw_seek_plan(new_state, remaining, domain, depth + 1);
+        std::optional<std::vector<TwCall>> sub = tw_seek_plan(new_state, remaining, domain, depth + 1);
         if (!sub) return std::nullopt;
         std::vector<TwCall> plan = {call};
         plan.insert(plan.end(), sub->begin(), sub->end());
@@ -63,16 +87,17 @@ inline std::optional<std::vector<TwCall>> tw_seek_plan(
     }
 
     // Compound task: try each method in order
-    auto mit = domain.task_methods.find(call.name);
+    std::unordered_map<std::string, std::vector<TwMethodFn>>::const_iterator mit =
+        domain.task_methods.find(call.name);
     if (mit != domain.task_methods.end()) {
-        for (auto &method : mit->second) {
-            auto subs = method(state, call.args);
+        for (const TwMethodFn &method : mit->second) {
+            std::optional<std::vector<TwTask>> subs = method(state, call.args);
             if (!subs) continue;
             std::vector<TwTask> new_tasks;
             new_tasks.insert(new_tasks.end(), subs->begin(), subs->end());
             new_tasks.insert(new_tasks.end(), remaining.begin(), remaining.end());
-            if (auto result = tw_seek_plan(state, new_tasks, domain, depth + 1))
-                return result;
+            std::optional<std::vector<TwCall>> result = tw_seek_plan(state, new_tasks, domain, depth + 1);
+            if (result) return result;
         }
         return std::nullopt;
     }

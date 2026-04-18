@@ -405,13 +405,17 @@ inline TwMethodFn build_scan_method(const TwValue::Dict &scan_def,
         const TwValue::Dict &enums) {
     // "over" — state variable name to iterate
     std::string over_var;
-    if (auto it = scan_def.find("over"); it != scan_def.end())
-        over_var = it->second.as_string();
+    {
+        TwValue::Dict::const_iterator it = scan_def.find("over");
+        if (it != scan_def.end()) over_var = it->second.as_string();
+    }
 
     // "recurse" — task name to append when a branch matches
     std::string recurse_name;
-    if (auto it = scan_def.find("recurse"); it != scan_def.end())
-        recurse_name = it->second.as_string();
+    {
+        TwValue::Dict::const_iterator it = scan_def.find("recurse");
+        if (it != scan_def.end()) recurse_name = it->second.as_string();
+    }
 
     // "branches" — array of alt-style dicts each with bind/check/subtasks
     struct Branch {
@@ -420,47 +424,67 @@ inline TwMethodFn build_scan_method(const TwValue::Dict &scan_def,
         TwValue::Array subtask_defs;
     };
     std::vector<Branch> branches;
-    if (auto it = scan_def.find("branches"); it != scan_def.end() && it->second.is_array()) {
-        for (auto &br : it->second.as_array()) {
-            if (!br.is_dict()) continue;
-            auto get = [&](const char *k) -> TwValue::Array {
-                auto jt = br.as_dict().find(k);
-                return (jt != br.as_dict().end() && jt->second.is_array())
-                    ? jt->second.as_array() : TwValue::Array{};
-            };
-            branches.push_back({get("bind"), get("check"), get("subtasks")});
+    {
+        TwValue::Dict::const_iterator it = scan_def.find("branches");
+        if (it != scan_def.end() && it->second.is_array()) {
+            for (const TwValue &br : it->second.as_array()) {
+                if (!br.is_dict()) continue;
+                auto get = [&](const char *k) -> TwValue::Array {
+                    TwValue::Dict::const_iterator jt = br.as_dict().find(k);
+                    return (jt != br.as_dict().end() && jt->second.is_array())
+                        ? jt->second.as_array() : TwValue::Array{};
+                };
+                branches.push_back({get("bind"), get("check"), get("subtasks")});
+            }
         }
     }
 
-    // "done_subtasks" — returned when no key matches any branch
-    TwValue::Array done_subtasks;
-    if (auto it = scan_def.find("done_subtasks"); it != scan_def.end() && it->second.is_array())
-        done_subtasks = it->second.as_array();
+    // "done" — optional check run when all branches × keys exhausted; fail if not met
+    TwValue::Array done_check;
+    {
+        TwValue::Dict::const_iterator it = scan_def.find("done");
+        if (it != scan_def.end() && it->second.is_array())
+            done_check = it->second.as_array();
+    }
 
-    return [over_var, recurse_name, branches, done_subtasks, enums](
+    // "done_subtasks" — returned when no key matches any branch (and done check passes)
+    TwValue::Array done_subtasks;
+    {
+        TwValue::Dict::const_iterator it = scan_def.find("done_subtasks");
+        if (it != scan_def.end() && it->second.is_array())
+            done_subtasks = it->second.as_array();
+    }
+
+    return [over_var, recurse_name, branches, done_check, done_subtasks, enums](
             std::shared_ptr<TwState> state, std::vector<TwValue> /*args*/)
             -> std::optional<std::vector<TwTask>> {
         // Collect current keys of the scanned variable.
         std::vector<std::string> keys;
-        if (auto it = state->vars.find(over_var); it != state->vars.end() && it->second.is_dict())
-            for (auto &[k, _] : it->second.as_dict()) keys.push_back(k);
+        {
+            tsl::ordered_map<std::string, TwValue>::const_iterator it = state->vars.find(over_var);
+            if (it != state->vars.end() && it->second.is_dict())
+                for (const std::pair<const std::string, TwValue> &kv : it->second.as_dict())
+                    keys.push_back(kv.first);
+        }
 
         // Branch-priority ordering: for each branch, scan ALL keys before
         // trying the next branch. Matches Python gltf_domain_interpreter.py.
-        for (auto &br : branches) {
-            for (auto &key : keys) {
+        for (const Branch &br : branches) {
+            for (const std::string &key : keys) {
                 Params params;
                 params["_key"] = TwValue(key);
                 run_binds(br.bind_defs, params, *state);
                 if (!run_checks(br.check_defs, params, *state, enums)) continue;
-                auto subtasks = expand_subtasks(br.subtask_defs, params);
+                std::vector<TwTask> subtasks = expand_subtasks(br.subtask_defs, params);
                 if (!recurse_name.empty())
                     subtasks.push_back(TwCall{recurse_name, {}});
                 return subtasks;
             }
         }
-        // All branches x keys exhausted -- done.
+        // All branches x keys exhausted — run optional done check.
         Params empty;
+        if (!done_check.empty() && !run_checks(done_check, empty, *state, enums))
+            return std::nullopt;
         return expand_subtasks(done_subtasks, empty);
     };
 }
@@ -587,15 +611,32 @@ inline TwLoaded load_domain(const TwValue &data) {
         }
     }
 
-    // Initial task list
+    // Initial task list — array items are either [name, args...] calls or {"multigoal": {...}} objects.
     if (auto it = d.find("tasks"); it != d.end() && it->second.is_array()) {
-        for (auto &task_def : it->second.as_array()) {
-            if (!task_def.is_array() || task_def.as_array().empty()) continue;
-            const auto &arr = task_def.as_array();
-            TwCall call;
-            call.name = arr[0].as_string();
-            for (size_t i = 1; i < arr.size(); ++i) call.args.push_back(arr[i]);
-            result.tasks.push_back(std::move(call));
+        for (const TwValue &task_def : it->second.as_array()) {
+            if (task_def.is_dict()) {
+                // {"multigoal": {var: {key: desired, ...}, ...}}
+                TwValue::Dict::const_iterator mg_it = task_def.as_dict().find("multigoal");
+                if (mg_it == task_def.as_dict().end() || !mg_it->second.is_dict()) continue;
+                TwMultiGoal mg;
+                for (const std::pair<const std::string, TwValue> &vp : mg_it->second.as_dict()) {
+                    if (!vp.second.is_dict()) continue;
+                    for (const std::pair<const std::string, TwValue> &kp : vp.second.as_dict()) {
+                        TwGoalBinding b;
+                        b.var     = vp.first;
+                        b.key     = kp.first;
+                        b.desired = kp.second;
+                        mg.bindings.push_back(std::move(b));
+                    }
+                }
+                if (!mg.bindings.empty()) result.tasks.push_back(std::move(mg));
+            } else if (task_def.is_array() && !task_def.as_array().empty()) {
+                const TwValue::Array &arr = task_def.as_array();
+                TwCall call;
+                call.name = arr[0].as_string();
+                for (size_t i = 1; i < arr.size(); ++i) call.args.push_back(arr[i]);
+                result.tasks.push_back(std::move(call));
+            }
         }
     }
 

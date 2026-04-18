@@ -43,8 +43,29 @@ struct TwGoal {
     }
 };
 
-// A task list item is either a task call or a conjunctive goal.
-using TwTask = std::variant<TwCall, TwGoal>;
+// Multigoal: same binding structure as TwGoal but decomposed by the planner
+// with backtracking over which unsatisfied binding to satisfy first
+// (IPyHOP MultiGoal / RECTGTN 'N'). Each unsatisfied binding becomes a
+// single-binding TwGoal subtask; the MultiGoal is re-queued until done.
+struct TwMultiGoal {
+    std::vector<TwGoalBinding> bindings;
+
+    bool is_satisfied(const TwState &state) const {
+        for (const TwGoalBinding &b : bindings)
+            if (state.get_nested(b.var, TwValue(b.key)) != b.desired) return false;
+        return true;
+    }
+
+    std::vector<TwGoalBinding> unsatisfied(const TwState &state) const {
+        std::vector<TwGoalBinding> unmet;
+        for (const TwGoalBinding &b : bindings)
+            if (state.get_nested(b.var, TwValue(b.key)) != b.desired) unmet.push_back(b);
+        return unmet;
+    }
+};
+
+// A task list item is either a task call, a conjunctive goal, or a multigoal.
+using TwTask = std::variant<TwCall, TwGoal, TwMultiGoal>;
 
 // Action: (state_copy, args) → new_state | nullptr
 using TwActionFn =
