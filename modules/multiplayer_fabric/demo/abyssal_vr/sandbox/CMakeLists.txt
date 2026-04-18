@@ -22,3 +22,11 @@ endfunction()
 add_jellygrid_program(jellygrid_swarm      jellygrid_swarm.cpp)
 add_jellygrid_program(jellygrid_power_node jellygrid_power_node.cpp)
 add_jellygrid_program(jellygrid_current    jellygrid_current.cpp)
+
+# Taskweft HTN planner — pure C++ standalone, no sim-headers dependency.
+set(TW_STANDALONE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../modules/taskweft/standalone")
+add_sandbox_program_at(taskweft_planner
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/taskweft_planner.cpp"
+)
+target_include_directories(taskweft_planner PRIVATE "${TW_STANDALONE_DIR}/..")

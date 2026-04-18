@@ -40,7 +40,7 @@ def _require_numpy() -> None:
         raise RuntimeError("numpy is required for holographic operations")
 
 
-def encode_atom(word: str, dim: int = 1024) -> "np.ndarray":
+def encode_atom(word: str, dim: int = 4096) -> "np.ndarray":
     """Deterministic phase vector via SHA-256 counter blocks.
 
     Uses hashlib (not numpy RNG) for cross-platform reproducibility.
@@ -88,22 +88,24 @@ def unbind(memory: "np.ndarray", key: "np.ndarray") -> "np.ndarray":
 
 
 def bundle(*vectors: "np.ndarray") -> "np.ndarray":
-    """Superposition via element-wise phase addition (mod 2pi).
+    """Superposition via circular mean of unit phasors.
 
-    Bundling merges multiple vectors into one that preserves algebraic
-    structure — unbinding can recover individual components (with noise
-    proportional to the number of superimposed items).
-
-    Verified in Lean 4 (see lean_hrr/HRR/Properties.lean):
-        unbind(bundle(bind(c1,e1), bind(c2,e2)), e1) = bundle(c1, bind(c2,e2))
+    Each component θ is treated as a unit complex number e^{iθ}.
+    The mean direction is atan2(Σsin(θ), Σcos(θ)), which gives
+    similarity(v_k, bundle(v1,...,vN)) ≈ 1/N when v_k is one of the N
+    components — making bundle a viable primary ranker.
 
     The result can hold O(sqrt(dim)) items before similarity degrades.
     """
     _require_numpy()
-    result = vectors[0].copy()
-    for v in vectors[1:]:
-        result = result + v
-    return result % _TWO_PI
+    sum_sin = np.zeros(vectors[0].shape, dtype=np.float64)
+    sum_cos = np.zeros(vectors[0].shape, dtype=np.float64)
+    for v in vectors:
+        sum_sin += np.sin(v)
+        sum_cos += np.cos(v)
+    result = np.arctan2(sum_sin, sum_cos)
+    result[result < 0.0] += _TWO_PI
+    return result
 
 
 def similarity(a: "np.ndarray", b: "np.ndarray") -> float:
@@ -116,7 +118,7 @@ def similarity(a: "np.ndarray", b: "np.ndarray") -> float:
     return float(np.mean(np.cos(a - b)))
 
 
-def encode_text(text: str, dim: int = 1024) -> "np.ndarray":
+def encode_text(text: str, dim: int = 4096) -> "np.ndarray":
     """Bag-of-words: bundle of atom vectors for each token.
 
     Tokenizes by lowercasing, splitting on whitespace, and stripping
@@ -140,7 +142,7 @@ def encode_text(text: str, dim: int = 1024) -> "np.ndarray":
     return bundle(*atom_vectors)
 
 
-def encode_binding(content: str, entity: str, dim: int = 1024) -> "np.ndarray":
+def encode_binding(content: str, entity: str, dim: int = 4096) -> "np.ndarray":
     """Direct content-entity binding for algebraic extraction.
 
     Returns bind(encode_text(content, dim), encode_atom(entity.lower(), dim)).
@@ -154,7 +156,7 @@ def encode_binding(content: str, entity: str, dim: int = 1024) -> "np.ndarray":
     return bind(encode_text(content, dim), encode_atom(entity.lower(), dim))
 
 
-def encode_fact(content: str, entities: list[str], dim: int = 1024) -> "np.ndarray":
+def encode_fact(content: str, entities: list[str], dim: int = 4096) -> "np.ndarray":
     """Bundled encoding for similarity search and approximate algebraic extraction.
 
     Role vectors are reserved atoms: "__hrr_role_content__", "__hrr_role_entity__"
@@ -164,9 +166,9 @@ def encode_fact(content: str, entities: list[str], dim: int = 1024) -> "np.ndarr
     2. For each entity: bind(encode_atom(entity.lower(), dim), encode_atom("__hrr_role_entity__", dim))
     3. bundle (additive superposition) all components together
 
-    Additive bundling preserves algebraic structure — unbinding recovers the
-    signal plus noise from other components (verified in Lean 4: additive_bundle_unbind).
-    For exact zero-noise recovery, use encode_binding() with a single entity.
+    Circular-mean bundling gives similarity ≈ 1/N for each component, making
+    HRR a viable primary ranker. For exact zero-noise algebraic recovery,
+    use encode_binding() with a single entity.
     """
     _require_numpy()
 

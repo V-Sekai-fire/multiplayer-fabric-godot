@@ -8,6 +8,7 @@
 jellygrid_swarm
 jellygrid_power_node
 jellygrid_current
+taskweft_planner
 
 # Downloaded CMake artifact
 generated_api.hpp

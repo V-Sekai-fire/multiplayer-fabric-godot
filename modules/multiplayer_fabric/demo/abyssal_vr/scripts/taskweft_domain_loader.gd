@@ -5,12 +5,139 @@
 ##   var domain: TaskweftDomain = result.domain
 ##   var state:  TaskweftState  = result.state
 ##   var tasks:  Array          = result.tasks
-##   var plan = Taskweft.new().set_domain(domain) ... planner.plan(state, tasks)
-##
-## Action callables:   fn(state, p0?, p1?, p2?, p3?) -> TaskweftState | null
-## Method callables:   fn(state, p0?, p1?, p2?, p3?) -> Array[subtask] | null
+##   var planner = Taskweft.new(); planner.set_domain(domain)
+##   var plan = planner.plan(state, tasks)
 class_name TaskweftDomainLoader
 extends RefCounted
+
+# ---------------------------------------------------------------------------
+# Inner runner classes — hold metadata, expose run() as a Callable.
+# Godot 4's Callable.bind() appends args, so we store metadata in the object
+# and let callv supply only (state, p0, p1, p2, p3).
+# ---------------------------------------------------------------------------
+
+class _ActionRunner:
+	extends RefCounted
+	var param_names: Array
+	var bind_defs: Array
+	var body: Array
+	var enums: Dictionary
+
+	func run(state: TaskweftState, p0 = null, p1 = null, p2 = null, p3 = null) -> Variant:
+		var params := TaskweftDomainLoader._build_params(param_names, [p0, p1, p2, p3])
+
+		# Bind steps: read state values into params before the body.
+		for bind_step in bind_defs:
+			var ptr := TaskweftDomainLoader._parse_pointer(bind_step["pointer"], params)
+			if ptr.size() == 2:
+				params[bind_step["name"]] = state.get_nested(ptr[0], ptr[1])
+
+		var new_state: TaskweftState = state.copy()
+
+		for step in body:
+			if step.has("check"):
+				var ptr := TaskweftDomainLoader._parse_pointer(step["check"], params)
+				if ptr.size() != 2:
+					return null
+				var actual  = new_state.get_nested(ptr[0], ptr[1])
+				var op      := TaskweftDomainLoader._check_op(step)
+				var expected = TaskweftDomainLoader._eval_expr(step[op], params, new_state, enums)
+				if not TaskweftDomainLoader._compare(actual, expected, op):
+					return null
+			elif step.has("set"):
+				var ptr := TaskweftDomainLoader._parse_pointer(step["set"], params)
+				if ptr.size() != 2:
+					return null
+				var value = TaskweftDomainLoader._eval_expr(step["value"], params, new_state, enums)
+				new_state.set_nested(ptr[0], ptr[1], value)
+
+		return new_state
+
+
+class _MethodAltRunner:
+	extends RefCounted
+	var param_names: Array
+	var alt_def: Dictionary
+	var enums: Dictionary
+
+	func run(state: TaskweftState, p0 = null, p1 = null, p2 = null, p3 = null) -> Variant:
+		var params := TaskweftDomainLoader._build_params(param_names, [p0, p1, p2, p3])
+
+		for bind_step in alt_def.get("bind", []):
+			var ptr := TaskweftDomainLoader._parse_pointer(bind_step["pointer"], params)
+			if ptr.size() == 2:
+				params[bind_step["name"]] = state.get_nested(ptr[0], ptr[1])
+
+		for check_step in alt_def.get("check", []):
+			var raw_ptr = check_step.get("pointer", check_step.get("var", null))
+			if raw_ptr == null:
+				return null
+			var ptr: Array
+			if raw_ptr is String:
+				ptr = TaskweftDomainLoader._parse_pointer(raw_ptr, params)
+			elif raw_ptr is Array and raw_ptr.size() == 2:
+				ptr = [raw_ptr[0], TaskweftDomainLoader._resolve_param(raw_ptr[1], params)]
+			else:
+				return null
+			if ptr.size() != 2:
+				return null
+			var actual  = state.get_nested(ptr[0], ptr[1])
+			var op      := TaskweftDomainLoader._check_op(check_step)
+			var expected = TaskweftDomainLoader._resolve_param(check_step[op], params)
+			if not TaskweftDomainLoader._compare(actual, expected, op):
+				return null
+
+		var subtasks: Array = []
+		for subtask_def in alt_def.get("subtasks", []):
+			var subtask: Array = []
+			for elem in subtask_def:
+				subtask.append(TaskweftDomainLoader._resolve_param(elem, params))
+			subtasks.append(subtask)
+
+		return subtasks
+
+
+class _GoalMethodRunner:
+	extends RefCounted
+	var goal_param_names: Array
+	var alt_def: Dictionary
+	var enums: Dictionary
+
+	func run(state: TaskweftState, desired = null) -> Variant:
+		var params := {}
+		if goal_param_names.size() >= 1:
+			params[goal_param_names[0]] = desired
+
+		for bind_step in alt_def.get("bind", []):
+			var ptr := TaskweftDomainLoader._parse_pointer(bind_step["pointer"], params)
+			if ptr.size() == 2:
+				params[bind_step["name"]] = state.get_nested(ptr[0], ptr[1])
+
+		for check_step in alt_def.get("check", []):
+			var raw_ptr = check_step.get("pointer", check_step.get("var", null))
+			if raw_ptr == null:
+				return null
+			var ptr: Array
+			if raw_ptr is String:
+				ptr = TaskweftDomainLoader._parse_pointer(raw_ptr, params)
+			elif raw_ptr is Array and raw_ptr.size() == 2:
+				ptr = [raw_ptr[0], TaskweftDomainLoader._resolve_param(raw_ptr[1], params)]
+			else:
+				return null
+			var actual   = state.get_nested(ptr[0], ptr[1])
+			var op       := TaskweftDomainLoader._check_op(check_step)
+			var expected  = TaskweftDomainLoader._resolve_param(check_step[op], params)
+			if not TaskweftDomainLoader._compare(actual, expected, op):
+				return null
+
+		var subtasks: Array = []
+		for subtask_def in alt_def.get("subtasks", []):
+			var subtask: Array = []
+			for elem in subtask_def:
+				subtask.append(TaskweftDomainLoader._resolve_param(elem, params))
+			subtasks.append(subtask)
+
+		return subtasks
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -45,20 +172,18 @@ static func load_dict(data: Dictionary) -> Dictionary:
 		if init is Dictionary:
 			for key in init:
 				state.set_nested(var_name, key, init[key])
-		# Scalar init (rare) stored directly.
 		elif init != null:
 			state.set_var(var_name, init)
 
 	# Build actions.
 	for action_name in data.get("actions", {}):
 		var action_def: Dictionary = data["actions"][action_name]
-		var param_names: Array = action_def.get("params", [])
-		var bind_defs: Array  = action_def.get("bind", [])
-		var body: Array       = action_def.get("body", [])
-		domain.declare_action(
-			action_name,
-			_exec_action.bind(param_names, bind_defs, body, enums)
-		)
+		var runner := _ActionRunner.new()
+		runner.param_names = action_def.get("params", [])
+		runner.bind_defs   = action_def.get("bind", [])
+		runner.body        = action_def.get("body", [])
+		runner.enums       = enums
+		domain.declare_action(action_name, Callable(runner, "run"))
 
 	# Build task methods.
 	for task_name in data.get("methods", {}):
@@ -66,153 +191,31 @@ static func load_dict(data: Dictionary) -> Dictionary:
 		var param_names: Array = group.get("params", [])
 		var callables: Array = []
 		for alt in group.get("alternatives", []):
-			callables.append(_exec_method_alt.bind(param_names, alt, enums))
+			var runner := _MethodAltRunner.new()
+			runner.param_names = param_names
+			runner.alt_def     = alt
+			runner.enums       = enums
+			callables.append(Callable(runner, "run"))
 		domain.declare_task_methods(task_name, callables)
 
 	# Build goal methods (keyed by state variable name).
 	for goal_var in data.get("goals", {}):
 		var group: Dictionary = data["goals"][goal_var]
-		var param_names: Array = group.get("params", [])
 		var callables: Array = []
 		for alt in group.get("alternatives", []):
-			callables.append(_exec_goal_method_alt.bind(param_names, alt, enums))
+			var runner := _GoalMethodRunner.new()
+			runner.goal_param_names = group.get("params", [])
+			runner.alt_def          = alt
+			runner.enums            = enums
+			callables.append(Callable(runner, "run"))
 		domain.declare_goal_methods(goal_var, callables)
 
-	# Build initial task list.
 	var tasks: Array = _build_tasks(data.get("tasks", []))
 
 	return {"domain": domain, "state": state, "tasks": tasks, "enums": enums}
 
 # ---------------------------------------------------------------------------
-# Action executor — pre-bound as Callable(param_names, bind_defs, body, enums)
-# ---------------------------------------------------------------------------
-
-static func _exec_action(
-		param_names: Array, bind_defs: Array, body: Array, enums: Dictionary,
-		state: TaskweftState,
-		p0 = null, p1 = null, p2 = null, p3 = null) -> Variant:
-	var params := _build_params(param_names, [p0, p1, p2, p3])
-
-	# Bind steps: read state values into params before executing the body.
-	for bind_step in bind_defs:
-		var ptr := _parse_pointer(bind_step["pointer"], params)
-		if ptr.size() == 2:
-			params[bind_step["name"]] = state.get_nested(ptr[0], ptr[1])
-
-	var new_state: TaskweftState = state.copy()
-
-	for step in body:
-		if step.has("check"):
-			var ptr := _parse_pointer(step["check"], params)
-			if ptr.size() != 2:
-				return null
-			var actual  = new_state.get_nested(ptr[0], ptr[1])
-			var op      := _check_op(step)
-			var expected = _eval_expr(step[op], params, new_state, enums)
-			if not _compare(actual, expected, op):
-				return null
-		elif step.has("set"):
-			var ptr := _parse_pointer(step["set"], params)
-			if ptr.size() != 2:
-				return null
-			var value = _eval_expr(step["value"], params, new_state, enums)
-			new_state.set_nested(ptr[0], ptr[1], value)
-
-	return new_state
-
-# ---------------------------------------------------------------------------
-# Method alternative executor
-# ---------------------------------------------------------------------------
-
-static func _exec_method_alt(
-		param_names: Array, alt_def: Dictionary, enums: Dictionary,
-		state: TaskweftState,
-		p0 = null, p1 = null, p2 = null, p3 = null) -> Variant:
-	var params := _build_params(param_names, [p0, p1, p2, p3])
-
-	# Bind steps.
-	for bind_step in alt_def.get("bind", []):
-		var ptr := _parse_pointer(bind_step["pointer"], params)
-		if ptr.size() == 2:
-			params[bind_step["name"]] = state.get_nested(ptr[0], ptr[1])
-
-	# Precondition checks.
-	for check_step in alt_def.get("check", []):
-		var ptr_key := "pointer" if check_step.has("pointer") else "var"
-		var raw_ptr = check_step[ptr_key]
-		var ptr: Array
-		if raw_ptr is String:
-			ptr = _parse_pointer(raw_ptr, params)
-		elif raw_ptr is Array and raw_ptr.size() == 2:
-			ptr = [raw_ptr[0], _resolve_param(raw_ptr[1], params)]
-		else:
-			return null
-		if ptr.size() != 2:
-			return null
-		var actual  = state.get_nested(ptr[0], ptr[1])
-		var op      := _check_op(check_step)
-		var expected = _resolve_param(check_step[op], params)
-		if not _compare(actual, expected, op):
-			return null
-
-	# Build subtasks, substituting params.
-	var subtasks: Array = []
-	for subtask_def in alt_def.get("subtasks", []):
-		var subtask: Array = []
-		for elem in subtask_def:
-			subtask.append(_resolve_param(elem, params))
-		subtasks.append(subtask)
-
-	return subtasks
-
-# ---------------------------------------------------------------------------
-# Goal method alternative executor
-# signature: fn(state, desired_value) -> Array[subtask] | null
-# ---------------------------------------------------------------------------
-
-static func _exec_goal_method_alt(
-		param_names: Array, alt_def: Dictionary, enums: Dictionary,
-		state: TaskweftState,
-		desired = null) -> Variant:
-	# Goal methods receive the desired value as the single extra arg.
-	var params := {}
-	if param_names.size() >= 1:
-		params[param_names[0]] = desired
-
-	# Bind and check same as method alt.
-	for bind_step in alt_def.get("bind", []):
-		var ptr := _parse_pointer(bind_step["pointer"], params)
-		if ptr.size() == 2:
-			params[bind_step["name"]] = state.get_nested(ptr[0], ptr[1])
-
-	for check_step in alt_def.get("check", []):
-		var raw_ptr = check_step.get("pointer", check_step.get("var", null))
-		if raw_ptr == null:
-			return null
-		var ptr: Array
-		if raw_ptr is String:
-			ptr = _parse_pointer(raw_ptr, params)
-		elif raw_ptr is Array and raw_ptr.size() == 2:
-			ptr = [raw_ptr[0], _resolve_param(raw_ptr[1], params)]
-		else:
-			return null
-		var actual   = state.get_nested(ptr[0], ptr[1])
-		var op       := _check_op(check_step)
-		var expected  = _resolve_param(check_step[op], params)
-		if not _compare(actual, expected, op):
-			return null
-
-	var subtasks: Array = []
-	for subtask_def in alt_def.get("subtasks", []):
-		var subtask: Array = []
-		for elem in subtask_def:
-			subtask.append(_resolve_param(elem, params))
-		subtasks.append(subtask)
-
-	return subtasks
-
-# ---------------------------------------------------------------------------
-# Helpers
+# Helpers (static — callable by inner classes via TaskweftDomainLoader.xxx)
 # ---------------------------------------------------------------------------
 
 static func _build_params(param_names: Array, raw_args: Array) -> Dictionary:
@@ -225,8 +228,7 @@ static func _build_params(param_names: Array, raw_args: Array) -> Dictionary:
 ## Parse "/var/{key}" into ["var", resolved_key].
 static func _parse_pointer(pointer: String, params: Dictionary) -> Array:
 	var parts := pointer.split("/")
-	# Leading "/" produces an empty first element; skip it.
-	var offset := 1 if parts.size() > 0 and parts[0] == "" else 0
+	var offset := 1 if (parts.size() > 0 and parts[0] == "") else 0
 	if parts.size() < offset + 2:
 		return []
 	var var_name: String = parts[offset]
@@ -237,7 +239,7 @@ static func _parse_pointer(pointer: String, params: Dictionary) -> Array:
 ## Substitute "{name}" references; return anything else as-is.
 static func _resolve_param(value, params: Dictionary):
 	if value is String and value.begins_with("{") and value.ends_with("}"):
-		var name := value.substr(1, value.length() - 2)
+		var name: String = value.substr(1, value.length() - 2)
 		return params.get(name, value)
 	return value
 
@@ -272,9 +274,8 @@ static func _eval_op(expr: Dictionary, params: Dictionary, state: TaskweftState,
 	return null
 
 
-## Find which comparison operator key is present in a check/alt-check step.
 static func _check_op(step: Dictionary) -> String:
-	for op in ["eq", "neq", "lt", "le", "gt", "ge", "ieq", "ilt", "ile", "igt", "ige"]:
+	for op: String in ["eq", "neq", "lt", "le", "gt", "ge", "ieq", "ilt", "ile", "igt", "ige"]:
 		if step.has(op):
 			return op
 	return "eq"
@@ -296,7 +297,4 @@ static func _build_tasks(task_defs: Array) -> Array:
 	for entry in task_defs:
 		if entry is Array:
 			tasks.append(entry)
-		elif entry is Dictionary and entry.has("multigoal"):
-			# Multigoal not yet ported — skip silently.
-			pass
 	return tasks
