@@ -26,9 +26,21 @@ The Abyss is a persistent, zone-sharded ocean:
 
 ---
 
+## Jellyfish Creator
+
+Because the asset format is a Godot scene, the creation workflow is:
+
+1. Design with CSG nodes (bell body, tentacle sweeps) directly in the Godot editor or an in-world editor scene.
+2. Bake CSG to a static mesh (`CSGShape3D.bake_mesh()`).
+3. Save the baked mesh scene to Uro — the content-addressed store assigns a chunk hash.
+
+No external DCC tools required. The baked scene is the canonical asset; clients instance it directly at runtime.
+
+---
+
 ## UGC Asset Pipeline (Uro)
 
-Every jellyfish is a content-addressed asset bundle in Uro. The bundle packs a Godot scene alongside a pulse waveform. Clients fetch by chunk hash at runtime and only download jellyfish within their AOI. The manifest endpoint resolves the full asset list in one round trip. Chunks are cached on disk so repeat visits cost no bandwidth. ReBAC permissions give creators control over who can remix or export their designs.
+Every jellyfish is a content-addressed asset bundle in Uro. The bundle packs a baked Godot mesh scene alongside a pulse waveform. Clients fetch by chunk hash at runtime and only download jellyfish within their AOI. The manifest endpoint resolves the full asset list in one round trip. Chunks are cached on disk so repeat visits cost no bandwidth. ReBAC permissions give creators control over who can remix or export their designs.
 
 ---
 
@@ -38,6 +50,7 @@ Every jellyfish is a content-addressed asset bundle in Uro. The bundle packs a G
 | ---------------- | ----------- | -------------------------------------------------- |
 | Zone networking  | Working     | fabric_zone.cpp                                    |
 | Entity migration | Working     | SCENARIO_JELLYFISH_ZONE_CROSSING                   |
+| Jellyfish creator | In scope   | CSG design → bake mesh → save Godot scene → Uro    |
 | Asset streaming  | In progress | jellyfish_asset_loader.gd → FabricMMOGAsset → Uro  |
 | VR interface     | Testing     | xr-grid project                                    |
 
