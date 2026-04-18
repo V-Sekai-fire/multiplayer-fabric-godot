@@ -2424,6 +2424,18 @@ void Control::_call_gui_input(const Ref<InputEvent> &p_event) {
 void Control::gui_input(const Ref<InputEvent> &p_event) {
 }
 
+void Control::call_gui_input(const Ref<InputEvent> &p_event) {
+	ERR_FAIL_COND(!is_inside_tree());
+	// Isolate this direct call from the viewport's global is_input_handled() state.
+	// Without isolation, a prior accepted event would skip the virtual method here,
+	// and consecutive calls would silently no-op after the first accepted one.
+	Viewport *vp = get_viewport();
+	bool prior_handled = vp->local_input_handled;
+	vp->local_input_handled = false;
+	_call_gui_input(p_event);
+	vp->local_input_handled = vp->local_input_handled || prior_handled;
+}
+
 void Control::accept_event() {
 	ERR_MAIN_THREAD_GUARD;
 	if (is_inside_tree()) {
@@ -4622,6 +4634,7 @@ void Control::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("find_prev_valid_focus"), &Control::find_prev_valid_focus);
 	ClassDB::bind_method(D_METHOD("find_next_valid_focus"), &Control::find_next_valid_focus);
 	ClassDB::bind_method(D_METHOD("find_valid_focus_neighbor", "side"), &Control::find_valid_focus_neighbor);
+	ClassDB::bind_method(D_METHOD("call_gui_input", "event"), &Control::call_gui_input);
 
 	ClassDB::bind_method(D_METHOD("set_h_size_flags", "flags"), &Control::set_h_size_flags);
 	ClassDB::bind_method(D_METHOD("get_h_size_flags"), &Control::get_h_size_flags);
