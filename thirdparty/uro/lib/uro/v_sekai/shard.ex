@@ -66,11 +66,14 @@ defmodule Uro.VSekai.Shard do
 
   def to_json_schema(%__MODULE__{} = shard) do
     %{
+      id: to_string(shard.id),
       user: User.to_limited_json_schema(shard.user),
       address: to_string(shard.address),
       port: shard.port,
       map: to_string(shard.map),
-      name: to_string(shard.name)
+      name: to_string(shard.name),
+      current_users: shard.current_users || 0,
+      max_users: shard.max_users || 32
     }
   end
 
