@@ -14,14 +14,18 @@ defmodule Uro.Application do
           Uro.Acl,
           Uro.Manifest,
           Uro.Keys,
+          {Phoenix.PubSub, [name: Uro.PubSub, adapter: Phoenix.PubSub.PG2]},
           Uro.Endpoint,
           Uro.VSekai.ShardJanitor,
           {Redix, {Application.get_env(:uro, Redix)[:url], [name: :redix]}},
-          {Phoenix.PubSub, [name: Uro.PubSub, adapter: Phoenix.PubSub.PG2]},
           ExMarcel.TableWrapper,
 
           # ExMarcel
-          {Task, fn -> Uro.Helpers.Validation.init_extra_extensions() end}
+          {Task, fn -> Uro.Helpers.Validation.init_extra_extensions() end},
+
+          {Registry, keys: :unique, name: Uro.WebTransport.ZoneRegistry},
+          Uro.WebTransport.ZoneSupervisor,
+          Uro.WebTransport.Supervisor
         ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

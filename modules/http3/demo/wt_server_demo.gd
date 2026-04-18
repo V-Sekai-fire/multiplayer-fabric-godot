@@ -11,9 +11,11 @@ extends SceneTree
 #   4. Serves a browser test HTML page over plain HTTP on HTTP_PORT.
 #   5. Echoes incoming datagrams and streams back to the sender.
 
-const PORT = 54370
-const HTTP_PORT = 8080
 const PATH = "/wt"
+
+# Allow Uro zone supervisor to override port via env var.
+var PORT: int = int(OS.get_environment("ZONE_PORT")) if OS.get_environment("ZONE_PORT") != "" else 54370
+var HTTP_PORT: int = PORT + 1
 
 var peer: WebTransportPeer
 var tcp_server: TCPServer
@@ -57,8 +59,9 @@ func _init():
 	ctx.start(HashingContext.HASH_SHA256)
 	ctx.update(cert.get_der())
 	var hash = Marshalls.raw_to_base64(ctx.finish())
-	print("WebTransport server listening on port ", PORT, PATH)
-	print("Certificate hash (for serverCertificateHashes): ", hash)
+
+	# Emit ready beacon as JSON so Uro zone supervisor can parse it from stdout.
+	print(JSON.stringify({"event": "ready", "port": PORT, "cert_hash": hash}))
 
 	html_page = _make_browser_test_page(hash)
 

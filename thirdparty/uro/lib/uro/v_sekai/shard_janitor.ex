@@ -14,6 +14,7 @@ defmodule Uro.VSekai.ShardJanitor do
 
   def handle_info(:cleanup, state) do
     cleanup_stale_shards()
+    cleanup_stale_zones()
     schedule_cleanup()
     {:noreply, state}
   end
@@ -27,6 +28,19 @@ defmodule Uro.VSekai.ShardJanitor do
           s.updated_at >
             from_now(^stale_shard_cutoff[:amount], ^stale_shard_cutoff[:calendar_type]),
         select: s.id
+
+    Repo.delete_all(query)
+  end
+
+  defp cleanup_stale_zones() do
+    stale_shard_cutoff = Application.get_env(:uro, :stale_shard_cutoff)
+
+    query =
+      from z in "zones",
+        where:
+          z.updated_at >
+            from_now(^stale_shard_cutoff[:amount], ^stale_shard_cutoff[:calendar_type]),
+        select: z.id
 
     Repo.delete_all(query)
   end

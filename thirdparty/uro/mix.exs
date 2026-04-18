@@ -75,7 +75,8 @@ defmodule Uro.MixProject do
       {:swoosh, "~> 1.3"},
       {:hammer, "~> 6.0"},
       {:scrivener_ecto, "~> 2.7"},
-      {:ex_marcel, "~> 0.1.0"}
+      {:ex_marcel, "~> 0.1.0"},
+      {:wtransport, git: "https://github.com/bugnano/wtransport-elixir.git"}
     ]
   end
 

@@ -139,4 +139,43 @@ defmodule Uro.VSekai do
   def get_shard_by_address(address) do
     Repo.get_by(Shard, address: address)
   end
+
+  # ── Zones ────────────────────────────────────────────────────────────────���───
+
+  alias Uro.VSekai.Zone
+
+  def zone_freshness_time_in_seconds, do: 30
+
+  def list_fresh_zones do
+    stale_timestamp =
+      DateTime.add(DateTime.utc_now(), -zone_freshness_time_in_seconds(), :second)
+
+    Repo.all(from z in Zone, where: z.updated_at > ^stale_timestamp)
+  end
+
+  def list_fresh_zones_for_shard(shard_id) do
+    stale_timestamp =
+      DateTime.add(DateTime.utc_now(), -zone_freshness_time_in_seconds(), :second)
+
+    Repo.all(
+      from z in Zone,
+        where: z.shard_id == ^shard_id and z.updated_at > ^stale_timestamp
+    )
+  end
+
+  def get_zone!(id), do: Repo.get!(Zone, id)
+
+  def create_zone(attrs) do
+    %Zone{}
+    |> Zone.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def update_zone(%Zone{} = zone, attrs) do
+    zone
+    |> Zone.changeset(attrs)
+    |> Repo.update(force: true)
+  end
+
+  def delete_zone(%Zone{} = zone), do: Repo.delete(zone)
 end

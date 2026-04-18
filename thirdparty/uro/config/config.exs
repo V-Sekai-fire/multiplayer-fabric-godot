@@ -156,6 +156,12 @@ config :logger, :console,
 
 config :phoenix, :json_library, Jason
 
+config :uro, Uro.WebTransport,
+  host: Helpers.get_env("WT_HOST", "0.0.0.0"),
+  port: "WT_PORT" |> Helpers.get_env("4433") |> String.to_integer(),
+  cert: Helpers.get_env("WT_CERT", "/run/secrets/wt_cert.pem"),
+  key: Helpers.get_env("WT_KEY", "/run/secrets/wt_key.pem")
+
 config :waffle,
   storage: Waffle.Storage.Local
 
