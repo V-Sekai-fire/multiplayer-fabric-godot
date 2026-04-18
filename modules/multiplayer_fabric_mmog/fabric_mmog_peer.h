@@ -70,7 +70,7 @@ public:
 	// ── Command set (low byte of payload[0] at WIRE_OFFSET_PAYLOAD + 0) ─
 	enum Command {
 		CMD_POSITION_ONLY = 0,
-		CMD_RAGDOLL = 1, // C7 velocity spike, interest-radius scoped
+		CMD_CURRENT_FUNNEL = 1, // C7 rip-current velocity spike, interest-radius scoped
 		CMD_NUDGE = 2, // payload[1] = target_entity_id (u32)
 		CMD_SPAWN_STROKE = 3, // payload[1] = stroke_id (u32), payload[2] = RGBA8888 (u32)
 	};

@@ -5,7 +5,7 @@ var client: Node = null
 
 func _init() -> void:
     print("[HeadlessObserver] Initializing headless diagnostic observer...")
-    
+
     # We must instantiate FabricClient directly to bypass the faulty observer.tscn
     client = preload("res://scripts/fabric_client.gd").new()
     client.zone_host = "127.0.0.1"
@@ -35,7 +35,7 @@ func _on_frame() -> void:
                         print("  > Entity ID: ", k, " | Node Invalid (Queue Freed?)")
         else:
             print("Client node not found.")
-        
+
     if _frames >= 600:
         print("[HeadlessObserver] Diagnostic complete. Shutdown.")
         quit(0)

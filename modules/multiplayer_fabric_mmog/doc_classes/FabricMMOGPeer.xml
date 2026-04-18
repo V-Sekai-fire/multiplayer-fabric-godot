@@ -67,7 +67,7 @@
 		</constant>
 		<constant name="CMD_POSITION_ONLY" value="0" enum="Command">
 		</constant>
-		<constant name="CMD_RAGDOLL" value="1" enum="Command">
+		<constant name="CMD_CURRENT_FUNNEL" value="1" enum="Command">
 		</constant>
 		<constant name="CMD_NUDGE" value="2" enum="Command">
 		</constant>

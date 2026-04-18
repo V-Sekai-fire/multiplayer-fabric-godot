@@ -32,11 +32,10 @@
 
 #include "fabric_snapshot.h"
 
-#include "core/math/predictive_bvh_adapter.h"
-
 #include "core/config/engine.h"
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
+#include "core/math/predictive_bvh_adapter.h"
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/string/print_string.h"
@@ -132,7 +131,7 @@ void FabricZone::_step_entity(FabricEntity &e, uint32_t p_tick, Scenario p_scena
 	}
 
 	switch (p_scenario) {
-		case SCENARIO_CONCERT: {
+		case SCENARIO_JELLYFISH_BLOOM: {
 			// ~1 Hz beat with a short pulse (~80 ms). Both expressed in terms of
 			// the engine's physics tick rate so the rhythm is wall-clock stable.
 			const uint32_t hz = _fz_hz();
@@ -166,7 +165,7 @@ void FabricZone::_step_entity(FabricEntity &e, uint32_t p_tick, Scenario p_scena
 			e.vz = nvz;
 		} break;
 
-		case SCENARIO_CONVOY: {
+		case SCENARIO_WHALE_WITH_SHARKS: {
 			// Multi-cabin articulated vehicle (train) with passengers.
 			// Each 14-entity group is one train:
 			//   slot 0..2  → three cabins, slot 0 is the lead cabin.
@@ -255,7 +254,7 @@ void FabricZone::_step_entity(FabricEntity &e, uint32_t p_tick, Scenario p_scena
 			e.vz = nvz;
 		} break;
 
-		case SCENARIO_RAGDOLL: {
+		case SCENARIO_CURRENT_FUNNEL: {
 			const uint32_t prone_period = _fz_hz() * (uint32_t)RAGDOLL_PRONE_PERIOD_SECONDS;
 			bool is_prone = (p_tick / prone_period + (uint32_t)e.global_id) % 4 == 3;
 			bool just_entered = is_prone && ((p_tick - 1) / prone_period + (uint32_t)e.global_id) % 4 != 3;
@@ -315,7 +314,7 @@ void FabricZone::_step_entity(FabricEntity &e, uint32_t p_tick, Scenario p_scena
 			}
 			break;
 
-		case SCENARIO_CHOKE_POINT: {
+		case SCENARIO_JELLYFISH_ZONE_CROSSING: {
 			// Chokepoint stress test — 144 choke_point entities (IDs 256-399)
 			// clump-spring toward (0,0,0) and cross zone boundaries in a burst.
 			// All other entities use default centering drift so zone density stays even:
@@ -457,11 +456,11 @@ void FabricZone::_step_entity(FabricEntity &e, uint32_t p_tick, Scenario p_scena
 			int concert_end = n / 2;
 			int choke_point_end = concert_end + n * 28 / 100;
 			if (e.global_id < concert_end) {
-				_step_entity(e, p_tick, SCENARIO_CONCERT, n);
+				_step_entity(e, p_tick, SCENARIO_JELLYFISH_BLOOM, n);
 			} else if (e.global_id < choke_point_end) {
-				_step_entity(e, p_tick, SCENARIO_RAGDOLL, n);
+				_step_entity(e, p_tick, SCENARIO_CURRENT_FUNNEL, n);
 			} else {
-				_step_entity(e, p_tick, SCENARIO_CONVOY, n);
+				_step_entity(e, p_tick, SCENARIO_WHALE_WITH_SHARKS, n);
 			}
 		} break;
 	}
@@ -980,13 +979,13 @@ void FabricZone::initialize() {
 		} else if (args[i] == "--scenario" && i + 1 < args.size()) {
 			String s = args[i + 1];
 			if (s == "concert") {
-				scenario = SCENARIO_CONCERT;
+				scenario = SCENARIO_JELLYFISH_BLOOM;
 			} else if (s == "choke_point") {
-				scenario = SCENARIO_CHOKE_POINT;
+				scenario = SCENARIO_JELLYFISH_ZONE_CROSSING;
 			} else if (s == "convoy") {
-				scenario = SCENARIO_CONVOY;
+				scenario = SCENARIO_WHALE_WITH_SHARKS;
 			} else if (s == "ragdoll") {
-				scenario = SCENARIO_RAGDOLL;
+				scenario = SCENARIO_CURRENT_FUNNEL;
 			} else if (s == "mixed") {
 				scenario = SCENARIO_MIXED;
 			} else {
@@ -1596,7 +1595,7 @@ bool FabricZone::physics_process(double p_time) {
 				// dynamic and can be displaced by a world-scale event.
 				// Downstream _step_entity clamps must have v_cap ≥ RAGDOLL_PEAK_V
 				// so the spike survives the next tick and the BVH registers its true
-				// magnitude (see static_assert near SCENARIO_CONVOY).
+				// magnitude (see static_assert near SCENARIO_WHALE_WITH_SHARKS).
 				for (int si = 0; si < _zone_capacity; si++) {
 					if (!slots[si].active) {
 						continue;
@@ -1689,7 +1688,7 @@ bool FabricZone::physics_process(double p_time) {
 	// Tracers in this zone attract each other via cohesion spring → natural clumping.
 	real_t local_clump[3] = {};
 	bool has_local_clump = false;
-	if (cur_scenario == SCENARIO_CHOKE_POINT) {
+	if (cur_scenario == SCENARIO_JELLYFISH_ZONE_CROSSING) {
 		double tc[3] = {};
 		int tc_n = 0;
 		for (int i = 0; i < _zone_capacity; i++) {
@@ -2079,16 +2078,16 @@ bool FabricZone::physics_process(double p_time) {
 		}
 		const char *scenario_name;
 		switch (scenario) {
-			case SCENARIO_CONCERT:
+			case SCENARIO_JELLYFISH_BLOOM:
 				scenario_name = "concert";
 				break;
-			case SCENARIO_CHOKE_POINT:
+			case SCENARIO_JELLYFISH_ZONE_CROSSING:
 				scenario_name = "choke_point";
 				break;
-			case SCENARIO_CONVOY:
+			case SCENARIO_WHALE_WITH_SHARKS:
 				scenario_name = "convoy";
 				break;
-			case SCENARIO_RAGDOLL:
+			case SCENARIO_CURRENT_FUNNEL:
 				scenario_name = "ragdoll";
 				break;
 			case SCENARIO_MIXED:
