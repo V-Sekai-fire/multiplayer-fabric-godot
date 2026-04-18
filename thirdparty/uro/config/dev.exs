@@ -20,13 +20,6 @@ config :phoenix, :plug_init_mode, :runtime
 
 config :uro, Uro.Repo,
   show_sensitive_data_on_connection_error: true,
-  pool_size: 10,
-  url: System.get_env("DATABASE_URL"),
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
-  database: "uro-dev",
   stacktrace: true,
-  show_sensitive_data_on_connection_error: true,
   pool_size: 10
 

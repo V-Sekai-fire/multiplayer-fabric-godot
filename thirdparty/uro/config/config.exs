@@ -51,13 +51,7 @@ config :uro,
 
 config :uro, Uro.Repo,
   adapter: Ecto.Adapters.Postgres,
-  url: Helpers.get_env("DATABASE_URL", "postgresql://vsekai:vsekai@database:5432/vsekai"),
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
-  database: "uro-dev",
-  stacktrace: true,
-  show_sensitive_data_on_connection_error: true,
+  url: Helpers.get_env("DATABASE_URL", "postgresql://vsekai@database:26257/vsekai"),
   pool_size: 10,
   migration_lock: false
 
