@@ -111,9 +111,6 @@ ScriptInstance *ELFScript::instance_create(Object *p_for_object) {
 PlaceHolderScriptInstance *ELFScript::placeholder_instance_create(Object *p_for_object) {
 	return nullptr; // TODO: implement if needed
 }
-bool ELFScript::instance_has(const Object *p_object) const {
-	return false;
-}
 bool ELFScript::has_source_code() const {
 	return true;
 }

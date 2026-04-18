@@ -96,9 +96,6 @@ ScriptInstance *CPPScript::instance_create(Object *p_for_object) {
 PlaceHolderScriptInstance *CPPScript::placeholder_instance_create(Object *p_for_object) {
 	return nullptr; // TODO: implement if needed
 }
-bool CPPScript::instance_has(const Object *p_object) const {
-	return false;
-}
 bool CPPScript::has_source_code() const {
 	return true;
 }
