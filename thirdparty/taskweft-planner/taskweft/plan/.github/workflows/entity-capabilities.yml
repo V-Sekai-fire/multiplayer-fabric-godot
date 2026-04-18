@@ -1,0 +1,67 @@
+name: Entity-Capabilities Feature Test
+
+on:
+  push:
+    paths:
+      - 'ipyhop/capabilities.py'
+      - 'ipyhop/actions.py'
+      - 'ipyhop/methods.py'
+      - 'ipyhop/planner.py'
+      - 'tests/test_entity_capabilities.py'
+      - 'examples/entity_capabilities/**'
+  pull_request:
+    paths:
+      - 'ipyhop/capabilities.py'
+      - 'ipyhop/actions.py'
+      - 'ipyhop/methods.py'
+      - 'ipyhop/planner.py'
+      - 'tests/test_entity_capabilities.py'
+      - 'examples/entity_capabilities/**'
+
+jobs:
+  entity-capabilities:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "0.4.x"
+    
+    - name: Install dependencies
+      run: |
+        uv sync --all-extras
+    
+    - name: Test EntityCapabilities class
+      run: |
+        echo "Running EntityCapabilities unit tests..."
+        uv run python -m pytest tests/test_entity_capabilities.py::TestEntityCapabilities -v
+    
+    - name: Test Actions integration
+      run: |
+        echo "Testing Actions capability integration..."
+        uv run python -m pytest tests/test_entity_capabilities.py::TestActionsCapabilitiesIntegration -v
+    
+    - name: Test Methods integration
+      run: |
+        echo "Testing Methods capability integration..."
+        uv run python -m pytest tests/test_entity_capabilities.py::TestMethodsCapabilitiesIntegration -v
+    
+    - name: Run full test suite
+      run: |
+        echo "Running complete entity-capabilities test suite..."
+        uv run python tests/test_entity_capabilities.py -v
+      env:
+        PYTHONPATH: .
+    
+    - name: Validate example runs without error
+      run: |
+        echo "Checking example syntax..."
+        uv run python -m py_compile examples/entity_capabilities/rescue_example.py
+        echo "✓ Example compiles successfully"

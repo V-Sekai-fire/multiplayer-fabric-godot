@@ -1,0 +1,11 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/git-commands/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/fire/fire-hermes-plugins.git
+	branch = main
+	commit = eb2ffa013eb297506228da4e23e3ad821014bd2c
+	parent = cf1fc5f93b0259edbddbe0d9ef4db28739660589
+	cmdver = 0.1.0

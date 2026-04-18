@@ -1,0 +1,97 @@
+name: CI Tests
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main ]  # Only run on merge to main, not on feature branch pushes
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "0.4.x"
+    
+    - name: Install dependencies
+      run: |
+        uv sync --all-extras
+        uv pip install pytest pytest-cov pytest-asyncio hypothesis
+    
+    - name: Run tests with coverage
+      run: |
+        uv run pytest tests/ -v --cov=ipyhop --cov-report=xml --cov-report=term-missing
+      env:
+        PYTHONPATH: .
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+    
+    - name: Install ruff
+      run: |
+        pip install ruff
+    
+    - name: Run ruff lint
+      run: |
+        ruff check ipyhop/ --line-length=120
+    
+    - name: Run ruff format check
+      run: |
+        ruff format --check ipyhop/
+
+  entity-capabilities-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "0.4.x"
+    
+    - name: Install dependencies
+      run: |
+        uv sync --all-extras
+    
+    - name: Run entity-capabilities tests
+      run: |
+        uv run python tests/test_entity_capabilities.py -v
+      env:
+        PYTHONPATH: .

@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/git-commands/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/V-Sekai-fire/IPyHOP-temporal.git
+	branch = main
+	commit = a372e4e91eaaecd3f863ee328ea946eaa51c94be
+	parent = 097474d4f3bf2064ee18195512378696f162eed8
+	cmdver = 0.4.9
+	method = merge

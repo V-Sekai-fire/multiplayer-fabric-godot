@@ -1,0 +1,20 @@
+{
+  "@context": {
+    "khr": "https://registry.khronos.org/glTF/extensions/2.0/KHR_interactivity/",
+    "graph": "khr:graph",
+    "nodes": "khr:nodes",
+    "declarations": "khr:declarations",
+    "variables": "khr:variables",
+    "types": "khr:types",
+    "events": "khr:events",
+    "op": "khr:operation",
+    "signature": "khr:typeSignature",
+    "flow": "khr:flow/",
+    "math": "khr:math/",
+    "variable": "khr:variable/",
+    "event": "khr:event/",
+    "animation": "khr:animation/",
+    "pointer": "khr:pointer/",
+    "debug": "khr:debug/"
+  }
+}
