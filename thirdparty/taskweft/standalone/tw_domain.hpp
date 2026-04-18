@@ -83,6 +83,8 @@ struct TwDomain {
     std::unordered_map<std::string, TwActionFn>              actions;
     std::unordered_map<std::string, std::vector<TwMethodFn>> task_methods;
     std::unordered_map<std::string, std::vector<TwGoalMethodFn>> goal_methods;
+    // ISO 8601 duration strings per action (RECTGTN 'T' temporal metadata).
+    std::unordered_map<std::string, std::string>             action_durations;
 
     bool has_action(const std::string &n) const { return actions.count(n) > 0; }
     bool has_task(const std::string &n)   const { return task_methods.count(n) > 0; }

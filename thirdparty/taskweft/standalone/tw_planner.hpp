@@ -3,16 +3,33 @@
 #pragma once
 #include "tw_domain.hpp"
 #include <optional>
+#include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 static constexpr int TW_MAX_DEPTH = 256;
+
+// Serialize a TwCall to a canonical string key for blacklist membership tests.
+// Mirrors Python's tuple identity: ("action_name", arg1, arg2, ...).
+inline std::string tw_call_key(const TwCall &call) {
+    std::string key = call.name;
+    for (const TwValue &a : call.args) { key += '\x1f'; key += a.to_string(); }
+    return key;
+}
+
+// A set of blacklisted command keys (serialized TwCalls).
+// Blacklisted commands are skipped during planning — used by replan to avoid
+// repeating the same (action, concrete_args) that failed at runtime.
+// Mirrors IPyHOP planner.blacklist / blacklist_command().
+using TwBlacklist = std::unordered_set<std::string>;
 
 inline std::optional<std::vector<TwCall>> tw_seek_plan(
         std::shared_ptr<TwState> state,
         std::vector<TwTask>      tasks,
         const TwDomain           &domain,
-        int                      depth = 0) {
+        int                      depth = 0,
+        const TwBlacklist       *blacklist = nullptr) {
 
     if (depth > TW_MAX_DEPTH) return std::nullopt;
     if (tasks.empty()) return std::vector<TwCall>{};
@@ -22,7 +39,7 @@ inline std::optional<std::vector<TwCall>> tw_seek_plan(
     // --- Conjunctive goal (unigoal) ---
     if (TwGoal *goal = std::get_if<TwGoal>(&tasks[0])) {
         if (goal->is_satisfied(*state))
-            return tw_seek_plan(state, remaining, domain, depth + 1);
+            return tw_seek_plan(state, remaining, domain, depth + 1, blacklist);
 
         std::vector<TwGoalBinding> unmet = goal->unsatisfied(*state);
         if (unmet.empty()) return std::nullopt;
@@ -41,7 +58,8 @@ inline std::optional<std::vector<TwCall>> tw_seek_plan(
             new_tasks.insert(new_tasks.end(), subs->begin(), subs->end());
             new_tasks.push_back(*goal);
             new_tasks.insert(new_tasks.end(), remaining.begin(), remaining.end());
-            std::optional<std::vector<TwCall>> result = tw_seek_plan(state, new_tasks, domain, depth + 1);
+            std::optional<std::vector<TwCall>> result =
+                tw_seek_plan(state, new_tasks, domain, depth + 1, blacklist);
             if (result) return result;
         }
         return std::nullopt;
@@ -50,7 +68,7 @@ inline std::optional<std::vector<TwCall>> tw_seek_plan(
     // --- Multigoal (RECTGTN 'N'): backtrack over which binding to satisfy first ---
     if (TwMultiGoal *mg = std::get_if<TwMultiGoal>(&tasks[0])) {
         if (mg->is_satisfied(*state))
-            return tw_seek_plan(state, remaining, domain, depth + 1);
+            return tw_seek_plan(state, remaining, domain, depth + 1, blacklist);
 
         std::vector<TwGoalBinding> unmet = mg->unsatisfied(*state);
         if (unmet.empty()) return std::nullopt;
@@ -64,7 +82,8 @@ inline std::optional<std::vector<TwCall>> tw_seek_plan(
             new_tasks.push_back(sub_goal);
             new_tasks.push_back(*mg);
             new_tasks.insert(new_tasks.end(), remaining.begin(), remaining.end());
-            std::optional<std::vector<TwCall>> result = tw_seek_plan(state, new_tasks, domain, depth + 1);
+            std::optional<std::vector<TwCall>> result =
+                tw_seek_plan(state, new_tasks, domain, depth + 1, blacklist);
             if (result) return result;
         }
         return std::nullopt;
@@ -73,13 +92,18 @@ inline std::optional<std::vector<TwCall>> tw_seek_plan(
     // --- Primitive action or compound task ---
     TwCall &call = std::get<TwCall>(tasks[0]);
 
-    // Primitive action
+    // Primitive action (RECTGTN 'E' — a command that can fail at runtime).
     std::unordered_map<std::string, TwActionFn>::const_iterator ait =
         domain.actions.find(call.name);
     if (ait != domain.actions.end()) {
+        // Skip blacklisted commands — specific (action, args) instances that
+        // failed at runtime and must not be replanned (IPyHOP blacklist_command).
+        if (blacklist && blacklist->count(tw_call_key(call))) return std::nullopt;
+
         std::shared_ptr<TwState> new_state = ait->second(state->copy(), call.args);
         if (!new_state) return std::nullopt;
-        std::optional<std::vector<TwCall>> sub = tw_seek_plan(new_state, remaining, domain, depth + 1);
+        std::optional<std::vector<TwCall>> sub =
+            tw_seek_plan(new_state, remaining, domain, depth + 1, blacklist);
         if (!sub) return std::nullopt;
         std::vector<TwCall> plan = {call};
         plan.insert(plan.end(), sub->begin(), sub->end());
@@ -96,7 +120,8 @@ inline std::optional<std::vector<TwCall>> tw_seek_plan(
             std::vector<TwTask> new_tasks;
             new_tasks.insert(new_tasks.end(), subs->begin(), subs->end());
             new_tasks.insert(new_tasks.end(), remaining.begin(), remaining.end());
-            std::optional<std::vector<TwCall>> result = tw_seek_plan(state, new_tasks, domain, depth + 1);
+            std::optional<std::vector<TwCall>> result =
+                tw_seek_plan(state, new_tasks, domain, depth + 1, blacklist);
             if (result) return result;
         }
         return std::nullopt;
@@ -108,6 +133,7 @@ inline std::optional<std::vector<TwCall>> tw_seek_plan(
 inline std::optional<std::vector<TwCall>> tw_plan(
         std::shared_ptr<TwState> state,
         std::vector<TwTask>      tasks,
-        const TwDomain           &domain) {
-    return tw_seek_plan(std::move(state), std::move(tasks), domain, 0);
+        const TwDomain           &domain,
+        const TwBlacklist       *blacklist = nullptr) {
+    return tw_seek_plan(std::move(state), std::move(tasks), domain, 0, blacklist);
 }

@@ -568,7 +568,12 @@ inline TwLoaded load_domain(const TwValue &data) {
     if (auto it = d.find("actions"); it != d.end() && it->second.is_dict()) {
         for (const std::pair<const std::string, TwValue> &np : it->second.as_dict()) {
             if (!np.second.is_dict()) continue;
-            TwActionFn fn = build_action(np.second.as_dict(), enums);
+            // RECTGTN 'T': store ISO 8601 duration metadata for temporal analysis.
+            const TwValue::Dict &adef = np.second.as_dict();
+            TwValue::Dict::const_iterator dur_it = adef.find("duration");
+            if (dur_it != adef.end() && dur_it->second.is_string())
+                result.domain.action_durations[np.first] = dur_it->second.as_string();
+            TwActionFn fn = build_action(adef, enums);
 
             std::unordered_map<std::string, std::vector<std::string>>::const_iterator rc_it =
                 action_required_caps.find(np.first);
