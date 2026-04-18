@@ -54,9 +54,10 @@ void initialize_multiplayer_fabric_module(ModuleInitializationLevel p_level) {
 	FabricZonePeerCallbacks cb;
 
 	cb.create_server = [](int p_port, int p_max_clients) -> Ref<MultiplayerPeer> {
+		(void)p_max_clients;
 		Ref<FabricMultiplayerPeer> peer;
 		peer.instantiate();
-		if (peer->create_server(p_port, p_max_clients) != OK) {
+		if (peer->create_server(p_port) != OK) {
 			return Ref<MultiplayerPeer>();
 		}
 		return peer;

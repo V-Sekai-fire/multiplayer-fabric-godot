@@ -942,12 +942,14 @@ void FabricZone::initialize() {
 	// (EMLAdversarialHeuristic.lean): gap = v * latency_ticks. Verify the
 	// emitted R128 body agrees with a direct r128_mul under the current
 	// engine physics rate — catches genC/r128 emission drift in dev builds.
+#ifdef DEV_ENABLED
 	{
 		const uint32_t hz = (uint32_t)Engine::get_singleton()->get_physics_ticks_per_second();
 		const R128 v = r128_from_int(pbvh_v_max_physical_um_per_tick(hz));
 		const R128 latency = r128_from_int((int64_t)pbvh_latency_ticks(hz));
 		DEV_ASSERT(r128_eq(pbvh_eml_c4_lifecycle_gap_bound(v, latency), r128_mul(v, latency)));
 	}
+#endif
 
 	// ── Parse optional overrides from command line ──────────────────────
 	// get_cmdline_args()      = args before "--" (engine args, may include zone flags if no "--" separator)
