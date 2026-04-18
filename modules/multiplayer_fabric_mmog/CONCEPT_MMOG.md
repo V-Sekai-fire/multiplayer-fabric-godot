@@ -8,7 +8,7 @@ A social world and UGC platform. Players design bioluminescent jellyfish and rel
 
 Fetch a player-uploaded jellyfish asset from Uro by hash, instance it inside the XR grid scene, and have it visible in VR.
 
-1. `jellyfish_asset_loader.gd` resolves the Uro manifest (`/storage/:uuid/manifest`) and downloads the `.glb` + pulse waveform.
+1. `jellyfish_asset_loader.gd` resolves the Uro manifest (`/storage/:uuid/manifest`) and downloads the Godot scene + pulse waveform.
 2. The loaded mesh is instanced into the existing xr-grid scene.
 3. Player sees the UGC jellyfish appear in VR.
 
@@ -28,7 +28,7 @@ The Abyss is a persistent, zone-sharded ocean:
 
 ## UGC Asset Pipeline (Uro)
 
-Every jellyfish is a content-addressed asset bundle in Uro. The bundle packs a `.glb` mesh and material alongside a pulse waveform. Clients fetch by chunk hash at runtime and only download jellyfish within their AOI. The manifest endpoint resolves the full asset list in one round trip. Chunks are cached on disk so repeat visits cost no bandwidth. ReBAC permissions give creators control over who can remix or export their designs.
+Every jellyfish is a content-addressed asset bundle in Uro. The bundle packs a Godot scene alongside a pulse waveform. Clients fetch by chunk hash at runtime and only download jellyfish within their AOI. The manifest endpoint resolves the full asset list in one round trip. Chunks are cached on disk so repeat visits cost no bandwidth. ReBAC permissions give creators control over who can remix or export their designs.
 
 ---
 
@@ -46,5 +46,5 @@ Every jellyfish is a content-addressed asset bundle in Uro. The bundle packs a `
 ## Test Scenario: First Release
 
 - Objective: fetch a jellyfish from Uro and instance it in the XR grid in VR
-- Method: `jellyfish_asset_loader.gd` → Uro manifest → `.glb` → xr-grid scene
+- Method: `jellyfish_asset_loader.gd` → Uro manifest → Godot scene → xr-grid scene
 - Pass: jellyfish appears in the scene, visible to the player in VR
