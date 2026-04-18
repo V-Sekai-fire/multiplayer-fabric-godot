@@ -15,7 +15,9 @@ defmodule ZoneConsole.CLI do
     case UroClient.login(client, username, password) do
       {:ok, authed} ->
         Application.put_env(:zone_console, :uro_client, authed)
-        ExRatatui.run(ZoneConsole.App, [])
+
+        {:ok, _pid} = ZoneConsole.App.start_link([])
+        Process.sleep(:infinity)
 
       {:error, reason} ->
         IO.puts(:stderr, "Login failed: #{reason}")

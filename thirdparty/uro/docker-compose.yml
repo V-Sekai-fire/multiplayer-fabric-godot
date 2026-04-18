@@ -19,7 +19,7 @@ services:
       - "./cockroach:/cockroach/cockroach-data"
     ports:
       - "26257:26257"
-      - "8081:8080"  # Dashboard
+      - "127.0.0.1:8082:8080"  # Dashboard
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health?ready=1"]
       interval: 3s

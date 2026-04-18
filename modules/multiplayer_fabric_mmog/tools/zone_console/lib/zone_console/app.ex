@@ -3,13 +3,18 @@ defmodule ZoneConsole.App do
 
   use ExRatatui.App
 
+  alias ExRatatui.Layout
+  alias ExRatatui.Layout.Rect
+  alias ExRatatui.Style
+  alias ExRatatui.Widgets.{Block, Paragraph, WidgetList}
   alias ZoneConsole.UroClient
 
   @help_rows [
     {"help",                    "show this message"},
-    {"shards",                  "list zones from Uro"},
-    {"connect <name|index>",    "connect to a zone"},
-    {"status",                  "zone entity count and neighbor links"},
+    {"shards",                  "list shards from Uro"},
+    {"connect <name|index>",    "connect to a shard"},
+    {"zones",                   "list zones within connected shard"},
+    {"status",                  "shard entity count and neighbor links"},
     {"entities [n]",            "list live jellyfish (default 20)"},
     {"kick <id>",               "force-migrate entity out of zone"},
     {"tombstone <hash>",        "blacklist UGC asset; despawn instances"},
@@ -23,7 +28,7 @@ defmodule ZoneConsole.App do
   defstruct [
     :uro,
     shards: [],
-    connected_zone: nil,
+    connected_shard: nil,
     output: [],
     input: ""
   ]
@@ -31,7 +36,7 @@ defmodule ZoneConsole.App do
   # ── lifecycle ────────────────────────────────────────────────────────────────
 
   @impl ExRatatui.App
-  def init(_opts) do
+  def mount(_opts) do
     uro = Application.fetch_env!(:zone_console, :uro_client)
 
     banner = [
@@ -45,86 +50,112 @@ defmodule ZoneConsole.App do
     {shard_lines, shards} =
       case UroClient.list_shards(uro) do
         {:ok, []} ->
-          {[line(:warn, "No zones registered.")], []}
+          {[line(:warn, "No shards registered.")], []}
 
         {:ok, shards} ->
-          {[line(:info, "Available zones:") | format_shards(shards)], shards}
+          {[line(:info, "Available shards:") | format_shards(shards)], shards}
 
         {:error, reason} ->
           {[line(:err, "Could not reach Uro: #{reason}")], []}
       end
 
-    %__MODULE__{
+    state = %__MODULE__{
       uro: uro,
       shards: shards,
       output: banner ++ shard_lines
     }
+
+    {:ok, state}
   end
+
+  @impl ExRatatui.App
+  def terminate(_reason, _state), do: System.stop(0)
 
   # ── event handling ───────────────────────────────────────────────────────────
 
   @impl ExRatatui.App
-  def handle_event(state, {:key, :enter}) do
+  def handle_event(%ExRatatui.Event.Key{code: "enter", kind: "press"}, state) do
     cmd = String.trim(state.input)
     state = %{state | input: ""}
     state = append(state, line(:prompt, "> #{cmd}"))
-    run_command(state, cmd)
+
+    case run_command(state, cmd) do
+      :exit -> {:stop, state}
+      new_state -> {:noreply, new_state}
+    end
   end
 
-  def handle_event(state, {:key, key}) when key in [:backspace, :delete] do
-    %{state | input: String.slice(state.input, 0..-2//1)}
+  def handle_event(%ExRatatui.Event.Key{code: code, kind: "press"}, state)
+      when code in ["backspace", "delete"] do
+    {:noreply, %{state | input: String.slice(state.input, 0..-2//1)}}
   end
 
-  def handle_event(_state, {:key, :ctrl_c}), do: :exit
-  def handle_event(_state, {:key, :ctrl_d}), do: :exit
-
-  def handle_event(state, {:char, ch}) do
-    %{state | input: state.input <> ch}
+  def handle_event(%ExRatatui.Event.Key{code: code, kind: "press", modifiers: mods}, state)
+      when code in ["c", "d"] do
+    if "ctrl" in mods, do: {:stop, state}, else: {:noreply, %{state | input: state.input <> code}}
   end
 
-  def handle_event(state, _event), do: state
+  def handle_event(%ExRatatui.Event.Key{code: ch, kind: "press"}, state)
+      when is_binary(ch) and byte_size(ch) == 1 do
+    {:noreply, %{state | input: state.input <> ch}}
+  end
+
+  def handle_event(_event, state), do: {:noreply, state}
 
   # ── render ───────────────────────────────────────────────────────────────────
 
   @impl ExRatatui.App
-  def render(state) do
-    zone_label =
-      case state.connected_zone do
+  def render(state, frame) do
+    area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
+
+    [output_area, input_area, status_area] =
+      Layout.split(area, :vertical, [
+        {:min, 0},
+        {:length, 3},
+        {:length, 1}
+      ])
+
+    shard_label =
+      case state.connected_shard do
         nil -> "offline"
-        z   -> "#{z["name"]} (#{z["address"]}:#{z["port"]})"
+        s   -> "#{s["name"]} (#{s["address"]}:#{s["port"]})"
       end
 
     prompt_prefix =
-      case state.connected_zone do
+      case state.connected_shard do
         nil -> "[offline]"
-        z   -> "[#{z["name"]}]"
+        s   -> "[#{s["name"]}]"
       end
 
-    ExRatatui.View.layout(:vertical, [
-      ExRatatui.View.block(
-        title: " zone console ",
-        borders: [:all],
-        flex: 1
-      ) do
-        ExRatatui.View.list(state.output, fn {style, text} ->
-          ExRatatui.View.span(text, fg: style_color(style))
-        end)
-      end,
+    output_items =
+      Enum.map(state.output, fn {style, text} ->
+        {%Paragraph{text: text, style: %Style{fg: style_color(style)}}, 1}
+      end)
 
-      ExRatatui.View.block(borders: [:all], height: 3) do
-        ExRatatui.View.line([
-          ExRatatui.View.span(prompt_prefix <> " > ", fg: :cyan),
-          ExRatatui.View.span(state.input, fg: :white),
-          ExRatatui.View.span("█", fg: :cyan)
-        ])
-      end,
+    scroll_offset = max(0, length(output_items) - (output_area.height - 2))
 
-      ExRatatui.View.block(borders: [], height: 1) do
-        ExRatatui.View.line([
-          ExRatatui.View.span(" Uro: #{state.uro.base_url}  |  Zone: #{zone_label}", fg: :dark_gray)
-        ])
-      end
-    ])
+    output_widget = %WidgetList{
+      items: output_items,
+      scroll_offset: scroll_offset,
+      block: %Block{title: " zone console ", borders: [:all]}
+    }
+
+    input_widget = %Paragraph{
+      text: "#{prompt_prefix} > #{state.input}█",
+      style: %Style{fg: :white},
+      block: %Block{borders: [:all]}
+    }
+
+    status_widget = %Paragraph{
+      text: " Uro: #{state.uro.base_url}  |  Shard: #{shard_label}",
+      style: %Style{fg: :dark_gray}
+    }
+
+    [
+      {output_widget, output_area},
+      {input_widget, input_area},
+      {status_widget, status_area}
+    ]
   end
 
   defp style_color(:ok),     do: :green
@@ -153,7 +184,7 @@ defmodule ZoneConsole.App do
     case UroClient.list_shards(state.uro) do
       {:ok, shards} ->
         state = %{state | shards: shards}
-        append_many(state, [line(:info, "Zones:") | format_shards(shards)])
+        append_many(state, [line(:info, "Shards:") | format_shards(shards)])
 
       {:error, reason} ->
         append(state, line(:err, "Error: #{reason}"))
@@ -171,69 +202,90 @@ defmodule ZoneConsole.App do
 
     case shard do
       nil ->
-        append(state, line(:err, "Unknown zone: #{arg}  (run 'shards' to list)"))
+        append(state, line(:err, "Unknown shard: #{arg}  (run 'shards' to list)"))
 
       s ->
-        state = %{state | connected_zone: s}
-        append(state, line(:ok, "Connected to #{s["name"]} (#{s["address"]}:#{s["port"]})"))
+        state = %{state | connected_shard: s}
+        append(state, line(:ok, "Connected to shard #{s["name"]} (#{s["address"]}:#{s["port"]})"))
     end
   end
 
-  defp run_command(%{connected_zone: nil} = state, cmd)
-       when cmd in ["status", "entities"] or
-              match?("entities " <> _, cmd) or
-              match?("kick " <> _, cmd) or
-              match?("tombstone " <> _, cmd) or
-              match?("rip " <> _, cmd) or
-              match?("bloom " <> _, cmd) do
-    append(state, line(:warn, "Not connected. Run 'shards' then 'connect <name>'."))
+  defp run_command(state, "zones") do
+    require_shard(state, fn s ->
+      zones = s["zones"] || []
+
+      if zones == [] do
+        append(state, line(:dim, "  No zone subdivisions listed for this shard."))
+      else
+        rows = Enum.with_index(zones, fn z, i ->
+          line(:dim, "  #{i}  #{inspect(z)}")
+        end)
+        append_many(state, [line(:info, "Zones in #{s["name"]}:") | rows])
+      end
+    end)
   end
 
-  defp run_command(state, "status") do
-    z = state.connected_zone
-
-    append_many(state, [
-      line(:info, "Zone: #{z["name"]}"),
-      line(:dim,  "  address:  #{z["address"]}:#{z["port"]}"),
-      line(:dim,  "  map:      #{z["map"]}"),
-      line(:dim,  "  users:    #{z["current_users"]}"),
-      line(:dim,  "  (live entity data requires zone server WebTransport — pending)"),
-    ])
+  defp run_command(state, cmd) when cmd in ["status", "entities"] do
+    require_shard(state, fn s ->
+      append_many(state, [
+        line(:info, "Shard: #{s["name"]}"),
+        line(:dim,  "  address:  #{s["address"]}:#{s["port"]}"),
+        line(:dim,  "  map:      #{s["map"]}"),
+        line(:dim,  "  users:    #{s["current_users"]}"),
+        line(:dim,  "  (live entity data requires WebTransport — pending)"),
+      ])
+    end)
   end
 
-  defp run_command(state, "entities" <> _rest) do
-    append(state, line(:warn, "Entity list requires live zone connection (pending)."))
+  defp run_command(state, "entities " <> _rest) do
+    require_shard(state, fn _s ->
+      append(state, line(:warn, "Entity list requires live zone connection (pending)."))
+    end)
   end
 
   defp run_command(state, "kick " <> _id) do
-    append(state, line(:warn, "Kick requires live zone connection (pending)."))
+    require_shard(state, fn _s ->
+      append(state, line(:warn, "Kick requires live zone connection (pending)."))
+    end)
   end
 
   defp run_command(state, "tombstone " <> _hash) do
-    append(state, line(:warn, "Tombstone requires live zone connection (pending)."))
+    require_shard(state, fn _s ->
+      append(state, line(:warn, "Tombstone requires live zone connection (pending)."))
+    end)
   end
 
   defp run_command(state, "rip " <> args) do
-    case String.split(String.trim(args)) do
-      [x, z, strength] ->
-        append(state, line(:ok, "rip queued: x=#{x} z=#{z} strength=#{strength}  (zone connection pending)"))
-      _ ->
-        append(state, line(:err, "usage: rip <x> <z> <strength>"))
-    end
+    require_shard(state, fn _s ->
+      case String.split(String.trim(args)) do
+        [x, z, strength] ->
+          append(state, line(:ok, "rip queued: x=#{x} z=#{z} strength=#{strength}  (pending)"))
+        _ ->
+          append(state, line(:err, "usage: rip <x> <z> <strength>"))
+      end
+    end)
   end
 
   defp run_command(state, "bloom " <> args) do
-    case String.split(String.trim(args)) do
-      [x, z] ->
-        append(state, line(:ok, "bloom queued: x=#{x} z=#{z}  (zone connection pending)"))
-      _ ->
-        append(state, line(:err, "usage: bloom <x> <z>"))
-    end
+    require_shard(state, fn _s ->
+      case String.split(String.trim(args)) do
+        [x, z] ->
+          append(state, line(:ok, "bloom queued: x=#{x} z=#{z}  (pending)"))
+        _ ->
+          append(state, line(:err, "usage: bloom <x> <z>"))
+      end
+    end)
   end
 
   defp run_command(state, unknown) do
     append(state, line(:err, "Unknown command: #{unknown}  (try 'help')"))
   end
+
+  defp require_shard(%{connected_shard: nil} = state, _fun) do
+    append(state, line(:warn, "Not connected. Run 'shards' then 'connect <name>'."))
+  end
+
+  defp require_shard(%{connected_shard: s} = _state, fun), do: fun.(s)
 
   # ── helpers ──────────────────────────────────────────────────────────────────
 
