@@ -36,6 +36,18 @@ defmodule Uro.VSekai.Zone do
 
   def json_schema, do: @json_schema
 
+  def to_json_schema(%__MODULE__{} = zone) do
+    %{
+      id: to_string(zone.id),
+      shard_id: to_string(zone.shard_id),
+      address: to_string(zone.address),
+      port: zone.port,
+      cert_hash: zone.cert_hash,
+      current_users: zone.current_users || 0,
+      status: zone.status
+    }
+  end
+
   def changeset(zone, attrs) do
     zone
     |> cast(attrs, [:shard_id, :address, :port, :cert_hash, :current_users, :status])
