@@ -3,6 +3,8 @@ defmodule Uro.Router do
   use Plug.ErrorHandler
   use Uro.Helpers.API
 
+  import Phoenix.LiveDashboard.Router
+
   defp handle_errors(conn, %{reason: reason}) do
     json_error(conn,
       code: :internal_server_error,
@@ -244,5 +246,18 @@ defmodule Uro.Router do
       put "/:id", Uro.PropController, :update
       delete "/:id", Uro.PropController, :delete
     end
+  end
+
+  # Phoenix LiveDashboard — admin-only, includes VM + DB metrics and the
+  # custom Traces page backed by the in-process ETS span store.
+  scope "/" do
+    pipe_through([:authenticated_admin])
+
+    live_dashboard("/dev/dashboard",
+      metrics: Uro.Telemetry,
+      additional_pages: [
+        traces: Uro.Telemetry.SpansPage
+      ]
+    )
   end
 end

@@ -86,6 +86,34 @@ Stdout JSON protocol:
 
 ---
 
+## OpenTelemetry (`thirdparty/uro/`)
+
+Uro ships the OTel SDK pre-wired. Traces are exported via OTLP HTTP protobuf.
+
+- `OpentelemetryPhoenix` instruments every HTTP request (Bandit adapter).
+- `OpentelemetryEcto` instruments every Ecto query against `Uro.Repo`.
+- `OpentelemetryLoggerMetadata` injects `trace_id`/`span_id` into every log line.
+
+To enable, set in `.env`:
+```
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+OTEL_SERVICE_NAME=uro
+```
+
+Leave `OTEL_EXPORTER_OTLP_ENDPOINT` empty (or unset) to run with the no-op exporter — no errors, no dropped spans.
+
+To add a span in application code:
+```elixir
+require OpenTelemetry.Tracer, as: Tracer
+
+Tracer.with_span "my.operation" do
+  Tracer.set_attributes([{"key", "value"}])
+  # ... work ...
+end
+```
+
+---
+
 ## Commit conventions
 
 - One PR per logical change.

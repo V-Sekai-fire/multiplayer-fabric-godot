@@ -5,18 +5,14 @@ import Config
 #
 #   docker compose -f thirdparty/uro/docker-compose.yml up -d database
 #
-# CRDB's --accept-sql-without-tls mode lets the Postgrex adapter connect
-# unencrypted on port 26257. The vsekai user and database are seeded by the
-# V-Sekai cockroach image on first boot, and the Ecto.Adapters.SQL.Sandbox
-# gives us per-test transactional isolation on top.
+# Set TEST_DATABASE_URL to the CockroachDB connection string, e.g.:
+#   TEST_DATABASE_URL=postgresql://vsekai@127.0.0.1:26257/vsekai_test
+#
+# TLS client-cert auth is applied at runtime via CRDB_CA_CERT_B64,
+# CRDB_CLIENT_CERT_B64, and CRDB_CLIENT_KEY_B64 (same as production).
+# See config/runtime.exs for details.
 config :uro, Uro.Repo,
   show_sensitive_data_on_connection_error: true,
-  url: System.get_env("TEST_DATABASE_URL"),
-  username: "vsekai",
-  password: "vsekai",
-  hostname: "127.0.0.1",
-  port: 26257,
-  database: "vsekai_test",
   stacktrace: true,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: 10
