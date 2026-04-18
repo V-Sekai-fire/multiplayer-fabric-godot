@@ -60,7 +60,7 @@ Every jellyfish is a content-addressed asset bundle in Uro. The bundle packs a b
 | Pulse waveform     | ~~Tombstoned~~ | dropped from asset bundle for now              |
 | Remix system       | ~~Tombstoned~~ | clone + fork provenance chain                  |
 | Moderation layer   | ~~Tombstoned~~ | Uro ACL + operator tombstone endpoint          |
-| ReBAC permissions  | ~~Tombstoned~~ | creator remix/export control                   |
+| ReBAC permissions  | Working     | Uro.Acl — creator remix/export control            |
 | Environmental FX   | ~~Tombstoned~~ | currents, rip events, bloom dynamics           |
 
 ---
