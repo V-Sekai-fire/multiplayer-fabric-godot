@@ -729,7 +729,7 @@ fn connect_client(url: String, cert_hash_b64: String, owner_pid: LocalPid) -> Re
                                     Ok(data) => {
                                         let bytes: Vec<u8> = data.payload().to_vec();
                                         let mut owned_env = OwnedEnv::new();
-                                        owned_env.send_and_clear(&owner_pid, |env| {
+                                        let _ = owned_env.send_and_clear(&owner_pid, |env| {
                                             let mut owned = OwnedBinary::new(bytes.len()).unwrap();
                                             owned.as_mut_slice().copy_from_slice(&bytes);
                                             (atoms::zone_datagram(), owned.release(env)).encode(env)
