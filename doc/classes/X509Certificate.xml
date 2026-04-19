@@ -11,6 +11,13 @@
 		<link title="SSL certificates">$DOCS_URL/tutorials/networking/ssl_certificates.html</link>
 	</tutorials>
 	<methods>
+		<method name="get_der" qualifiers="const">
+			<return type="PackedByteArray" />
+			<description>
+				Returns the raw DER (Distinguished Encoding Rules) encoding of the certificate. Returns an empty [PackedByteArray] if the certificate has not been loaded or the backend does not support DER export.
+				The DER bytes are suitable for computing the SHA-256 fingerprint used in WebTransport's [code]serverCertificateHashes[/code] browser certificate pinning, and for passing the certificate directly to TLS stacks that consume binary DER rather than PEM text.
+			</description>
+		</method>
 		<method name="load">
 			<return type="int" enum="Error" />
 			<param index="0" name="path" type="String" />
