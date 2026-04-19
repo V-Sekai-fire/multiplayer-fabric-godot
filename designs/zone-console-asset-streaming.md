@@ -64,9 +64,24 @@ chunks from S3, and calls `ResourceLoader.load()` + `instantiate()` at
 the given world position. The 100-byte packet already has 14 payload
 u32 slots; this uses 5.
 
-## Cycles
+## Cycles (Pareto order — highest value/effort ratio first)
+
+| Cycle | What you get | Effort |
+|---|---|---|
+| 1 | `UroClient.upload_asset/3` — scenes stored in uro | Low |
+| 2 | `upload <path>` command — user can store a scene | Low |
+| 3 | `CMD_INSTANCE_ASSET` wire encoding — protocol ready | Low |
+| 4 | `instance <id> <x> <y> <z>` command — user can trigger instancing | Low |
+| 5 | `UroClient.get_manifest/2` — chunk manifest fetch | Low |
+| 6 | Godot zone handler — zone actually instances the scene | High |
+| 7 | Round-trip integration smoke test | High |
+
+---
 
 ### Cycle 1 — UroClient: upload a file, get back a shared_file_id
+
+**Value:** Unlocks storing any scene in uro from the CLI. Every later cycle depends on this.
+**Effort:** One `Req` multipart call.
 
 **RED:** `test/zone_console/uro_client_test.exs` — mock HTTP server
 returns `{id: "abc123", name: "test.tscn"}`, assert
@@ -79,20 +94,10 @@ multipart POST to `/storage` with `Authorization: Bearer` header.
 
 ---
 
-### Cycle 2 — UroClient: fetch manifest for a shared_file_id
+### Cycle 2 — zone_console app: `upload <path>` command
 
-**RED:** Assert `UroClient.get_manifest(token, id)` returns
-`{:ok, %{store_url: _, chunks: [_|_]}}` against a mock that returns
-the uro manifest JSON shape.
-
-**Implementation:** Add `get_manifest/2` to `UroClient` — POST to
-`/storage/:id/manifest`, parse `store_url` and `chunks` fields.
-
-**Commit:** `Cycle 2: UroClient.get_manifest/2 — POST /storage/:id/manifest`
-
----
-
-### Cycle 3 — zone_console app: `upload <path>` command
+**Value:** First user-visible feature — operator can store a scene and get its ID.
+**Effort:** One `handle_line/2` clause calling Cycle 1.
 
 **RED:** `test/zone_console/app_test.exs` — feed `"upload test.tscn"`
 to the app loop against a stubbed UroClient, assert the output line
@@ -101,11 +106,14 @@ contains the returned asset ID.
 **Implementation:** Add `"upload"` clause to `handle_line/2` in
 `app.ex`; call `UroClient.upload_asset`, display the ID.
 
-**Commit:** `Cycle 3: app: upload command stores scene in uro`
+**Commit:** `Cycle 2: app: upload command stores scene in uro`
 
 ---
 
-### Cycle 4 — CMD_INSTANCE_ASSET constant and encode path in zone_client
+### Cycle 3 — CMD_INSTANCE_ASSET constant and encode path in zone_client
+
+**Value:** Wire protocol ready; ZoneClient can send instance commands. Unblocks Cycle 4.
+**Effort:** Elixir packet encoding + constant addition in C++ header.
 
 **RED:** Unit test `encode_player/6` with `cmd: :instance_asset,
 asset_id: 7, pos: {1.0, 2.0, 3.0}` — assert payload bytes decode back
@@ -117,11 +125,14 @@ to the correct values.
 - Add `send_instance/4` to `ZoneClient` — build the 100-byte packet
   with `payload[1] = asset_id`, `payload[2..4] = f32 pos`.
 
-**Commit:** `Cycle 4: ZoneClient.send_instance/4 — CMD_INSTANCE_ASSET encoding`
+**Commit:** `Cycle 3: ZoneClient.send_instance/4 — CMD_INSTANCE_ASSET encoding`
 
 ---
 
-### Cycle 5 — zone_console app: `instance <asset_id> <x> <y> <z>` command
+### Cycle 4 — zone_console app: `instance <asset_id> <x> <y> <z>` command
+
+**Value:** Second user-visible feature — operator can trigger scene instancing from the CLI.
+**Effort:** One `handle_line/2` clause calling Cycle 3.
 
 **RED:** Assert the app emits `"instanced asset …"` after a stubbed
 `ZoneClient.send_instance` call.
@@ -129,11 +140,31 @@ to the correct values.
 **Implementation:** Add `"instance"` clause to `handle_line/2`; parse
 asset_id and float coords; call `ZoneClient.send_instance`.
 
-**Commit:** `Cycle 5: app: instance command sends CMD_INSTANCE_ASSET to zone`
+**Commit:** `Cycle 4: app: instance command sends CMD_INSTANCE_ASSET to zone`
+
+---
+
+### Cycle 5 — UroClient: fetch manifest for a shared_file_id
+
+**Value:** Chunk manifest available to the zone handler. Deferred until here because
+nothing before Cycle 6 needs it.
+**Effort:** One `Req` call.
+
+**RED:** Assert `UroClient.get_manifest(token, id)` returns
+`{:ok, %{store_url: _, chunks: [_|_]}}` against a mock that returns
+the uro manifest JSON shape.
+
+**Implementation:** Add `get_manifest/2` to `UroClient` — POST to
+`/storage/:id/manifest`, parse `store_url` and `chunks` fields.
+
+**Commit:** `Cycle 5: UroClient.get_manifest/2 — POST /storage/:id/manifest`
 
 ---
 
 ### Cycle 6 — Godot zone: handle CMD_INSTANCE_ASSET datagram
+
+**Value:** Completes the full loop — the zone actually fetches and instances the scene.
+**Effort:** C++ dispatch, `FabricMMOGAsset::fetch_asset` wiring, `ResourceLoader` call.
 
 **RED:** C++ unit test in `modules/multiplayer_fabric_mmog/tests/` —
 feed a crafted 100-byte datagram with `cmd = 4`, assert the zone
@@ -153,9 +184,11 @@ handler calls `request_manifest(asset_id)` and queues a load job.
 
 ### Cycle 7 — round-trip integration smoke test
 
-**RED:** `mix test` with a live local stack (CockroachDB + VersityGW +
-uro + zone) — upload a minimal `.tscn`, `instance` it, assert the zone
-entity list shows a new entry near `pos`.
+**Value:** Validates the end-to-end path under a live stack.
+**Effort:** Requires CockroachDB + VersityGW + uro + zone all running locally.
+
+**RED:** `mix test` with a live local stack — upload a minimal `.tscn`,
+`instance` it, assert the zone entity list shows a new entry near `pos`.
 
 **Implementation:** Whatever the integration test exposes.
 
