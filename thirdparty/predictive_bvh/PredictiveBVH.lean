@@ -27,6 +27,9 @@ import PredictiveBVH.Protocol.AbyssalSLA
 -- Resources
 import PredictiveBVH.Formulas.Resources
 
+-- Relativistic zone theory: no ego, no god, no determinism, gossip authority
+import PredictiveBVH.Relativistic.NoGod
+
 -- Code generation pipeline
 import PredictiveBVH.Codegen.QuinticHermite
 import PredictiveBVH.Codegen.TreeC
