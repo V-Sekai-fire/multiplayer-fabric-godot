@@ -8,6 +8,7 @@ defmodule ZoneConsole.App do
   alias ExRatatui.Style
   alias ExRatatui.Widgets.{Block, Paragraph, WidgetList}
   alias ZoneConsole.UroClient
+  alias ZoneConsole.ZoneClient
 
   @help_rows [
     {"help", "show this message"},
@@ -19,9 +20,13 @@ defmodule ZoneConsole.App do
     {"start <port>", "spawn a Godot zone on the connected shard"},
     {"stop <port>", "stop a running zone on the connected shard"},
     {"zones", "list running zones for connected shard"},
+    {"join [index]", "join a zone as a player over WebTransport"},
+    {"leave", "disconnect from the current zone"},
+    {"pos <x> <y> <z>", "set your in-zone position"},
     {"status", "show connected shard details"},
-    {"entities [n]", "list live jellyfish (default 20)"},
-    {"kick <id>", "force-migrate entity out of zone"},
+    {"entities [n]", "list live entities in joined zone (default 20)"},
+    {"players [n]", "list player entities (gid >= 0x80000000)"},
+    {"kick <id>", "send nudge to force-migrate entity out of zone"},
     {"tombstone <hash>", "blacklist UGC asset; despawn instances"},
     {"rip <x> <z> <strength>", "inject rip current into flow field"},
     {"bloom <x> <z>", "trigger jellyfish bloom event"},
@@ -34,6 +39,11 @@ defmodule ZoneConsole.App do
     :uro,
     shards: [],
     connected_shard: nil,
+    zones: [],
+    zone_client: nil,
+    player_id: 0,
+    player_pos: {0.0, 0.0, 0.0},
+    entities: %{},
     output: [],
     input: ""
   ]
@@ -74,7 +84,17 @@ defmodule ZoneConsole.App do
   end
 
   @impl ExRatatui.App
-  def terminate(_reason, _state), do: System.stop(0)
+  def terminate(_reason, state) do
+    if state.zone_client, do: ZoneClient.stop(state.zone_client)
+    System.stop(0)
+  end
+
+  @impl ExRatatui.App
+  def handle_info({:zone_entities, entities}, state) do
+    {:noreply, %{state | entities: Map.merge(state.entities, entities)}}
+  end
+
+  def handle_info(_msg, state), do: {:noreply, state}
 
   # ── event handling ───────────────────────────────────────────────────────────
 
@@ -321,21 +341,27 @@ defmodule ZoneConsole.App do
     require_shard(state, fn s ->
       case UroClient.list_zones(state.uro, s["id"]) do
         {:ok, []} ->
+          state = %{state | zones: []}
+
           append_many(state, [
             line(:warn, "No running zones for shard #{s["name"]}."),
             line(:dim, "  Use 'start <port>' to spawn one.")
           ])
 
         {:ok, zones} ->
-          header = line(:dim, "  #{String.pad_trailing("id", 38)} port   status    cert_hash")
+          state = %{state | zones: zones}
+          header = line(:dim, "  #   #{String.pad_trailing("id", 38)} port   status    cert_hash")
 
           rows =
-            Enum.map(zones, fn z ->
+            zones
+            |> Enum.with_index()
+            |> Enum.map(fn {z, i} ->
               cert = String.slice(z["cert_hash"] || "-", 0, 12)
 
               line(
                 :dim,
-                "  #{String.pad_trailing(z["id"] || "?", 38)} " <>
+                "  #{String.pad_trailing(to_string(i), 4)}" <>
+                  "#{String.pad_trailing(z["id"] || "?", 38)} " <>
                   "#{String.pad_trailing(to_string(z["port"] || "?"), 6)} " <>
                   "#{String.pad_trailing(z["status"] || "?", 9)} " <>
                   cert
@@ -350,6 +376,91 @@ defmodule ZoneConsole.App do
     end)
   end
 
+  defp run_command(state, "join" <> rest) do
+    require_shard(state, fn s ->
+      zones =
+        if state.zones == [] do
+          case UroClient.list_zones(state.uro, s["id"]) do
+            {:ok, zs} -> zs
+            _ -> []
+          end
+        else
+          state.zones
+        end
+
+      idx =
+        rest
+        |> String.trim()
+        |> Integer.parse()
+        |> then(fn
+          {n, ""} -> n
+          _ -> 0
+        end)
+
+      zone = Enum.at(zones, idx)
+
+      cond do
+        zones == [] ->
+          append(state, line(:warn, "No zones available. Run 'start <port>' first."))
+
+        zone == nil ->
+          append(state, line(:err, "No zone at index #{idx}."))
+
+        true ->
+          if state.zone_client, do: ZoneClient.stop(state.zone_client)
+
+          addr = s["address"] || "127.0.0.1"
+          port = zone["port"]
+          cert = zone["cert_hash"]
+          url = "https://#{addr}:#{port}/wt"
+
+          if is_nil(cert) do
+            append(state, line(:err, "Zone has no cert_hash — cannot pin TLS."))
+          else
+            case ZoneClient.start_link(url, cert, state.player_id, self()) do
+              {:ok, pid} ->
+                state = %{state | zone_client: pid, zones: zones, entities: %{}}
+                append(state, line(:ok, "Joined zone #{zone["id"]} at #{url}"))
+
+              {:error, reason} ->
+                append(state, line(:err, "Join failed: #{reason}"))
+            end
+          end
+      end
+    end)
+  end
+
+  defp run_command(state, "leave") do
+    if state.zone_client do
+      ZoneClient.stop(state.zone_client)
+      state = %{state | zone_client: nil, entities: %{}}
+      append(state, line(:ok, "Left zone."))
+    else
+      append(state, line(:warn, "Not joined to any zone."))
+    end
+  end
+
+  defp run_command(state, "pos " <> args) do
+    case String.split(String.trim(args)) do
+      [xs, ys, zs] ->
+        with {x, ""} <- Float.parse(xs),
+             {y, ""} <- Float.parse(ys),
+             {z, ""} <- Float.parse(zs) do
+          if state.zone_client do
+            ZoneClient.set_pos(state.zone_client, x, y, z)
+          end
+
+          state = %{state | player_pos: {x, y, z}}
+          append(state, line(:ok, "Position set to (#{x}, #{y}, #{z})"))
+        else
+          _ -> append(state, line(:err, "usage: pos <x> <y> <z>  (floats)"))
+        end
+
+      _ ->
+        append(state, line(:err, "usage: pos <x> <y> <z>"))
+    end
+  end
+
   defp run_command(state, "status") do
     require_shard(state, fn s ->
       owner = get_in(s, ["user", "username"]) || "?"
@@ -361,30 +472,60 @@ defmodule ZoneConsole.App do
         line(:dim, "  map:     #{s["map"]}"),
         line(:dim, "  owner:   #{owner}"),
         line(:dim, "  users:   #{s["current_users"] || 0} / #{s["max_users"] || "?"}"),
-        line(:dim, "  (live entity data requires zone server connection — pending)")
+        line(:dim, "  entities: #{map_size(state.entities)}  (join a zone for live data)")
       ])
     end)
   end
 
   defp run_command(state, "entities" <> rest) do
-    require_shard(state, fn _s ->
-      _n =
-        rest
-        |> String.trim()
-        |> Integer.parse()
-        |> then(fn
-          {n, ""} -> n
-          _ -> 20
-        end)
+    n =
+      rest
+      |> String.trim()
+      |> Integer.parse()
+      |> then(fn
+        {v, ""} -> v
+        _ -> 20
+      end)
 
-      append(state, line(:warn, "Entity list requires live zone connection (pending)."))
-    end)
+    if map_size(state.entities) == 0 do
+      append(state, line(:warn, "No entity data. Join a zone first."))
+    else
+      render_entities(state, state.entities, n, "Entities")
+    end
   end
 
-  defp run_command(state, "kick " <> _id) do
-    require_shard(state, fn _s ->
-      append(state, line(:warn, "Kick requires live zone connection (pending)."))
-    end)
+  defp run_command(state, "players" <> rest) do
+    n =
+      rest
+      |> String.trim()
+      |> Integer.parse()
+      |> then(fn
+        {v, ""} -> v
+        _ -> 20
+      end)
+
+    players = Map.filter(state.entities, fn {gid, _} -> gid >= 0x80_000_000 end)
+
+    if map_size(players) == 0 do
+      append(state, line(:warn, "No player entities. Join a zone first."))
+    else
+      render_entities(state, players, n, "Players")
+    end
+  end
+
+  defp run_command(state, "kick " <> id_str) do
+    case Integer.parse(String.trim(id_str)) do
+      {id, ""} ->
+        if state.zone_client do
+          ZoneClient.send_nudge(state.zone_client, id)
+          append(state, line(:ok, "Nudge sent to entity #{id}"))
+        else
+          append(state, line(:warn, "Not joined to a zone."))
+        end
+
+      _ ->
+        append(state, line(:err, "usage: kick <integer_id>"))
+    end
   end
 
   defp run_command(state, "tombstone " <> _hash) do
@@ -463,5 +604,28 @@ defmodule ZoneConsole.App do
       end)
 
     [header | rows]
+  end
+
+  defp render_entities(state, entity_map, n, label) do
+    header =
+      line(
+        :dim,
+        "  #{String.pad_trailing("gid", 12)} #{String.pad_trailing("cx", 12)} #{String.pad_trailing("cy", 12)} cz"
+      )
+
+    rows =
+      entity_map
+      |> Enum.take(n)
+      |> Enum.map(fn {gid, e} ->
+        line(
+          :dim,
+          "  #{String.pad_trailing(to_string(gid), 12)} " <>
+            "#{String.pad_trailing(:erlang.float_to_binary(e.cx, decimals: 2), 12)} " <>
+            "#{String.pad_trailing(:erlang.float_to_binary(e.cy, decimals: 2), 12)} " <>
+            :erlang.float_to_binary(e.cz, decimals: 2)
+        )
+      end)
+
+    append_many(state, [line(:info, "#{label} (#{map_size(entity_map)} total):"), header | rows])
   end
 end
