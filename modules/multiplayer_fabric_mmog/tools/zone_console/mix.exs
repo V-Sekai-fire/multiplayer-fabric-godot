@@ -21,7 +21,7 @@ defmodule ZoneConsole.MixProject do
       {:ex_ratatui, "~> 0.1"},
       {:req, "~> 0.5"},
       {:jason, "~> 1.4"},
-      {:rustler, "~> 0.34"},
+      {:wtransport, path: "vendor/wtransport_elixir"},
       {:propcheck, "~> 1.4", only: [:test, :dev], runtime: false}
     ]
   end
