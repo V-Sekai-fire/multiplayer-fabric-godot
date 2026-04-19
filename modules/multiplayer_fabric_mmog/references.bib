@@ -1,0 +1,59 @@
+% Relativistic queues / relaxed distributed queue consistency
+% Pareto winner: Gilbert & Golab (DISC 2014)
+% Ranked across: relevance to relativistic queues, distributed/no-global-clock,
+% gossip compatibility, venue impact, formal rigor.
+% Winner dominates all other candidates except Baldwin et al. 2025 on gossip dimension.
+
+@inproceedings{gilbert2014relativistic,
+  author    = {Seth Gilbert and Wojciech Golab},
+  title     = {Making Sense of Relativistic Distributed Systems},
+  booktitle = {Distributed Computing: 28th International Symposium, {DISC} 2014,
+               Austin, TX, USA, October 12--15, 2014. Proceedings},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {8784},
+  publisher = {Springer},
+  year      = {2014},
+  doi       = {10.1007/978-3-662-45174-8_25},
+  url       = {https://link.springer.com/chapter/10.1007/978-3-662-45174-8_25},
+  note      = {Generalizes linearizability for distributed systems without global
+               clocks via causality; retains locality property. Directly applicable
+               to gossip-based zone ownership where no coordinator assigns global time.}
+}
+
+% Pareto runner-up: strongest on gossip/async dimension
+% Uses vector clocks (gossip-native) for relaxed async queues.
+@inproceedings{baldwin2025relaxation,
+  author    = {Samuel Baldwin and Cole Hausman and Mohamed Bakr and Edward Talmage},
+  title     = {Relaxation for Efficient Asynchronous Queues},
+  booktitle = {Structural Information and Communication Complexity: 32nd International
+               Colloquium, {SIROCCO} 2025},
+  year      = {2025},
+  eprint    = {2503.02164},
+  archivePrefix = {arXiv},
+  url       = {https://arxiv.org/abs/2503.02164},
+  note      = {Replaces timers with vector clocks for relaxed queues in fully
+               asynchronous systems; tunable FIFO-vs-performance tradeoff via
+               gossip-compatible causal ordering.}
+}
+
+% Foundational relativistic programming (shared memory, not distributed)
+@inproceedings{triplett2011resizable,
+  author    = {Josh Triplett and Paul E. McKenney and Jonathan Walpole},
+  title     = {Resizable, Scalable, Concurrent Hash Tables via Relativistic Programming},
+  booktitle = {2011 {USENIX} Annual Technical Conference ({USENIX} {ATC} 11)},
+  publisher = {{USENIX} Association},
+  year      = {2011},
+  url       = {https://www.usenix.org/conference/usenixatc11/resizable-scalable-concurrent-hash-tables-relativistic-programming}
+}
+
+% Quantitative relaxation framework (POPL, highly cited)
+@inproceedings{henzinger2013quantitative,
+  author    = {Thomas A. Henzinger and Christoph M. Kirsch and Hannes Payer and
+               Ali Sezgin and Anna Sokolova},
+  title     = {Quantitative Relaxation of Concurrent Data Structures},
+  booktitle = {Proceedings of the 40th Annual {ACM} {SIGPLAN}-{SIGACT} Symposium on
+               Principles of Programming Languages ({POPL} 2013)},
+  publisher = {{ACM}},
+  year      = {2013},
+  doi       = {10.1145/2429069.2429109}
+}
