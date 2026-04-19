@@ -16,7 +16,7 @@ import PredictiveBVH.Protocol.Fabric
 --
 --   God-clock (global tick) → VClock (per-node causal counter)
 --   Coordinator-assigned range → geometric containment in Hilbert space
---   Deterministic serialisation → causal partial order; concurrent ops freely reordered
+--   Deterministic serialization → causal partial order; concurrent ops freely reordered
 --
 -- Network authority and interest survive the replacement:
 --   Authority = the zone whose Hilbert range contains hilbert3D(entity.pos)
@@ -26,8 +26,8 @@ import PredictiveBVH.Protocol.Fabric
 --
 -- The hybrid logical clock (HLC) used by the existing protocol is compatible:
 -- the physical component of an HLC maps to the local component of VClock.selfId,
--- and the logical counter maps to the tick count.  VClock generalises HLC to
--- n nodes without assuming a synchronised wall clock.
+-- and the logical counter maps to the tick count.  VClock generalizes HLC to
+-- n nodes without assuming a synchronized wall clock.
 -- ============================================================================
 
 namespace PredictiveBVH.Relativistic
@@ -69,7 +69,7 @@ def VClock.lt {n : Nat} (a b : VClock n) : Prop :=
   VClock.le a b ∧ ∃ i, a.ticks i < b.ticks i
 
 /-- Concurrent: neither happened-before the other.
-    Gilbert & Golab 2014: concurrent operations may be serialised in either order. -/
+    Gilbert & Golab 2014: concurrent operations may be serialized in either order. -/
 def VClock.concurrent {n : Nat} (a b : VClock n) : Prop :=
   ¬ VClock.lt a b ∧ ¬ VClock.lt b a
 
@@ -317,8 +317,8 @@ def QueueOp.hb {α : Type} {n : Nat} (op1 op2 : QueueOp α n) : Prop :=
   VClock.lt op1.vc op2.vc
 
 /-- Concurrent operations: neither happened-before the other.
-    Gilbert & Golab 2014 (Def. 3): a relativistically linearisable history
-    is allowed to serialise concurrent operations in any order. -/
+    Gilbert & Golab 2014 (Def. 3): a relativistically linearizable history
+    is allowed to serialize concurrent operations in any order. -/
 def QueueOp.concurrent {α : Type} {n : Nat} (op1 op2 : QueueOp α n) : Prop :=
   VClock.concurrent op1.vc op2.vc
 
@@ -335,7 +335,7 @@ theorem QueueOp.hb_trans {α : Type} {n : Nat} {op1 op2 op3 : QueueOp α n}
 /-- The key relativistic property: concurrent operations carry no ordering
     constraint.  A scheduler may process them in either order and remain valid.
     This is the "no determinism" property: concurrent events have no canonical
-    serialisation; the system is consistent whichever order it picks. -/
+    serialization; the system is consistent whichever order it picks. -/
 theorem concurrent_is_freely_reorderable {α : Type} {n : Nat}
     (op1 op2 : QueueOp α n) (hcon : QueueOp.concurrent op1 op2) :
     ¬ QueueOp.hb op1 op2 ∧ ¬ QueueOp.hb op2 op1 :=
@@ -403,7 +403,7 @@ theorem fresh_replica_le_clock {n : Nat} (rep : RelReplica n)
 --
 -- For n > 1 nodes: replace the single NTP pt with n independent physical
 -- components (one per zone), removing the global-clock assumption entirely.
--- Causality is then governed by VClock.lt alone — no NTP synchronisation needed.
+-- Causality is then governed by VClock.lt alone — no NTP synchronization needed.
 
 /-- A hybrid logical clock: physical time (in ticks) plus a logical counter.
     The physical component advances with wall time; the logical counter breaks ties
@@ -534,8 +534,8 @@ theorem HLC.toVClock_lt_of_pt_lt (maxL : Nat) (a b : HLC)
 -- HLC:      the existing protocol's single-node HLC (pt, l) embeds into
 --           VClock 1 via toVClock.  Order is preserved by
 --           HLC.toVClock_lt_of_same_pt and HLC.toVClock_lt_of_pt_lt.
---           VClock n generalises HLC to n nodes, eliminating the NTP
---           synchronisation requirement.
+--           VClock n generalizes HLC to n nodes, eliminating the NTP
+--           synchronization requirement.
 --           Authority and interest remain computable from geometry alone.
 
 -- ============================================================================
