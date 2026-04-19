@@ -1,3 +1,0 @@
-1. investigate the idea of gltf interactivity as the temporal entity capability goal task network planner standard library.
-1. A sandbox MMORPG where every action is a REST API call: POST /my/{name}/action/move, /action/fight, /action/crafting, /action/gathering. Returns full JSON state (position, inventory, HP, cooldowns). Up to 5 characters.
-URL: https://artifactsmmo.com / https://api.artifactsmmo.com/docs/

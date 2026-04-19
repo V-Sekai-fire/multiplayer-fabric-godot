@@ -1,8 +1,0 @@
-name: taskweft
-version: 1.0.0
-description: >
-  Unified FIRE plugin — holographic memory (HRR-based SQLite fact store
-  with FTS5 search, trust scoring, and compositional retrieval), HTN planner
-  (IPyHOP over six built-in domains), and memory-augmented planning via ReBAC.
-hooks:
-  - on_session_end

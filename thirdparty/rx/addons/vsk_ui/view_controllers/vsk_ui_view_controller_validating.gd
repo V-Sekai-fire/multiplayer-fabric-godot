@@ -1,3 +1,0 @@
-@tool
-extends SarUIViewController
-class_name VSKUIViewControllerValidating
