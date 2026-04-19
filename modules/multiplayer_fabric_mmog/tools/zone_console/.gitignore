@@ -1,6 +1,0 @@
-_build/
-deps/
-mix.lock
-/zone_console
-.env
-vendor/*/native/*/target/
