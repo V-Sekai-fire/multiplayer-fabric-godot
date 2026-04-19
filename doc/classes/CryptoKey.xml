@@ -11,6 +11,15 @@
 		<link title="SSL certificates">$DOCS_URL/tutorials/networking/ssl_certificates.html</link>
 	</tutorials>
 	<methods>
+		<method name="get_der" qualifiers="const">
+			<return type="PackedByteArray" />
+			<param index="0" name="public_only" type="bool" default="false" />
+			<description>
+				Returns the raw DER (Distinguished Encoding Rules) encoding of the key. If [param public_only] is [code]true[/code], returns only the public-key DER; otherwise returns the full private-key DER.
+				Returns an empty [PackedByteArray] if unsupported by the current crypto backend.
+				The DER encoding is useful when interoperating with libraries that require binary key material rather than PEM text (e.g. passing keys directly to TLS stacks like picoquic/picotls).
+			</description>
+		</method>
 		<method name="is_public_only" qualifiers="const">
 			<return type="bool" />
 			<description>
