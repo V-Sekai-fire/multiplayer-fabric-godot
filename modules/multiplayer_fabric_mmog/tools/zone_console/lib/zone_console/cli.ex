@@ -1,7 +1,12 @@
 defmodule ZoneConsole.CLI do
   @moduledoc "Escript entry point — authenticate against Uro then launch the TUI."
 
-  alias ZoneConsole.UroClient
+  alias ZoneConsole.{Keychain, UroClient}
+
+  # session tokens are plain strings — use Keychain directly, not FabricMMOGKeyStore
+  @kc_package "org.v-sekai.godot"
+  @kc_service "zone_console"
+  @kc_account "uro_session"
 
   def main(args) do
     load_dotenv()
@@ -13,6 +18,22 @@ defmodule ZoneConsole.CLI do
 
     IO.puts("Uro: #{uro_url}")
 
+    authed =
+      with {:cached, {:ok, token}} <- {:cached, Keychain.get_password(@kc_package, @kc_service, @kc_account)},
+           client = %UroClient{base_url: uro_url, access_token: token},
+           {:ok, verified} <- UroClient.current_user(client) do
+        IO.puts("(session restored from keychain)")
+        verified
+      else
+        _ -> fresh_login(uro_url)
+      end
+
+    Application.put_env(:zone_console, :uro_client, authed)
+    {:ok, _pid} = ZoneConsole.App.start_link([])
+    Process.sleep(:infinity)
+  end
+
+  defp fresh_login(uro_url) do
     username =
       System.get_env("URO_USERNAME") ||
         (IO.gets("username: ") |> String.trim())
@@ -21,14 +42,10 @@ defmodule ZoneConsole.CLI do
       System.get_env("URO_PASSWORD") ||
         (IO.gets("password: ") |> String.trim())
 
-    client = UroClient.new(uro_url)
-
-    case UroClient.login(client, username, password) do
+    case UroClient.login(UroClient.new(uro_url), username, password) do
       {:ok, authed} ->
-        Application.put_env(:zone_console, :uro_client, authed)
-
-        {:ok, _pid} = ZoneConsole.App.start_link([])
-        Process.sleep(:infinity)
+        Keychain.set_password(@kc_package, @kc_service, @kc_account, authed.access_token)
+        authed
 
       {:error, reason} ->
         IO.puts(:stderr, "Login failed: #{reason}")

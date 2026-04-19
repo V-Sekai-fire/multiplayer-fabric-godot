@@ -1,0 +1,18 @@
+[package]
+name = "keychain_nif"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "keychain_nif"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.37"
+# Real OS security: Security.framework (macOS), Credential Vault (Windows),
+# libsecret or kernel keyring (Linux). No DIY crypto.
+# Explicit OS-native backends — v3 has no defaults, every backend must be opted in.
+# apple-native  → Security.framework (macOS)
+# windows-native → Windows Credential Vault
+# linux-native   → Linux kernel keyring (no libsecret/DBus dependency)
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "linux-native"] }

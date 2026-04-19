@@ -154,6 +154,23 @@ defmodule ZoneConsole.UroClient do
     end
   end
 
+  @doc "GET /session — verify a cached token. Returns {:ok, client} or {:error, reason}."
+  def current_user(%__MODULE__{} = client) do
+    case Req.get("#{client.base_url}/session",
+           headers: auth_headers(client),
+           receive_timeout: 10_000
+         ) do
+      {:ok, %{status: 200, body: %{"data" => data}}} ->
+        {:ok, %{client | user: data["user"]}}
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, "HTTP #{status}: #{inspect(body)}"}
+
+      {:error, reason} ->
+        {:error, inspect(reason)}
+    end
+  end
+
   defp auth_headers(%__MODULE__{access_token: nil}), do: []
   defp auth_headers(%__MODULE__{access_token: tok}), do: [{"authorization", "Bearer #{tok}"}]
 end
