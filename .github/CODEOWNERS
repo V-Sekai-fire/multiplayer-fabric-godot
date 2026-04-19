@@ -127,6 +127,7 @@
 /modules/multiplayer/                         @godotengine/network
 /modules/multiplayer/doc_classes/             @godotengine/network @godotengine/documentation
 /modules/keychain/                            @fire
+/designs/                                     @fire
 /modules/multiplayer_fabric/                  @fire
 /modules/multiplayer_fabric_mmog/             @fire
 /modules/multiplayer/editor/                  @godotengine/network @godotengine/editor
