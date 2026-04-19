@@ -4,7 +4,7 @@
 ; git-subrepo command. See https://github.com/git-commands/git-subrepo#readme
 ;
 [subrepo]
-	remote = https://github.com/V-Sekai/uro.git
+	remote = https://github.com/V-Sekai-fire/multiplayer-fabric-zone-backend.git
 	branch = master
 	commit = b3f491a04442b40fd71a3f230e0b507bfdd532cd
 	parent = 8d1e51dc03c91d1413131ce35b431d587dcf1e8a
