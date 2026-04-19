@@ -29,7 +29,8 @@
 /**************************************************************************/
 
 #include "lasso.h"
-#include "servers/xr/xr_server.h"
+
+#include "core/object/class_db.h"
 #include <core/math/math_defs.h>
 
 LassoPoint::LassoPoint() {};
