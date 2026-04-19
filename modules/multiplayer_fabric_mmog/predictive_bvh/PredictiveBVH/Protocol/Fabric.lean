@@ -294,7 +294,7 @@ def countInFlight (migInfo : Array EntityMigInfo) : Nat :=
 --      stays constant in the fabric size — the superlinear scaling invariant
 --      the C++ headers quote at fabric_zone.cpp:816.
 --
--- A parallel C++ helper lives at FabricZone::_hilbert_aoi_band.
+-- A parallel C++ helper lives at RelZone::aoi_band_cells (relativistic_zone.h).
 
 /-- Morton AOI band for zone `zoneIdx` in a fabric with `prefixDepth` prefix
     bits, padded by `aoiCells` cellWidths on each side. The C++ helper adds
