@@ -7,7 +7,7 @@ defmodule Uro.Telemetry.SpansPage do
   def menu_link(_, _), do: {:ok, "Traces"}
 
   @impl Phoenix.LiveDashboard.PageBuilder
-  def render_page(assigns) do
+  def render(assigns) do
     spans =
       Uro.Telemetry.SpanStore.recent(200)
       |> Enum.map(fn s ->

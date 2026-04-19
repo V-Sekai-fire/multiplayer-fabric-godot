@@ -16,6 +16,11 @@ defmodule Uro.Telemetry.SpanStore do
 
   use GenServer
 
+  require Record
+
+  Record.defrecordp :otel_span, :span,
+    Record.extract(:span, from_lib: "opentelemetry/include/otel_span.hrl")
+
   @table :uro_otel_spans
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -97,17 +102,17 @@ defmodule Uro.Telemetry.SpanStore do
 
   defp delete_loop(_key, _cutoff), do: :ok
 
-  defp normalize(span) do
+  defp normalize(s) do
     %{
-      trace_id:   span |> :otel_span.trace_id() |> format_id(),
-      span_id:    span |> :otel_span.span_id() |> format_id(),
-      parent_id:  span |> :otel_span.parent_span_id() |> format_id(),
-      name:       :otel_span.name(span),
-      kind:       :otel_span.kind(span),
-      status:     :otel_span.status(span),
-      start_time: :otel_span.start_time(span),
-      end_time:   :otel_span.end_time(span),
-      attributes: :otel_span.attributes(span)
+      trace_id:   otel_span(s, :trace_id) |> format_id(),
+      span_id:    otel_span(s, :span_id) |> format_id(),
+      parent_id:  otel_span(s, :parent_span_id) |> format_id(),
+      name:       otel_span(s, :name),
+      kind:       otel_span(s, :kind),
+      status:     otel_span(s, :status),
+      start_time: otel_span(s, :start_time),
+      end_time:   otel_span(s, :end_time),
+      attributes: otel_span(s, :attributes)
     }
   end
 
