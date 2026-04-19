@@ -1,0 +1,76 @@
+name: Uro CI
+
+on:
+  push:
+    paths:
+      - "thirdparty/uro/**"
+  pull_request:
+    paths:
+      - "thirdparty/uro/**"
+
+concurrency:
+  group: uro-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: mix test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: thirdparty/uro
+
+    env:
+      MIX_ENV: test
+      TEST_DATABASE_URL: postgresql://root@localhost:26257/uro_test?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.17"
+          otp-version: "27"
+
+      - name: Cache Mix deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            thirdparty/uro/deps
+            thirdparty/uro/_build
+          key: ${{ runner.os }}-uro-mix-${{ hashFiles('thirdparty/uro/mix.lock') }}
+          restore-keys: ${{ runner.os }}-uro-mix-
+
+      - name: Install CockroachDB
+        run: |
+          curl -fsSL https://binaries.cockroachdb.com/cockroach-v23.2.3.linux-amd64.tgz | tar xz
+          sudo cp cockroach-v23.2.3.linux-amd64/cockroach /usr/local/bin/
+          cockroach version
+
+      - name: Start CockroachDB (single-node insecure)
+        run: |
+          cockroach start-single-node --insecure --background \
+            --listen-addr=localhost:26257 --http-addr=localhost:8080
+          until cockroach sql --insecure --execute="SELECT 1" 2>/dev/null; do
+            sleep 1
+          done
+
+      - name: Create test database
+        run: |
+          cockroach sql --insecure --execute="CREATE DATABASE IF NOT EXISTS uro_test;"
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile
+        run: mix compile --warnings-as-errors
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Run migrations
+        run: mix ecto.migrate
+
+      - name: Run tests
+        run: mix test --trace
