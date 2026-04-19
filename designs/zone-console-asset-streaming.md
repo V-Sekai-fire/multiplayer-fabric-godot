@@ -30,21 +30,50 @@ committed when green, with any cleanup done while the test stays green.
 ```
 zone_console (Elixir CLI)
     │
-    ├─ UroClient.upload_asset/3  ──POST /storage──►  uro (Phoenix)
-    │                                                   │
-    │                                              Waffle → S3 (VersityGW)
+    ├─ aria-storage (library dep)
+    │   AriaStorage.process_file/2
+    │       buzhash chunk split
+    │       zstd compress each chunk
+    │       SHA-512/256 chunk ID
+    │       store chunks ──────────────────────────────────►  VersityGW S3
+    │       build caibx index                                  chunks/{xx}/{chunk_id}.cacnk
     │
-    ├─ UroClient.get_manifest/2  ──POST /storage/:id/manifest──►  uro
-    │                                 ◄── {chunks, store_url}
+    ├─ UroClient.upload_asset/3
+    │   POST /storage {chunk_ids, store_url} ──────────────►  uro (Phoenix)
+    │                                                            SharedFile record
     │
-    └─ ZoneClient.send_instance/3 ──CH_PLAYER datagram──►  zone (Godot headless)
-                                    CMD_INSTANCE_ASSET                │
-                                    payload[1] = asset_id (u32)       │
-                                    payload[2..4] = pos x,y,z (f32)   │
-                                                                 fetch chunks
-                                                                 from S3
-                                                                 ResourceLoader.load()
-                                                                 instantiate at pos
+    ├─ UroClient.get_manifest/2
+    │   POST /storage/:id/manifest ────────────────────────►  uro
+    │       ◄── {store_url, chunks:[{id,start,size}]}
+    │
+    └─ ZoneClient.send_instance/3 ──CH_PLAYER datagram────►  zone (Godot headless)
+                                    CMD_INSTANCE_ASSET              │
+                                    payload[1..2] = UUID (2×u32)    │  fetch manifest
+                                    payload[3..5] = pos xyz (f32)   │  download chunks
+                                                                     │  zstd decompress
+                                                                     │  SHA-512/256 verify
+                                                                     │  assemble file
+                                                                     │  ResourceLoader.load()
+                                                                     └► instantiate at pos
+```
+
+## Dependencies
+
+Add to `modules/multiplayer_fabric_mmog/tools/zone_console/mix.exs`:
+
+```elixir
+{:aria_storage, github: "V-Sekai-fire/aria-storage"},
+```
+
+Configure S3 backend in `config/runtime.exs`:
+
+```elixir
+config :aria_storage,
+  storage_backend: :s3,
+  s3_bucket: System.get_env("AWS_S3_BUCKET", "uro-uploads"),
+  s3_endpoint: System.get_env("AWS_S3_ENDPOINT", "http://localhost:7070"),
+  aws_access_key_id: System.get_env("AWS_ACCESS_KEY_ID"),
+  aws_secret_access_key: System.get_env("AWS_SECRET_ACCESS_KEY")
 ```
 
 ## Wire protocol addition
@@ -53,22 +82,24 @@ New command constant in `fabric_mmog_peer.h` (next after CMD_SPAWN_STROKE = 3):
 
 ```cpp
 CMD_INSTANCE_ASSET = 4,
-// payload[1] = shared_file_id (u32, lower 32 bits of UUID)
-// payload[2] = pos_x as bit-cast f32 (u32)
-// payload[3] = pos_y as bit-cast f32 (u32)
-// payload[4] = pos_z as bit-cast f32 (u32)
+// payload[1] = shared_file_uuid_hi (u32, bytes 0-3 of UUID, no hyphens)
+// payload[2] = shared_file_uuid_lo (u32, bytes 4-7 of UUID, no hyphens)
+// payload[3] = pos_x as bit-cast f32 (u32)
+// payload[4] = pos_y as bit-cast f32 (u32)
+// payload[5] = pos_z as bit-cast f32 (u32)
 ```
 
-The zone receives this, fetches the caibx manifest from uro, streams
-chunks from S3, and calls `ResourceLoader.load()` + `instantiate()` at
-the given world position. The 100-byte packet already has 14 payload
-u32 slots; this uses 5.
+The zone receives this, reconstructs the UUID prefix, looks up the full
+UUID via `GET /storage?prefix=<8hex>`, fetches the caibx manifest, streams
+zstd-compressed SHA-512/256-verified chunks from S3, and calls
+`ResourceLoader.load()` + `instantiate()` at the given world position.
+The 100-byte packet has 14 payload u32 slots; this uses 6.
 
 ## Cycles (Pareto order — highest value/effort ratio first)
 
 | Cycle | What you get | Effort |
 |---|---|---|
-| 1 | `UroClient.upload_asset/3` — scenes stored in uro | Low |
+| 1 | `UroClient.upload_asset/3` — casync chunk → S3 → uro manifest | Medium |
 | 2 | `upload <path>` command — user can store a scene | Low |
 | 3 | `CMD_INSTANCE_ASSET` wire encoding — protocol ready | Low |
 | 4 | `instance <id> <x> <y> <z>` command — user can trigger instancing | Low |
@@ -78,19 +109,40 @@ u32 slots; this uses 5.
 
 ---
 
-### Cycle 1 — UroClient: upload a file, get back a shared_file_id
+### Cycle 1 — UroClient: chunk file with aria-storage, push to S3, register with uro
 
 **Value:** Unlocks storing any scene in uro from the CLI. Every later cycle depends on this.
-**Effort:** One `Req` multipart call.
+**Effort:** aria-storage does the heavy lifting; UroClient wires the manifest registration.
 
-**RED:** `test/zone_console/uro_client_test.exs` — mock HTTP server
-returns `{id: "abc123", name: "test.tscn"}`, assert
-`UroClient.upload_asset(token, path, name)` returns `{:ok, "abc123"}`.
+**What happens internally:**
 
-**Implementation:** Add `upload_asset/3` to `UroClient` using `Req`
-multipart POST to `/storage` with `Authorization: Bearer` header.
+```
+file.tscn
+  │
+  ▼ AriaStorage.process_file/2
+  ├─ buzhash content-defined split (16 KB–256 KB chunks)
+  ├─ per-chunk: zstd compress → SHA-512/256 ID
+  ├─ store each chunk to S3: chunks/{first4hex}/{chunk_id}.cacnk
+  └─ build caibx binary index → {:ok, %{chunks: [...], store_url: "s3://..."}}
+  │
+  ▼ Req POST /storage
+  body: {name, chunks: [{id, start, size}], store_url}
+  ◄── {id: "uuid", ...}
+```
 
-**Commit:** `Cycle 1: UroClient.upload_asset/3 — POST /storage multipart`
+**RED:** `test/zone_console/uro_client_test.exs` — stub `AriaStorage.process_file/2`
+to return `{:ok, %{chunks: [%{id: "aa"<><<0::496>>, start: 0, size: 100}], store_url: "s3://bucket"}}`;
+mock HTTP returns `{"id": "abc123"}`; assert
+`UroClient.upload_asset(token, path, "test.tscn")` returns `{:ok, "abc123"}`.
+
+**Implementation:**
+- Add `{:aria_storage, github: "V-Sekai-fire/aria-storage"}` to `mix.exs`.
+- Add `upload_asset/3` to `UroClient`:
+  1. Call `AriaStorage.process_file(path, backend: :s3)` → `{:ok, %{chunks, store_url}}`.
+  2. POST to `/storage` with `{name, chunks, store_url}` + Bearer token.
+  3. Return `{:ok, id}`.
+
+**Commit:** `Cycle 1: UroClient.upload_asset/3 — casync chunk + S3 store + uro register`
 
 ---
 
