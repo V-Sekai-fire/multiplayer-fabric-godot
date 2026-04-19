@@ -139,12 +139,12 @@ using AabbI64 = AabbFor<int64_t>; // AabbT<int64_t>      — integer coords
 // than inside the emitted header.
 static inline Aabb aabb_from_floats(float x0, float x1, float y0, float y1, float z0, float z1) {
 	Aabb a;
-	a.min_x = r128_from_int((int64_t)(x0 * 1000000.0f));
-	a.max_x = r128_from_int((int64_t)(x1 * 1000000.0f));
-	a.min_y = r128_from_int((int64_t)(y0 * 1000000.0f));
-	a.max_y = r128_from_int((int64_t)(y1 * 1000000.0f));
-	a.min_z = r128_from_int((int64_t)(z0 * 1000000.0f));
-	a.max_z = r128_from_int((int64_t)(z1 * 1000000.0f));
+	a.min_x = (int64_t)(x0 * 1000000.0f);
+	a.max_x = (int64_t)(x1 * 1000000.0f);
+	a.min_y = (int64_t)(y0 * 1000000.0f);
+	a.max_y = (int64_t)(y1 * 1000000.0f);
+	a.min_z = (int64_t)(z0 * 1000000.0f);
+	a.max_z = (int64_t)(z1 * 1000000.0f);
 	return a;
 }
 

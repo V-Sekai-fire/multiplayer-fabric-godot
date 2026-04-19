@@ -10,22 +10,22 @@ defmodule ZoneConsole.App do
   alias ZoneConsole.UroClient
 
   @help_rows [
-    {"help",                         "show this message"},
-    {"shards",                       "list shards from Uro"},
-    {"connect <name|index>",         "connect to a shard"},
+    {"help", "show this message"},
+    {"shards", "list shards from Uro"},
+    {"connect <name|index>", "connect to a shard"},
     {"register <addr> <port> <map> <name>", "register a new shard"},
-    {"unregister <name|index>",      "delete a shard from Uro"},
-    {"heartbeat",                    "send keepalive for connected shard"},
-    {"start <port>",                 "spawn a Godot zone on the connected shard"},
-    {"stop <port>",                  "stop a running zone on the connected shard"},
-    {"zones",                        "list running zones for connected shard"},
-    {"status",                       "show connected shard details"},
-    {"entities [n]",                 "list live jellyfish (default 20)"},
-    {"kick <id>",                    "force-migrate entity out of zone"},
-    {"tombstone <hash>",             "blacklist UGC asset; despawn instances"},
-    {"rip <x> <z> <strength>",       "inject rip current into flow field"},
-    {"bloom <x> <z>",                "trigger jellyfish bloom event"},
-    {"exit / quit / Ctrl-C",         "disconnect and exit"},
+    {"unregister <name|index>", "delete a shard from Uro"},
+    {"heartbeat", "send keepalive for connected shard"},
+    {"start <port>", "spawn a Godot zone on the connected shard"},
+    {"stop <port>", "stop a running zone on the connected shard"},
+    {"zones", "list running zones for connected shard"},
+    {"status", "show connected shard details"},
+    {"entities [n]", "list live jellyfish (default 20)"},
+    {"kick <id>", "force-migrate entity out of zone"},
+    {"tombstone <hash>", "blacklist UGC asset; despawn instances"},
+    {"rip <x> <z> <strength>", "inject rip current into flow field"},
+    {"bloom <x> <z>", "trigger jellyfish bloom event"},
+    {"exit / quit / Ctrl-C", "disconnect and exit"}
   ]
 
   # ── state ───────────────────────────────────────────────────────────────────
@@ -46,10 +46,10 @@ defmodule ZoneConsole.App do
 
     banner = [
       line(:info, "Multiplayer Fabric Zone Console"),
-      line(:dim,  "Uro: #{uro.base_url}"),
-      line(:dim,  "User: #{get_in(uro.user, ["username"]) || "?"}"),
-      line(:dim,  ""),
-      line(:dim,  "Type 'help' for commands."),
+      line(:dim, "Uro: #{uro.base_url}"),
+      line(:dim, "User: #{get_in(uro.user, ["username"]) || "?"}"),
+      line(:dim, ""),
+      line(:dim, "Type 'help' for commands.")
     ]
 
     {shard_lines, shards} =
@@ -123,13 +123,13 @@ defmodule ZoneConsole.App do
     shard_label =
       case state.connected_shard do
         nil -> "offline"
-        s   -> "#{s["name"]} (#{s["address"]}:#{s["port"]})"
+        s -> "#{s["name"]} (#{s["address"]}:#{s["port"]})"
       end
 
     prompt_prefix =
       case state.connected_shard do
         nil -> "[offline]"
-        s   -> "[#{s["name"]}]"
+        s -> "[#{s["name"]}]"
       end
 
     output_items =
@@ -163,12 +163,12 @@ defmodule ZoneConsole.App do
     ]
   end
 
-  defp style_color(:ok),     do: :green
-  defp style_color(:err),    do: :red
-  defp style_color(:warn),   do: :yellow
-  defp style_color(:info),   do: :cyan
+  defp style_color(:ok), do: :green
+  defp style_color(:err), do: :red
+  defp style_color(:warn), do: :yellow
+  defp style_color(:info), do: :cyan
   defp style_color(:prompt), do: :white
-  defp style_color(_),       do: :reset
+  defp style_color(_), do: :reset
 
   # ── commands ─────────────────────────────────────────────────────────────────
 
@@ -202,7 +202,7 @@ defmodule ZoneConsole.App do
     shard =
       case Integer.parse(arg) do
         {idx, ""} -> Enum.at(state.shards, idx)
-        _         -> Enum.find(state.shards, &(&1["name"] == arg))
+        _ -> Enum.find(state.shards, &(&1["name"] == arg))
       end
 
     case shard do
@@ -244,7 +244,7 @@ defmodule ZoneConsole.App do
     shard =
       case Integer.parse(arg) do
         {idx, ""} -> Enum.at(state.shards, idx)
-        _         -> Enum.find(state.shards, &(&1["name"] == arg))
+        _ -> Enum.find(state.shards, &(&1["name"] == arg))
       end
 
     case shard do
@@ -271,7 +271,7 @@ defmodule ZoneConsole.App do
   defp run_command(state, "heartbeat") do
     require_shard(state, fn s ->
       case UroClient.heartbeat_shard(state.uro, s["id"]) do
-        :ok    -> append(state, line(:ok, "Heartbeat sent for #{s["name"]}"))
+        :ok -> append(state, line(:ok, "Heartbeat sent for #{s["name"]}"))
         {:error, reason} -> append(state, line(:err, "Heartbeat failed: #{reason}"))
       end
     end)
@@ -284,9 +284,9 @@ defmodule ZoneConsole.App do
           case UroClient.spawn_zone(state.uro, s["id"], port) do
             {:ok, data} ->
               append_many(state, [
-                line(:ok,  "Zone spawning on shard #{s["name"]} port #{port}"),
+                line(:ok, "Zone spawning on shard #{s["name"]} port #{port}"),
                 line(:dim, "  status: #{data["status"]}"),
-                line(:dim, "  run 'zones' to monitor progress"),
+                line(:dim, "  run 'zones' to monitor progress")
               ])
 
             {:error, reason} ->
@@ -323,20 +323,25 @@ defmodule ZoneConsole.App do
         {:ok, []} ->
           append_many(state, [
             line(:warn, "No running zones for shard #{s["name"]}."),
-            line(:dim,  "  Use 'start <port>' to spawn one."),
+            line(:dim, "  Use 'start <port>' to spawn one.")
           ])
 
         {:ok, zones} ->
           header = line(:dim, "  #{String.pad_trailing("id", 38)} port   status    cert_hash")
-          rows = Enum.map(zones, fn z ->
-            cert = String.slice(z["cert_hash"] || "-", 0, 12)
-            line(:dim,
-              "  #{String.pad_trailing(z["id"] || "?", 38)} " <>
-              "#{String.pad_trailing(to_string(z["port"] || "?"), 6)} " <>
-              "#{String.pad_trailing(z["status"] || "?", 9)} " <>
-              cert
-            )
-          end)
+
+          rows =
+            Enum.map(zones, fn z ->
+              cert = String.slice(z["cert_hash"] || "-", 0, 12)
+
+              line(
+                :dim,
+                "  #{String.pad_trailing(z["id"] || "?", 38)} " <>
+                  "#{String.pad_trailing(to_string(z["port"] || "?"), 6)} " <>
+                  "#{String.pad_trailing(z["status"] || "?", 9)} " <>
+                  cert
+              )
+            end)
+
           append_many(state, [line(:info, "Zones for #{s["name"]}:"), header | rows])
 
         {:error, reason} ->
@@ -348,24 +353,30 @@ defmodule ZoneConsole.App do
   defp run_command(state, "status") do
     require_shard(state, fn s ->
       owner = get_in(s, ["user", "username"]) || "?"
+
       append_many(state, [
         line(:info, "Shard: #{s["name"]}"),
-        line(:dim,  "  id:      #{s["id"]}"),
-        line(:dim,  "  address: #{s["address"]}:#{s["port"]}"),
-        line(:dim,  "  map:     #{s["map"]}"),
-        line(:dim,  "  owner:   #{owner}"),
-        line(:dim,  "  users:   #{s["current_users"] || 0} / #{s["max_users"] || "?"}"),
-        line(:dim,  "  (live entity data requires zone server connection — pending)"),
+        line(:dim, "  id:      #{s["id"]}"),
+        line(:dim, "  address: #{s["address"]}:#{s["port"]}"),
+        line(:dim, "  map:     #{s["map"]}"),
+        line(:dim, "  owner:   #{owner}"),
+        line(:dim, "  users:   #{s["current_users"] || 0} / #{s["max_users"] || "?"}"),
+        line(:dim, "  (live entity data requires zone server connection — pending)")
       ])
     end)
   end
 
   defp run_command(state, "entities" <> rest) do
     require_shard(state, fn _s ->
-      _n = rest |> String.trim() |> Integer.parse() |> then(fn
-        {n, ""} -> n
-        _       -> 20
-      end)
+      _n =
+        rest
+        |> String.trim()
+        |> Integer.parse()
+        |> then(fn
+          {n, ""} -> n
+          _ -> 20
+        end)
+
       append(state, line(:warn, "Entity list requires live zone connection (pending)."))
     end)
   end
@@ -387,6 +398,7 @@ defmodule ZoneConsole.App do
       case String.split(String.trim(args)) do
         [x, z, strength] ->
           append(state, line(:ok, "rip queued: x=#{x} z=#{z} strength=#{strength}  (pending)"))
+
         _ ->
           append(state, line(:err, "usage: rip <x> <z> <strength>"))
       end
@@ -398,6 +410,7 @@ defmodule ZoneConsole.App do
       case String.split(String.trim(args)) do
         [x, z] ->
           append(state, line(:ok, "bloom queued: x=#{x} z=#{z}  (pending)"))
+
         _ ->
           append(state, line(:err, "usage: bloom <x> <z>"))
       end
@@ -437,6 +450,7 @@ defmodule ZoneConsole.App do
       |> Enum.with_index()
       |> Enum.map(fn {s, i} ->
         users = "#{s["current_users"] || 0}/#{s["max_users"] || "?"}"
+
         line(
           :dim,
           "  #{String.pad_trailing(to_string(i), 4)}" <>

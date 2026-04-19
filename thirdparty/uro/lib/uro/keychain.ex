@@ -95,7 +95,7 @@ defmodule Uro.Keychain do
   @spec remove(String.t()) :: :ok
   def remove(account) do
     Repo.delete_all(
-      from e in Entry, where: e.service == @service and e.account == account
+      from e in Entry, where: e.service == @service and e.account == ^account
     )
 
     :ok

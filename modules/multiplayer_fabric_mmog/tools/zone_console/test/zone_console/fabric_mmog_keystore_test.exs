@@ -41,8 +41,7 @@ defmodule ZoneConsole.FabricMMOGKeyStoreTest do
   end
 
   property "put overwrites existing entry — last write wins" do
-    forall [id <- uuid(), k1 <- aes_key(), iv1 <- aes_iv(),
-            k2 <- aes_key(), iv2 <- aes_iv()] do
+    forall [id <- uuid(), k1 <- aes_key(), iv1 <- aes_iv(), k2 <- aes_key(), iv2 <- aes_iv()] do
       Mock.reset()
       :ok = KS.put(id, k1, iv1)
       :ok = KS.put(id, k2, iv2)
