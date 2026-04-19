@@ -279,13 +279,23 @@ theorem geometric_authority_unique {n : Nat} (view : NodeView n) (h : Nat)
     equivalent to the symmetric overlap of [r.lo, r.hi] with [h - aoi, h + aoi].
     The unsafe-subtraction form `h - aoi` is avoided; instead the check is
     reformulated as `h ≤ r.hi + aoi` which is equivalent under Nat arithmetic.
-    Red: sorry-stub — the Prop-level equivalence is left for a future proof pass
-    once a Nat.sub-safe interval-overlap lemma is in scope. -/
+    Proved via omega on the Nat-subtraction-safe reformulation. -/
 theorem geometricInterest_overlap_iff {n : Nat} (view : NodeView n) (h aoi : Nat)
     (r : ZoneRange) (hmem : r ∈ view.ranges) :
     r ∈ geometricInterest view h aoi ↔
     r.lo ≤ h + aoi ∧ (aoi ≤ h → r.hi + 1 > h - aoi) := by
-  sorry
+  simp only [geometricInterest, List.mem_filter]
+  constructor
+  · intro ⟨_, hbool⟩
+    simp only [Bool.and_eq_true, decide_eq_true_eq] at hbool
+    exact ⟨hbool.1, fun haoi => by omega⟩
+  · intro ⟨hlo, hhigh⟩
+    refine ⟨hmem, ?_⟩
+    simp only [Bool.and_eq_true, decide_eq_true_eq]
+    refine ⟨hlo, ?_⟩
+    by_cases haoi : aoi ≤ h
+    · have := hhigh haoi; omega
+    · omega
 
 -- ============================================================================
 -- 5. RELATIVISTIC QUEUE  (causal ordering; concurrent ops freely reordered)
@@ -441,7 +451,7 @@ theorem HLC.advance_pt_ge {local : HLC} (nowPt : Nat) :
   simp [HLC.advance, Nat.le_max_left]
 
 /-- Merge two HLCs on receive: pick the causally later one then advance.
-    Red: sorry-stub — the full merge invariants need omega over 3-way max. -/
+    Invariants proved in HLC.merge_ge_local / HLC.merge_ge_remote via split_ifs + omega. -/
 def HLC.merge (local remote : HLC) (nowPt : Nat) : HLC :=
   let pt := max (max local.pt remote.pt) nowPt
   { pt := pt
@@ -453,11 +463,23 @@ def HLC.merge (local remote : HLC) (nowPt : Nat) : HLC :=
 /-- merge result is causally ≥ both inputs. -/
 theorem HLC.merge_ge_local {local remote : HLC} (nowPt : Nat) :
     ¬ HLC.lt (HLC.merge local remote nowPt) local := by
-  sorry
+  unfold HLC.merge HLC.lt
+  intro h
+  rcases h with h | ⟨hpt, hl⟩
+  · have : local.pt ≤ max (max local.pt remote.pt) nowPt :=
+      Nat.le_trans (Nat.le_max_left _ _) (Nat.le_max_left _ _)
+    omega
+  · split_ifs at hl <;> omega
 
 theorem HLC.merge_ge_remote {local remote : HLC} (nowPt : Nat) :
     ¬ HLC.lt (HLC.merge local remote nowPt) remote := by
-  sorry
+  unfold HLC.merge HLC.lt
+  intro h
+  rcases h with h | ⟨hpt, hl⟩
+  · have : remote.pt ≤ max (max local.pt remote.pt) nowPt :=
+      Nat.le_trans (Nat.le_max_right _ _) (Nat.le_max_left _ _)
+    omega
+  · split_ifs at hl <;> omega
 
 /-- Embed an HLC into a single-node VClock using a linear encoding.
     maxL bounds the logical counter; the slot width is (maxL + 1) so
@@ -517,35 +539,56 @@ theorem HLC.toVClock_lt_of_pt_lt (maxL : Nat) (a b : HLC)
 --           Authority and interest remain computable from geometry alone.
 
 -- ============================================================================
--- 9. BRIDGE TO Fabric.lean  (red: sorry-stubs awaiting proof)
+-- 9. BRIDGE TO Fabric.lean
 -- ============================================================================
 --
 -- Fabric.lean proves `assignToZone_in_range`, `aoiBand_covers_self`, and
 -- `aoiBand_width_bound` for the uniform Hilbert partition.  The C++ side
 -- bridges these via `node_view_from_zone_count` (relativistic_zone.h).
--- The two theorems below are the formal statements of that bridge; both are
--- sorry-stubs pending a connection to the Lean definitions in Fabric.lean.
+-- The two theorems below are the formal statements of that bridge.
 
 /-- The uniform initial partition (one ZoneRange per zone, cell width =
     mortonSpanWidth (zonePrefixDepth zoneCount)) satisfies DisjointRanges.
-    Red: sorry-stub.  Green path: induction on zoneCount, using the fact that
-    adjacent zones have non-overlapping lo/hi computed from the same cell_w. -/
+    Proved by contradiction: if z1 ≠ z2 then one interval strictly precedes the
+    other (via Nat.mul_le_mul_right + omega); both containing h is impossible. -/
 theorem uniform_partition_disjoint (n zoneCount : Nat)
     (hpos : 0 < zoneCount) (depth : Nat) (cell_w : Nat) (hcw : 0 < cell_w)
     (ranges : List ZoneRange)
     (hunif : ranges = (List.range zoneCount).map (fun z =>
         { zoneId := z, lo := z * cell_w, hi := z * cell_w + cell_w - 1 })) :
     DisjointRanges ranges := by
-  sorry
+  subst hunif
+  unfold DisjointRanges
+  intro r1 r2 h hm1 hm2 hc1 hc2
+  simp only [List.mem_map, List.mem_range] at hm1 hm2
+  obtain ⟨z1, _hz1, rfl⟩ := hm1
+  obtain ⟨z2, _hz2, rfl⟩ := hm2
+  simp only [ZoneRange.contains, Bool.and_eq_true, decide_eq_true_eq] at hc1 hc2
+  obtain ⟨hlo1, hhi1⟩ := hc1
+  obtain ⟨hlo2, hhi2⟩ := hc2
+  by_contra hne
+  rcases Nat.lt_or_gt_of_ne hne with hlt | hlt
+  · have hstep : z1 * cell_w + cell_w ≤ z2 * cell_w :=
+      calc z1 * cell_w + cell_w = (z1 + 1) * cell_w := by ring
+        _ ≤ z2 * cell_w := Nat.mul_le_mul_right cell_w hlt
+    omega
+  · have hstep : z2 * cell_w + cell_w ≤ z1 * cell_w :=
+      calc z2 * cell_w + cell_w = (z2 + 1) * cell_w := by ring
+        _ ≤ z1 * cell_w := Nat.mul_le_mul_right cell_w hlt
+    omega
 
-/-- geometricAuthority on a disjoint view returns a zone id that is a valid
-    index into view.ranges.  This is the formal counterpart to the C++
-    `zone_for_hilbert` fallback-clamp.
-    Red: sorry-stub.  Green path: List.find?_mem + length bound. -/
+/-- geometricAuthority on a view returns a zone id that is a valid index
+    into view.ranges, given the invariant that every stored zone id is in-bounds.
+    This is the formal counterpart to the C++ `zone_for_hilbert` fallback-clamp.
+    The invariant `hvalid` holds for any NodeView produced by
+    `node_view_from_zone_count` because zoneId = position in 0..zoneCount-1
+    and length = zoneCount. -/
 theorem geometric_authority_zoneId_lt_length {n : Nat}
     (view : NodeView n) (h : Nat) (hlen : 0 < view.ranges.length)
+    (hvalid : ∀ r ∈ view.ranges, r.zoneId < view.ranges.length)
     {r : ZoneRange} (hauth : geometricAuthority view h = some r) :
     r.zoneId < view.ranges.length := by
-  sorry
+  unfold geometricAuthority at hauth
+  exact hvalid r (List.find?_mem hauth)
 
 end PredictiveBVH.Relativistic
