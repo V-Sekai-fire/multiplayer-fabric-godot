@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/V-Sekai-fire/multiplayer-fabric-zone-console.git
+	branch = main
+	commit = 55dcf95c7b28458f21b45edae7cca68e64e425e2
+	parent = c4a70e5f266ba89e9b5117f9e7c9fad8dfb1bf41
+	method = merge
+	cmdver = 0.4.9
