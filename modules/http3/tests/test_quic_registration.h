@@ -31,7 +31,6 @@
 #pragma once
 
 #include "../quic_client.h"
-#include "../quic_server.h"
 
 #include "core/object/class_db.h"
 #include "tests/test_macros.h"

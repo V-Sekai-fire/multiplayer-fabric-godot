@@ -35,7 +35,6 @@
 #include "core/object/ref_counted.h"
 #include "core/templates/list.h"
 #include "core/templates/vector.h"
-#include "core/variant/binder_common.h"
 
 // HTTP/3 client layered on QUICClient. Signatures match
 // core/io/http_client.h (Status, Method, request, response accessors) so

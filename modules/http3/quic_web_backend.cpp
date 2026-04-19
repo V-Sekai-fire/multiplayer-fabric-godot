@@ -28,8 +28,6 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "quic_picoquic_backend.h"
-
 #ifdef GODOT_QUIC_WEB_BACKEND
 
 #include "web_transport_peer.h"

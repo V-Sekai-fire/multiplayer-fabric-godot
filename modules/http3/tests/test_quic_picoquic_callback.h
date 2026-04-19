@@ -31,7 +31,6 @@
 #pragma once
 
 #include "../quic_client.h"
-#include "../quic_picoquic_backend.h"
 
 #include "tests/test_macros.h"
 
