@@ -22,6 +22,12 @@ config/icon="res://icon.svg"
 window/size/viewport_width=1920
 window/size/viewport_height=1080
 
+[opentelemetry]
+
+enabled=true
+endpoint="console"
+service_name="vsekai-zone"
+
 [rendering]
 
 renderer/rendering_method="forward_plus"
