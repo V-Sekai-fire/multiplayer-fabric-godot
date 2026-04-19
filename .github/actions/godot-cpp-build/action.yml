@@ -33,21 +33,54 @@ runs:
       shell: sh
       run: ${{ inputs.bin }} --headless --dump-gdextension-interface --dump-extension-api
 
+    - name: Patch godot-cpp ar for E2BIG workaround
+      shell: python3 {0}
+      run: |
+        import os, textwrap
+        # SCons picks up site_scons/site_init.py from the directory where it runs.
+        # We put the patch in godot-cpp/test/site_scons/ so it is loaded when
+        # scons --directory=./godot-cpp/test is executed.
+        site_dir = "godot-cpp/test/site_scons"
+        os.makedirs(site_dir, exist_ok=True)
+        code = textwrap.dedent("""\
+            # Replace the SCons 'ar' tool's generate function with one that
+            # uses a Python Action (no shell, no E2BIG) backed by GNU ar @rspfile.
+            import SCons.Tool.ar as _ar_mod
+            import subprocess, tempfile, os
+            from SCons.Script import Action
+
+            _orig_generate = _ar_mod.generate
+
+            def _patched_generate(env):
+                _orig_generate(env)
+
+                def _ar_rsp(target, source, env):
+                    tp = str(target[0])
+                    srcs = [str(s) for s in source]
+                    with tempfile.NamedTemporaryFile(
+                        mode='w', suffix='.rsp', delete=False
+                    ) as f:
+                        f.write('\\n'.join(srcs))
+                        rsp = f.name
+                    try:
+                        if os.path.exists(tp):
+                            os.unlink(tp)
+                        subprocess.run(
+                            ['/usr/bin/ar', 'rc', tp, '@' + rsp], check=True
+                        )
+                    finally:
+                        os.unlink(rsp)
+                    return 0
+
+                env.Replace(ARCOM=Action(_ar_rsp, 'Archiving $TARGET'))
+
+            _ar_mod.generate = _patched_generate
+        """)
+        with open(f"{site_dir}/site_init.py", "w") as f:
+            f.write(code)
+
     - name: SCons Build
       shell: bash
       env:
         SCONS_CACHE: ${{ inputs.scons-cache }}
-      run: |
-        # GNU ar supports @file response files (binutils >= 2.25).
-        # Without this wrapper, archiving godot-cpp fails with E2BIG when
-        # the object-file list exceeds ARG_MAX.
-        cat > /tmp/ar_rsp << 'WRAPPER_EOF'
-        #!/bin/bash
-        op="$1"; target="$2"; shift 2
-        rsp=$(mktemp /tmp/ar_sources_XXXXXX)
-        printf '%s\n' "$@" > "$rsp"
-        /usr/bin/ar "$op" "$target" @"$rsp"
-        rm "$rsp"
-        WRAPPER_EOF
-        chmod +x /tmp/ar_rsp
-        scons --directory=./godot-cpp/test "gdextension_dir=${{ github.workspace }}" ${{ inputs.scons-flags }} AR=/tmp/ar_rsp
+      run: scons --directory=./godot-cpp/test "gdextension_dir=${{ github.workspace }}" ${{ inputs.scons-flags }}
