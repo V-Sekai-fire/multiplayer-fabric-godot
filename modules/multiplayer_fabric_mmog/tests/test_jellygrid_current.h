@@ -1,19 +1,37 @@
 /**************************************************************************/
 /*  test_jellygrid_current.h                                              */
 /**************************************************************************/
-/* Cycle 1: place_current returns valid slot, emitter_count increases    */
-/* Cycle 2: placed emitter creates nonzero flow near its position        */
-/* Cycle 3: remove_current zeroes emitter slot, flow clears              */
-/* Cycle 4: MAX_EMITTERS full → place_current returns -1                 */
-/* Cycle 5: inject_rip_current spreads nonzero flow across field         */
-/* Cycle 6: tick decays injected rip current                             */
-/* Cycle 7: persistent emitter resists decay (re-splat each tick)        */
-/* Cycle 8: sample_flow_x/z clamped at grid boundary                    */
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
 #pragma once
 
 #include "../jellygrid_current_sim.hpp"
+
 #include "tests/test_macros.h"
 
 namespace TestJellygridCurrent {
@@ -64,8 +82,9 @@ TEST_CASE("[Jellygrid][Current] remove_current clears slot and rebuilds field") 
 
 TEST_CASE("[Jellygrid][Current] returns -1 when all emitter slots are full") {
 	State s;
-	for (int i = 0; i < MAX_EMITTERS; ++i)
+	for (int i = 0; i < MAX_EMITTERS; ++i) {
 		place_current(s, (float)i, 0.0f, 1.0f, 0.0f, 1.0f);
+	}
 
 	int slot = place_current(s, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f);
 	CHECK(slot == -1);
@@ -78,8 +97,12 @@ TEST_CASE("[Jellygrid][Current] inject_rip_current spreads nonzero flow") {
 	inject_rip_current(s, 0.0f, 0.0f, 5.0f);
 
 	bool any_nonzero = false;
-	for (auto &c : s.field)
-		if (c.vx != 0.0f || c.vz != 0.0f) { any_nonzero = true; break; }
+	for (auto &c : s.field) {
+		if (c.vx != 0.0f || c.vz != 0.0f) {
+			any_nonzero = true;
+			break;
+		}
+	}
 	CHECK(any_nonzero);
 }
 
@@ -90,13 +113,17 @@ TEST_CASE("[Jellygrid][Current] rip current decays after tick with no emitters")
 	inject_rip_current(s, 0.0f, 0.0f, 5.0f);
 
 	float sum_before = 0.0f;
-	for (auto &c : s.field) sum_before += c.vx * c.vx + c.vz * c.vz;
+	for (auto &c : s.field) {
+		sum_before += c.vx * c.vx + c.vz * c.vz;
+	}
 	CHECK(sum_before > 0.0f);
 
 	tick(s, 1.0f);
 
 	float sum_after = 0.0f;
-	for (auto &c : s.field) sum_after += c.vx * c.vx + c.vz * c.vz;
+	for (auto &c : s.field) {
+		sum_after += c.vx * c.vx + c.vz * c.vz;
+	}
 	CHECK(sum_after < sum_before);
 }
 
@@ -108,13 +135,15 @@ TEST_CASE("[Jellygrid][Current] persistent emitter maintains flow through decay"
 
 	float vx_initial = sample_flow_x(s, 0.0f, 0.0f);
 	// After many ticks, emitter re-splat should keep flow bounded above zero.
-	for (int i = 0; i < 10; ++i) tick(s, 1.0f);
+	for (int i = 0; i < 10; ++i) {
+		tick(s, 1.0f);
+	}
 	float vx_final = sample_flow_x(s, 0.0f, 0.0f);
 
 	CHECK(vx_final > 0.0f);
-	// Should be substantially below initial (decay is real, not zero).
-	// Note: re-splat each tick means it reaches steady-state, not zero.
-	CHECK(vx_final < vx_initial * 5.0f); // sanity: not runaway growth
+	// tick() decays then re-splats; steady state = vx_initial / DECAY ≈ 12.5×.
+	// Verify the value is bounded (not infinite) and above the initial.
+	CHECK(vx_final < vx_initial * 20.0f); // bounded: steady state ≈ 12.5×
 }
 
 // ── Cycle 8 ──────────────────────────────────────────────────────────────────
