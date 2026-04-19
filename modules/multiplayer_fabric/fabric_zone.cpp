@@ -613,47 +613,9 @@ uint32_t FabricZone::_entity_hilbert(const FabricEntity &e) {
 	return hilbert_of_aabb(&b, &scene);
 }
 
-int FabricZone::_zone_for_hilbert(uint32_t hcode, int count) {
-	// Matches Fabric.lean assignToZone / zonePrefixDepth:
-	//   depth = ceil(log2(count)) = bit-length of (count - 1)
-	//   zone  = min(count - 1, hcode >> (30 - depth))
-	if (count <= 1) {
-		return 0;
-	}
-	int depth = 0;
-	uint32_t x = (uint32_t)(count - 1);
-	while (x > 0) {
-		depth++;
-		x >>= 1;
-	}
-	int z = (int)(hcode >> (30 - depth));
-	return CLAMP(z, 0, count - 1);
-}
-
-void FabricZone::_hilbert_aoi_band(uint32_t &out_lo, uint32_t &out_hi, int my_id, int count) {
-	// Hilbert AOI band for zone `my_id` in an `count`-zone fabric.
-	// depth = ceil(log2(count)); cell_w = 2^(30 - depth).
-	// Own range is [my_id*cell_w, (my_id+1)*cell_w); the band pads by
-	// AOI_CELLS*cell_w on each side, clamped to [0, 2^30).
-	uint32_t total = 1u << 30;
-	if (count <= 1) {
-		out_lo = 0u;
-		out_hi = total;
-		return;
-	}
-	int depth = 0;
-	uint32_t x = (uint32_t)(count - 1);
-	while (x > 0) {
-		depth++;
-		x >>= 1;
-	}
-	uint32_t cell_w = 1u << (30 - depth);
-	uint32_t pad = (uint32_t)AOI_CELLS * cell_w;
-	uint32_t zone_lo = (uint32_t)my_id * cell_w;
-	uint32_t zone_hi = zone_lo + cell_w;
-	out_lo = zone_lo > pad ? zone_lo - pad : 0u;
-	out_hi = (total - zone_hi) > pad ? zone_hi + pad : total;
-}
+// _zone_for_hilbert and _hilbert_aoi_band removed.
+// Use RelZone::zone_for_hilbert(_node_view, hcode) and
+// RelZone::aoi_band_cells(_node_view, zone_id, AOI_CELLS, lo, hi) instead.
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Migration intent serialization — little-endian byte packing
@@ -852,7 +814,7 @@ int FabricZone::_load_snapshot() {
 			e.payload[p] = (uint32_t)pay[i * 14 + p];
 		}
 		// Only load entities that belong to this zone by Hilbert assignment.
-		int target = _zone_for_hilbert(_entity_hilbert(e), zone_count);
+		int target = RelZone::zone_for_hilbert(_node_view, _entity_hilbert(e));
 		if (target != zone_id) {
 			continue; // Will be loaded by the correct zone.
 		}
@@ -1055,6 +1017,13 @@ void FabricZone::initialize() {
 	zone_id = my_id;
 	zone_count = zcount;
 
+	// ── Build relativistic NodeView from static zone partition ──────────
+	// Initial view is computed from the uniform Hilbert partition (same
+	// formula as the old _zone_for_hilbert / _hilbert_aoi_band). Gossip
+	// messages from neighbors will update this at runtime if ranges change.
+	_node_view = RelZone::node_view_from_zone_count<MAX_ZONES>((std::size_t)my_id, zcount);
+	_hlc = RelZone::HLC{ (uint64_t)tick, 0 };
+
 	// ── Allocate fixed-size slot array ──────────────────────────────────
 	// _zone_capacity is set by --zone-capacity (default = ZONE_CAPACITY).
 	// Allocating exactly _zone_capacity slots ensures constant-work at the configured limit.
@@ -1074,7 +1043,7 @@ void FabricZone::initialize() {
 		candidate.cx = (real_t)((i * 137) % 30000 - 15000) * 0.001;
 		candidate.cy = (real_t)((i * 53) % 30000 - 15000) * 0.001;
 		candidate.cz = (real_t)((i * 29) % 30000 - 15000) * 0.001;
-		int z = _zone_for_hilbert(_entity_hilbert(candidate), zone_count);
+		int z = RelZone::zone_for_hilbert(_node_view, _entity_hilbert(candidate));
 		if (z < MAX_ZONES) {
 			centroid_sum[z][0] += candidate.cx;
 			centroid_sum[z][1] += candidate.cy;
@@ -1140,7 +1109,7 @@ void FabricZone::initialize() {
 			// linear connectivity at AOI_CELLS=1 in a large fabric, without
 			// any zone_count special case.
 			uint32_t band_lo = 0, band_hi = 0;
-			_hilbert_aoi_band(band_lo, band_hi, my_id, zcount);
+			RelZone::aoi_band_cells(_node_view, (uint32_t)my_id, AOI_CELLS, band_lo, band_hi);
 			int depth = 0;
 			uint32_t x = (uint32_t)(zcount - 1);
 			while (x > 0) {
@@ -1168,7 +1137,7 @@ void FabricZone::initialize() {
 
 	{
 		uint32_t bl = 0, bh = 0;
-		_hilbert_aoi_band(bl, bh, my_id, zone_count);
+		RelZone::aoi_band_cells(_node_view, (uint32_t)my_id, AOI_CELLS, bl, bh);
 		::AABB lo_cell = hilbert_cell_of_aabb((int)bl, 10);
 		::AABB hi_cell = hilbert_cell_of_aabb((int)(bh > 0 ? bh - 1 : 0), 10);
 		print_line(vformat("[zone %d] aoi_band: codes=[%d,%d) lo_cell=(%.1f,%.1f,%.1f) hi_cell=(%.1f,%.1f,%.1f)",
@@ -1220,7 +1189,7 @@ bool FabricZone::physics_process(double p_time) {
 			memcpy(w + 28, &ivx, 2);
 			memcpy(w + 30, &ivy, 2);
 			// vz, ax, ay, az left 0
-			uint32_t hlc_val = ((tick & 0x00FFFFFFu) << 8);
+			uint32_t hlc_val = _hlc.to_wire();
 			memcpy(w + 40, &hlc_val, 4);
 			// payload[0..13] = 0 (no cmd)
 			// Only send once connected (avoids put_packet errors during ENet handshake).
@@ -1465,7 +1434,7 @@ bool FabricZone::physics_process(double p_time) {
 			LocalVector<Vector<uint8_t>> interest_pkts =
 					peer_callbacks.drain_channel_raw(fabric_peer.ptr(), CH_INTEREST);
 			uint32_t band_lo = 0, band_hi = 0;
-			_hilbert_aoi_band(band_lo, band_hi, zone_id, zone_count);
+			RelZone::aoi_band_cells(_node_view, (uint32_t)zone_id, AOI_CELLS, band_lo, band_hi);
 			Aabb scene = _scene_aabb();
 			Vector<uint8_t> relay_buf;
 			relay_buf.resize(1200);
@@ -1734,7 +1703,6 @@ bool FabricZone::physics_process(double p_time) {
 
 	// ── Detect boundary crossings -> begin_migration (Lean protocol) ────
 	int my_id = zone_id;
-	int p = zone_count;
 
 	struct IntentRecord {
 		int target;
@@ -1758,7 +1726,7 @@ bool FabricZone::physics_process(double p_time) {
 		if (slots[i].is_player_slot) {
 			continue;
 		}
-		int target = _zone_for_hilbert(_entity_hilbert(e), p);
+		int target = RelZone::zone_for_hilbert(_node_view, _entity_hilbert(e));
 		if (target != my_id) {
 			diag_wrong_zone++;
 			slots[i].hysteresis += 1;
@@ -2125,7 +2093,9 @@ bool FabricZone::physics_process(double p_time) {
 		buf.resize(_zone_capacity * 100); // Constant-work: fixed allocation regardless of occupancy.
 		uint8_t *w = buf.ptrw();
 		int write_pos = 0;
-		uint8_t hlc_counter = 0;
+		// Advance HLC to current tick; reset logical counter for this publish pass.
+		_hlc = RelZone::HLC::advance(_hlc, (uint64_t)tick);
+		_hlc.l = 0;
 
 		for (int i = 0; i < _zone_capacity; i++) {
 			if (!slots[i].active) {
@@ -2143,8 +2113,9 @@ bool FabricZone::physics_process(double p_time) {
 				int16_t iax = (int16_t)CLAMP((int)(e.ax * A_SCALE), -32767, 32767);
 				int16_t iay = (int16_t)CLAMP((int)(e.ay * A_SCALE), -32767, 32767);
 				int16_t iaz = (int16_t)CLAMP((int)(e.az * A_SCALE), -32767, 32767);
-				// HLC: tick(24b) | counter(8b). Counter disambiguates same-tick publishes.
-				uint32_t hlc = ((tick & 0x00FFFFFFu) << 8) | hlc_counter++;
+				// HLC wire: tick(24b) | counter(8b). Counter disambiguates same-tick publishes.
+				uint32_t hlc = _hlc.to_wire();
+				_hlc.l++;
 				memcpy(w + write_pos, &gid, 4);
 				write_pos += 4;
 				memcpy(w + write_pos, &ecx, 8);
@@ -2295,7 +2266,8 @@ int FabricZone::_accept_incoming_intents_s(EntitySlot *p_slots, int p_capacity,
 }
 
 int FabricZone::_collect_migration_intents_s(EntitySlot *p_slots, int p_capacity,
-		int p_zone_id, int p_zone_count, const uint32_t p_srtt[2],
+		int p_zone_id, const RelZone::NodeView<MAX_ZONES> &p_node_view,
+		const uint32_t p_srtt[2],
 		uint32_t p_tick, uint32_t p_hz, int p_budget,
 		uint64_t &r_xing_started, uint64_t &r_migrations,
 		LocalVector<Vector<uint8_t>> &r_outbox) {
@@ -2307,7 +2279,7 @@ int FabricZone::_collect_migration_intents_s(EntitySlot *p_slots, int p_capacity
 			continue;
 		}
 		const FabricEntity &e = p_slots[i].entity;
-		int target = _zone_for_hilbert(_entity_hilbert(e), p_zone_count);
+		int target = RelZone::zone_for_hilbert(p_node_view, _entity_hilbert(e));
 		if (target != p_zone_id) {
 			p_slots[i].hysteresis += 1;
 			if (p_slots[i].hysteresis >= hysteresis_runtime && p_budget > 0) {

@@ -103,6 +103,26 @@ theorem VClock.le_merge_left {n : Nat} (a b : VClock n) : VClock.le a (VClock.me
 theorem VClock.le_merge_right {n : Nat} (a b : VClock n) : VClock.le b (VClock.merge a b) :=
   fun _ => Nat.le_max_right _ _
 
+-- ── Lattice properties of merge (red → green: all three proved below) ──────
+
+/-- merge is commutative: the order of inputs does not matter. -/
+theorem VClock.merge_comm {n : Nat} (a b : VClock n) :
+    VClock.merge a b = VClock.merge b a := by
+  unfold VClock.merge
+  congr 1; funext i; exact Nat.max_comm _ _
+
+/-- merge is associative. -/
+theorem VClock.merge_assoc {n : Nat} (a b c : VClock n) :
+    VClock.merge (VClock.merge a b) c = VClock.merge a (VClock.merge b c) := by
+  unfold VClock.merge
+  congr 1; funext i; exact Nat.max_assoc _ _ _
+
+/-- merge is idempotent: merging with yourself leaves the clock unchanged. -/
+theorem VClock.merge_idem {n : Nat} (a : VClock n) :
+    VClock.merge a a = a := by
+  unfold VClock.merge
+  congr 1; funext i; exact Nat.max_self _
+
 /-- tick strictly advances the issuing node's clock.
     Every other component is unchanged; only `self` increments. -/
 theorem VClock.lt_tick {n : Nat} (vc : VClock n) (self : Fin n) :
@@ -194,6 +214,24 @@ theorem receive_subsumes_sender {n : Nat} (view : NodeView n) (msg : GossipMsg n
   simp only [receive_clock_eq]
   exact VClock.le_merge_right _ _
 
+/-- Gossip preserves DisjointRanges.
+    If the current view's ranges are disjoint AND the incoming message's ranges
+    are disjoint, then the post-receive view's ranges are also disjoint.
+    This is the core "no god" safety invariant: no coordinator is needed because
+    the gossip gating (causal dominance) guarantees the adopted map is from a node
+    that itself maintained disjointness.
+    Red → green: proved by case analysis on the if-branch. -/
+theorem receive_preserves_disjoint {n : Nat} (view : NodeView n) (msg : GossipMsg n)
+    (hview : DisjointRanges view.ranges)
+    (hmsg  : DisjointRanges msg.ranges) :
+    DisjointRanges (NodeView.receive view msg).ranges := by
+  unfold NodeView.receive
+  by_cases h : VClock.le view.clock msg.vc
+  · simp only [if_pos h]
+    exact hmsg
+  · simp only [if_neg h]
+    exact hview
+
 /-- Gossip is monotone: receiving a causally newer message gives a larger clock. -/
 theorem receive_clock_monotone {n : Nat} (view : NodeView n) (msg1 msg2 : GossipMsg n)
     (hord : VClock.le msg1.vc msg2.vc) :
@@ -236,6 +274,18 @@ theorem geometric_authority_unique {n : Nat} (view : NodeView n) (h : Nat)
     (hc1 : r1.contains h = true) (hc2 : r2.contains h = true) :
     r1.zoneId = r2.zoneId :=
   authority_unique hdisj hm1 hm2 hc1 hc2
+
+/-- The geometricInterest condition `(r.lo ≤ h + aoi) && (h ≤ r.hi + aoi)` is
+    equivalent to the symmetric overlap of [r.lo, r.hi] with [h - aoi, h + aoi].
+    The unsafe-subtraction form `h - aoi` is avoided; instead the check is
+    reformulated as `h ≤ r.hi + aoi` which is equivalent under Nat arithmetic.
+    Red: sorry-stub — the Prop-level equivalence is left for a future proof pass
+    once a Nat.sub-safe interval-overlap lemma is in scope. -/
+theorem geometricInterest_overlap_iff {n : Nat} (view : NodeView n) (h aoi : Nat)
+    (r : ZoneRange) (hmem : r ∈ view.ranges) :
+    r ∈ geometricInterest view h aoi ↔
+    r.lo ≤ h + aoi ∧ (aoi ≤ h → r.hi + 1 > h - aoi) := by
+  sorry
 
 -- ============================================================================
 -- 5. RELATIVISTIC QUEUE  (causal ordering; concurrent ops freely reordered)
@@ -365,6 +415,50 @@ theorem HLC.lt_trans {a b c : HLC} (hab : HLC.lt a b) (hbc : HLC.lt b c) : HLC.l
   simp [HLC.lt] at *
   omega
 
+/-- Advance an HLC to a new physical time `nowPt` (e.g. the server tick counter).
+    If nowPt > local.pt, reset the logical counter to 0 and bump pt.
+    If nowPt ≤ local.pt (same tick or clock stall), keep pt and bump l.
+    Matches the C++ HLC::advance in relativistic_zone.h. -/
+def HLC.advance (local : HLC) (nowPt : Nat) : HLC :=
+  let pt := max local.pt nowPt
+  { pt := pt
+    l  := if pt = local.pt then local.l + 1 else 0 }
+
+/-- advance always produces a strictly later HLC. -/
+theorem HLC.advance_lt {local : HLC} (nowPt : Nat) :
+    HLC.lt local (HLC.advance local nowPt) := by
+  unfold HLC.advance HLC.lt
+  simp only
+  by_cases h : max local.pt nowPt = local.pt
+  · simp only [h, if_true, lt_irrefl, false_or]
+    exact ⟨rfl, Nat.lt_succ_self _⟩
+  · left
+    exact Nat.lt_of_le_of_ne (Nat.le_max_left _ _) (fun heq => h heq.symm)
+
+/-- Receiving a later physical time does not decrease pt. -/
+theorem HLC.advance_pt_ge {local : HLC} (nowPt : Nat) :
+    local.pt ≤ (HLC.advance local nowPt).pt := by
+  simp [HLC.advance, Nat.le_max_left]
+
+/-- Merge two HLCs on receive: pick the causally later one then advance.
+    Red: sorry-stub — the full merge invariants need omega over 3-way max. -/
+def HLC.merge (local remote : HLC) (nowPt : Nat) : HLC :=
+  let pt := max (max local.pt remote.pt) nowPt
+  { pt := pt
+    l  := if pt = local.pt && pt = remote.pt then max local.l remote.l + 1
+          else if pt = local.pt then local.l + 1
+          else if pt = remote.pt then remote.l + 1
+          else 0 }
+
+/-- merge result is causally ≥ both inputs. -/
+theorem HLC.merge_ge_local {local remote : HLC} (nowPt : Nat) :
+    ¬ HLC.lt (HLC.merge local remote nowPt) local := by
+  sorry
+
+theorem HLC.merge_ge_remote {local remote : HLC} (nowPt : Nat) :
+    ¬ HLC.lt (HLC.merge local remote nowPt) remote := by
+  sorry
+
 /-- Embed an HLC into a single-node VClock using a linear encoding.
     maxL bounds the logical counter; the slot width is (maxL + 1) so
     different physical times produce non-overlapping ranges. -/
@@ -416,8 +510,42 @@ theorem HLC.toVClock_lt_of_pt_lt (maxL : Nat) (a b : HLC)
 --           are delivered — no leader election needed.
 --
 -- HLC:      the existing protocol's single-node HLC (pt, l) embeds into
---           VClock 1 via toVClock (HLC.toVClock_lt_iff).  VClock n generalises
---           HLC to n nodes, eliminating the NTP synchronisation requirement.
+--           VClock 1 via toVClock.  Order is preserved by
+--           HLC.toVClock_lt_of_same_pt and HLC.toVClock_lt_of_pt_lt.
+--           VClock n generalises HLC to n nodes, eliminating the NTP
+--           synchronisation requirement.
 --           Authority and interest remain computable from geometry alone.
+
+-- ============================================================================
+-- 9. BRIDGE TO Fabric.lean  (red: sorry-stubs awaiting proof)
+-- ============================================================================
+--
+-- Fabric.lean proves `assignToZone_in_range`, `aoiBand_covers_self`, and
+-- `aoiBand_width_bound` for the uniform Hilbert partition.  The C++ side
+-- bridges these via `node_view_from_zone_count` (relativistic_zone.h).
+-- The two theorems below are the formal statements of that bridge; both are
+-- sorry-stubs pending a connection to the Lean definitions in Fabric.lean.
+
+/-- The uniform initial partition (one ZoneRange per zone, cell width =
+    mortonSpanWidth (zonePrefixDepth zoneCount)) satisfies DisjointRanges.
+    Red: sorry-stub.  Green path: induction on zoneCount, using the fact that
+    adjacent zones have non-overlapping lo/hi computed from the same cell_w. -/
+theorem uniform_partition_disjoint (n zoneCount : Nat)
+    (hpos : 0 < zoneCount) (depth : Nat) (cell_w : Nat) (hcw : 0 < cell_w)
+    (ranges : List ZoneRange)
+    (hunif : ranges = (List.range zoneCount).map (fun z =>
+        { zoneId := z, lo := z * cell_w, hi := z * cell_w + cell_w - 1 })) :
+    DisjointRanges ranges := by
+  sorry
+
+/-- geometricAuthority on a disjoint view returns a zone id that is a valid
+    index into view.ranges.  This is the formal counterpart to the C++
+    `zone_for_hilbert` fallback-clamp.
+    Red: sorry-stub.  Green path: List.find?_mem + length bound. -/
+theorem geometric_authority_zoneId_lt_length {n : Nat}
+    (view : NodeView n) (h : Nat) (hlen : 0 < view.ranges.length)
+    {r : ZoneRange} (hauth : geometricAuthority view h = some r) :
+    r.zoneId < view.ranges.length := by
+  sorry
 
 end PredictiveBVH.Relativistic

@@ -36,7 +36,9 @@
 #include "scene/main/fabric_zone_peer_callbacks.h"
 #include "scene/main/scene_tree.h"
 
-#include <thirdparty/predictive_bvh/predictive_bvh.h>
+#include <modules/multiplayer_fabric_mmog/predictive_bvh/predictive_bvh.h>
+
+#include "relativistic_zone.h"
 
 // Timing and migration constants come from predictive_bvh.h (generated from Lean):
 //   PBVH_SIM_TICK_HZ, PBVH_LATENCY_TICKS, PBVH_HYSTERESIS_THRESHOLD,
@@ -61,19 +63,9 @@ class FabricZone : public SceneTree {
 	GDCLASS(FabricZone, SceneTree);
 
 public:
-	// ── Hilbert AOI band ───────────────────────────────────────────────
-	// AOI_CELLS: number of Hilbert cells of padding applied to each side
-	// of a zone's own range. The relay and the neighbor-topology loop both
-	// read the same band so one constant controls fanout width.
-	// AOI_CELLS=1 gives two or three neighbors in a 100-zone fabric;
-	// AOI_CELLS=2 on a 3-zone smoke covers the full Hilbert space (full
-	// mesh by derivation, not by branch).
+	// ── Capacity and AOI constants (public for tests and RelZone helpers) ─
+	static constexpr int MAX_ZONES = 32;
 	static constexpr int AOI_CELLS = 2;
-	// Fills [out_lo, out_hi) = Hilbert AOI band for this zone's (my_id,
-	// zone_count) pair. Clamped to [0, 2^30). Static/pure so unit tests
-	// can mirror the Lean theorems in Protocol/Fabric.lean without
-	// constructing a SceneTree.
-	static void _hilbert_aoi_band(uint32_t &out_lo, uint32_t &out_hi, int my_id, int count);
 
 	// ── Entity (real_t, meters) ────────────────────────────────────────
 	struct FabricEntity {
@@ -196,7 +188,8 @@ public:
 	// Zone A: scan slots, emit intents for entities that crossed Hilbert boundary.
 	// Returns number of intents queued. Pushes packed intents to r_outbox.
 	static int _collect_migration_intents_s(EntitySlot *p_slots, int p_capacity,
-			int p_zone_id, int p_zone_count, const uint32_t p_srtt[2],
+			int p_zone_id, const RelZone::NodeView<MAX_ZONES> &p_node_view,
+			const uint32_t p_srtt[2],
 			uint32_t p_tick, uint32_t p_hz, int p_budget,
 			uint64_t &r_xing_started, uint64_t &r_migrations,
 			LocalVector<Vector<uint8_t>> &r_outbox);
@@ -251,7 +244,6 @@ private:
 	static constexpr int CHOKE_POINT_BELL_PERIOD_SECONDS = 3; // choke_point bell period
 	static constexpr uint32_t CHOKE_POINT_PULSE_MS = 100; // choke_point pulse duration
 	static constexpr uint32_t STATS_LOG_INTERVAL_SECONDS = 20; // periodic stats log cadence
-	static constexpr int MAX_ZONES = 32;
 	// ZONE_CAPACITY: hard upper bound on slot array size (compile-time max).
 	// _zone_capacity: runtime limit set via --zone-capacity N (default = ZONE_CAPACITY).
 	// Headless dedicated server: 1800 (AbyssalSLA.lean: 16 players × 56 + 904 ecosystem).
@@ -264,6 +256,13 @@ private:
 	static constexpr int STROKE_ENTITY_BASE = 1000000; // global_id >= this → pen stroke knot
 	static constexpr int MAX_STROKE_KNOTS = 50; // max knots per stroke chain (snake head/tail)
 	static constexpr uint32_t INTEREST_PUBLISH_INTERVAL = 1;
+
+	// ── Relativistic zone state (NoGod theory) ──────────────────────────
+	// Gossip-maintained view of the cluster's Hilbert-range partition.
+	// Replaces the computed _zone_for_hilbert / _hilbert_aoi_band statics.
+	RelZone::NodeView<MAX_ZONES> _node_view;
+	// Hybrid Logical Clock for causal ordering of CH_INTEREST packets.
+	RelZone::HLC _hlc;
 
 	// ── Zone state ───────────────────────────────────────────────────────
 	int zone_id = 0;
@@ -426,7 +425,6 @@ private:
 
 	// ── GDScript-exposed Hilbert helpers (public for ClassDB + tests) ───
 public:
-	static int _zone_for_hilbert(uint32_t hcode, int count);
 	static uint32_t _entity_hilbert(const FabricEntity &e);
 	static ::AABB hilbert_cell_of_aabb(int p_code, int p_prefix_depth);
 	static int hilbert_of_point(float p_x, float p_y, float p_z);
