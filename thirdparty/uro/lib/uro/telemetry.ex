@@ -67,7 +67,7 @@ defmodule Uro.Telemetry do
 
     running  = Enum.count(zones, &(&1.status == "running"))
     starting = Enum.count(zones, &(&1.status == "starting"))
-    players  = zones |> Enum.filter(&(&1.status == "running")) |> Enum.sum_by(& &1.current_users || 0)
+    players  = zones |> Enum.filter(&(&1.status == "running")) |> Enum.reduce(0, fn z, acc -> acc + (z.current_users || 0) end)
 
     :telemetry.execute([:uro, :zones, :running],  %{count: running},  %{})
     :telemetry.execute([:uro, :zones, :starting], %{count: starting}, %{})

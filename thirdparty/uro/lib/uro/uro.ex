@@ -81,14 +81,4 @@ defmodule Uro do
     apply(__MODULE__, which, [])
   end
 
-  require Protocol
-
-  Protocol.derive(Inspect, Plug.Conn,
-    only: [
-      :method,
-      :params,
-      :request_path,
-      :assigns
-    ]
-  )
 end

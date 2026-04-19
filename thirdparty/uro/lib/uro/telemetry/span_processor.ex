@@ -8,17 +8,16 @@ defmodule Uro.Telemetry.SpanProcessor do
   @behaviour :otel_span_processor
 
   @impl :otel_span_processor
-  def on_start(span, _parent_ctx), do: span
+  def on_start(span, _parent_ctx, _config), do: span
 
   @impl :otel_span_processor
-  def on_end(span) do
+  def on_end(span, _config) do
     Uro.Telemetry.SpanStore.record(span)
     :ok
   end
 
   @impl :otel_span_processor
-  def force_flush(timeout), do: {:ok, timeout}
+  def force_flush(_timeout), do: :ok
 
-  @impl :otel_span_processor
-  def shutdown(_timeout), do: :ok
+  def shutdown(_config), do: :ok
 end
