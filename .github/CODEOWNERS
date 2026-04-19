@@ -126,8 +126,13 @@
 /modules/mbedtls/tests/                       @godotengine/network @godotengine/tests
 /modules/multiplayer/                         @godotengine/network
 /modules/multiplayer/doc_classes/             @godotengine/network @godotengine/documentation
+/modules/keychain/                            @fire
+/designs/                                     @fire
+/modules/multiplayer_fabric/                  @fire
+/modules/multiplayer_fabric_mmog/             @fire
 /modules/multiplayer/editor/                  @godotengine/network @godotengine/editor
 /modules/multiplayer/tests/                   @godotengine/network @godotengine/tests
+/modules/http3/                               @godotengine/network
 /modules/upnp/                                @godotengine/network
 /modules/upnp/doc_classes/                    @godotengine/network @godotengine/documentation
 /modules/webrtc/                              @godotengine/network
@@ -147,8 +152,6 @@
 /modules/meshoptimizer/                       @godotengine/rendering
 /modules/raycast/                             @godotengine/rendering
 /modules/vhacd/                               @godotengine/rendering
-/modules/visual_shader/                       @godotengine/shaders
-/modules/visual_shader/doc_classes/           @godotengine/shaders @godotengine/documentation
 /modules/xatlas_unwrap/                       @godotengine/rendering
 
 ## Scripting
@@ -156,6 +159,8 @@
 /modules/gdscript/doc_classes/                @godotengine/gdscript @godotengine/documentation
 /modules/gdscript/editor/                     @godotengine/gdscript @godotengine/script-editor
 /modules/gdscript/tests/                      @godotengine/gdscript @godotengine/tests
+/modules/sandbox/                             @fire
+/modules/speech/                              @fire
 /modules/jsonrpc/                             @godotengine/gdscript @godotengine/network
 /modules/jsonrpc/tests/                       @godotengine/gdscript @godotengine/network @godotengine/tests
 /modules/mono/                                @godotengine/dotnet
@@ -189,6 +194,8 @@
 /modules/gridmap/                             @godotengine/3d-nodes
 /modules/gridmap/doc_classes/                 @godotengine/3d-nodes @godotengine/documentation
 /modules/gridmap/editor/                      @godotengine/3d-nodes @godotengine/editor
+/modules/lasso/                               @fire
+/modules/sqlite/                              @fire
 /modules/navigation_2d/                       @godotengine/navigation
 /modules/navigation_2d/editor/                @godotengine/navigation @godotengine/editor
 /modules/navigation_3d/                       @godotengine/navigation
@@ -202,6 +209,7 @@
 /modules/regex/                               @godotengine/core
 /modules/regex/doc_classes/                   @godotengine/core @godotengine/documentation
 /modules/regex/tests/                         @godotengine/core @godotengine/tests
+/modules/open_telemetry/                      @V-Sekai/vsekai
 /modules/zip/                                 @godotengine/core
 /modules/zip/doc_classes/                     @godotengine/core @godotengine/documentation
 /modules/zip/tests/                           @godotengine/core @godotengine/tests
@@ -254,6 +262,7 @@
 /scene/resources/shader*                      @godotengine/shaders
 /scene/resources/skeleton*                    @godotengine/animation
 /scene/resources/text_*                       @godotengine/gui-nodes
+/scene/resources/visual_shader*               @godotengine/shaders
 /scene/theme/                                 @godotengine/gui-nodes
 
 # Servers
