@@ -399,6 +399,10 @@ struct HLC {
 		return l < o.l;
 	}
 	bool operator==(const HLC &o) const { return pt == o.pt && l == o.l; }
+	bool operator<=(const HLC &o) const { return !(o < *this); }
+
+	// leb: decidable ≤ matching Lean HLC.leb — a ≤ b iff ¬(b < a).
+	static bool leb(const HLC &a, const HLC &b) { return !(b < a); }
 
 	// Encode into the existing wire format: tick(24b) | counter(8b).
 	// Matches the existing CH_INTEREST packet layout (offset 40).
