@@ -387,7 +387,7 @@ private:
 	real_t _p1_cx[XING_TOTAL] = {};
 	real_t _p1_cy[XING_TOTAL] = {};
 	real_t _p1_cz[XING_TOTAL] = {};
-	uint32_t _p1_last_tick[XING_TOTAL] = {}; // tick of last received update per entity
+	RelZone::HLC _p1_sent_at[XING_TOTAL] = {}; // causal HLC of last received update per entity
 	int _p1_seen_count = 0;
 	int _p1_snap_count = 0;
 	bool _p1_pass_logged = false;

@@ -1224,7 +1224,7 @@ bool FabricZone::physics_process(double p_time) {
 						int idx = (int)gid - XING_ID_LO;
 						bool was_seen = _p1_seen[idx];
 						const uint32_t snap_absence_ticks = MAX((SNAP_ABSENCE_MS * _fz_hz() + 999u) / 1000u, 1u);
-						bool gap = was_seen && (tick - _p1_last_tick[idx] > snap_absence_ticks);
+						bool gap = was_seen && !RelZone::HLC::leb({ _p1_sent_at[idx].pt + snap_absence_ticks, 0 }, _hlc);
 						if (was_seen && !gap) {
 							// Continuous stream — check for teleport.
 							real_t dx = cx - _p1_cx[idx];
@@ -1244,7 +1244,7 @@ bool FabricZone::physics_process(double p_time) {
 						_p1_cx[idx] = cx;
 						_p1_cy[idx] = cy;
 						_p1_cz[idx] = cz;
-						_p1_last_tick[idx] = tick;
+						_p1_sent_at[idx] = _hlc;
 						if (!_p1_pass_logged && _p1_seen_count >= XING_TOTAL) {
 							_p1_pass_logged = true;
 							print_line(vformat(
