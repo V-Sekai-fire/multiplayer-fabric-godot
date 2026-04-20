@@ -405,3 +405,6 @@ $RECYCLE.BIN/
 /*.db*
 thirdparty/uro/cockroach/
 native/keychain_nif/target/
+
+# Lean 4 build cache
+.lake/
