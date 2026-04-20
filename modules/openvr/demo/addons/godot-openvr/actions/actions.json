@@ -1,0 +1,127 @@
+{
+	"action_sets" : [
+		{
+			"name" : "/actions/godot",
+			"usage" : "leftright"
+		}
+	],
+	"actions" : [
+		{
+			"name": "/actions/godot/in/aim",
+			"requirement" : "mandatory",
+			"type": "pose"
+		},
+		{
+			"name": "/actions/godot/in/grip",
+			"requirement" : "mandatory",
+			"type": "pose"
+		},
+		{
+			"name" : "/actions/godot/in/trigger_click",
+			"requirement" : "mandatory",
+			"type" : "boolean"
+		},
+		{
+			"name" : "/actions/godot/in/trigger_value",
+			"requirement" : "suggested",
+			"type" : "vector1"
+		},
+		{
+			"name" : "/actions/godot/in/grip_click",
+			"requirement" : "suggested",
+			"type" : "boolean"
+		},
+		{
+			"name" : "/actions/godot/in/grip_value",
+			"requirement" : "suggested",
+			"type" : "vector1"
+		},
+		{
+			"name" : "/actions/godot/in/primary",
+			"requirement" : "suggested",
+			"type" : "vector2"
+		},
+		{
+			"name" : "/actions/godot/in/primary_click",
+			"requirement" : "suggested",
+			"type" : "boolean"
+		},
+		{
+			"name" : "/actions/godot/in/secondary",
+			"requirement" : "suggested",
+			"type" : "vector2"
+		},
+		{
+			"name" : "/actions/godot/in/secondary_click",
+			"requirement" : "suggested",
+			"type" : "boolean"
+		},
+		{
+			"name" : "/actions/godot/in/ax",
+			"requirement" : "optional",
+			"type" : "boolean"
+		},
+		{
+			"name" : "/actions/godot/in/by",
+			"requirement" : "optional",
+			"type" : "boolean"
+		},
+		{
+			"name" : "/actions/godot/out/haptic",
+			"requirement" : "optional",
+			"type" : "vibration"
+		},
+		{
+			"name": "/actions/godot/in/left_hand",
+			"type": "skeleton",
+			"skeleton": "/skeleton/hand/left"
+		},
+		{
+			"name": "/actions/godot/in/right_hand",
+			"type": "skeleton",
+			"skeleton": "/skeleton/hand/right"
+		}	],
+	"default_bindings" : [
+		{
+			"binding_url" : "bindings_index_controller.json",
+			"controller_type" : "knuckles"
+		},
+		{
+			"binding_url" : "bindings_oculus_touch.json",
+			"controller_type" : "oculus_touch"
+		},
+		{
+			"binding_url" : "bindings_vive_controller.json",
+			"controller_type" : "vive_controller"
+		},
+		{
+			"binding_url" : "bindings_holographic_controller.json",
+			"controller_type" : "holographic_controller"
+		},
+		{
+			"binding_url" : "bindings_generic.json",
+			"controller_type" : "generic"
+		}
+	],
+	"localization" : [
+		{
+			"/actions/godot" : "Godot actions",
+			"/actions/godot/in/primary" : "Primary analog Input",
+			"/actions/godot/in/primary_click" : "Primary analog Click",
+			"/actions/godot/in/secondary" : "Secondary analog Input",
+			"/actions/godot/in/secondary_click" : "Secondary analog Click",
+			"/actions/godot/in/analog_grip" : "Analog Grip",
+			"/actions/godot/in/analog_trigger" : "Analog Trigger",
+			"/actions/godot/in/button_ax" : "A/X Button",
+			"/actions/godot/in/button_by" : "B/Y Button",
+			"/actions/godot/in/grip" : "Grip",
+			"/actions/godot/in/trigger" : "Trigger",
+			"/actions/godot/in/aim_pose" : "Aim pose",
+			"/actions/godot/in/grip_pose" : "Grip pose",
+			"/actions/godot/out/haptic" : "Haptic Feedback",
+			"/actions/godot/in/left_hand" : "Left hand",
+			"/actions/godot/in/right_hand" : "Right hand",
+			"language_tag" : "en_US"
+		}
+	]
+}
