@@ -17,7 +17,7 @@ never commit unique work to it directly.
 | `feat/module-lasso` | `modules/lasso` (includes E2BIG fix) |
 | `feat/engine-patches-NNN` | Engine patches across core, scene, servers, editor, drivers, tests |
 | `feat/engine-patch-control-gui-input` | `Control::call_gui_input` public wrapper with viewport isolation |
-| `archived/module-http3` | `modules/http3` + `thirdparty/picoquic` + mbedtls |
+| `feat/module-http3-NNN` | `modules/http3` + `thirdparty/picoquic` + mbedtls |
 | `feat/module-multiplayer-fabric-NNN` | `modules/multiplayer_fabric` |
 | `feat/module-multiplayer-fabric-mmog-NNN` | `modules/multiplayer_fabric_mmog` + predictive BVH + Lean proofs |
 | `feat/module-open-telemetry` | `modules/open_telemetry` |
