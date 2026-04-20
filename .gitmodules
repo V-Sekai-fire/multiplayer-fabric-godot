@@ -1,0 +1,3 @@
+[submodule "modules/multiplayer_fabric_mmog/predictive_bvh"]
+	path = modules/multiplayer_fabric_mmog/predictive_bvh
+	url = https://github.com/V-Sekai-fire/multiplayer-fabric-predictive-bvh.git
