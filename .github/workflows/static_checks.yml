@@ -43,7 +43,7 @@ jobs:
         run: |
           echo '${{ steps.changed-files.outputs.everything_all_changed_files }}' \
             | tr '" "' '\n' | sed 's/^"//;s/"$//' | grep -v '^$' \
-            > /tmp/changed_files.txt
+            > /tmp/changed_files.txt || true
           echo "Changed files: $(wc -l < /tmp/changed_files.txt)"
 
       - name: Install pre-commit
