@@ -32,7 +32,7 @@ protected and cannot be force-pushed. Increment the number and update
 
 ## Rules that apply everywhere
 
-- **Commit messages use sentence case.** First word capitalised, rest
+- **Commit messages use sentence case.** First word capitalized, rest
   lowercase unless a proper noun. No `type(scope):` conventional-commit
   prefixes.
 - **Never commit to `multiplayer-fabric`.** It is overwritten by assembly.
