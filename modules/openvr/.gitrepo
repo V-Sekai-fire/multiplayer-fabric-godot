@@ -1,0 +1,11 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/git-commands/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/GodotVR/godot_openvr.git
+	branch = master
+	commit = 74e3943eaf0e4430d4322b96eb1b98170c5ea018
+	parent = a8643700ce8affae9fed0d2688b9f7867f5b7d4e
+	cmdver = 0.1.0
