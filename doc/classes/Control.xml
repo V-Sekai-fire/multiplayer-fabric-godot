@@ -803,6 +803,16 @@
 				Returns [code]true[/code] if the layout is right-to-left. See also [member layout_direction].
 			</description>
 		</method>
+		<method name="call_gui_input">
+			<return type="void" />
+			<param index="0" name="event" type="InputEvent" />
+			<description>
+				Push a GUI-specific [InputEvent] directly to this [Control] without affecting the viewport's global input-handled state.
+				Unlike calling [method Viewport.push_input], this bypasses focus routing and delivers the event exclusively to this control. The [signal gui_input] signal fires first; if the handler calls [method accept_event], the virtual [method _gui_input] method is skipped, matching normal input pipeline semantics.
+				Each call is fully isolated: prior accepted events do not suppress this call, and consecutive calls each execute independently.
+				You are responsible for managing focus ([method grab_focus]) and delivering [constant NOTIFICATION_MOUSE_ENTER] / [constant NOTIFICATION_MOUSE_EXIT] as needed. Convert [member InputEventMouse.position] to local coordinates using [code]event.global_position * control.get_global_transform_with_canvas()[/code].
+			</description>
+		</method>
 		<method name="release_focus">
 			<return type="void" />
 			<description>
