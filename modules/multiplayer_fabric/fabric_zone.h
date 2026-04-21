@@ -36,7 +36,7 @@
 #include "scene/main/fabric_zone_peer_callbacks.h"
 #include "scene/main/scene_tree.h"
 
-#include "modules/multiplayer_fabric_mmog/predictive_bvh/predictive_bvh.h"
+#include "thirdparty/misc/predictive_bvh.h"
 
 #include "relativistic_zone.h"
 
