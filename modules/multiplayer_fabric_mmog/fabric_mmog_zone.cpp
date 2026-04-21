@@ -80,6 +80,9 @@ int FabricMMOGZone::spawn_humanoid_entities_for_player(int p_player_id) {
 	}
 	int first_slot = bone_slots[0];
 	_player_bone_slots.insert(p_player_id, bone_slots);
+	for (int bone = 0; bone < ENTITIES_PER_PLAYER; bone++) {
+		_journal.journal_spawn(bone_slots[bone], _slot_entity_ref(bone_slots[bone]));
+	}
 	return first_slot;
 }
 
@@ -88,6 +91,8 @@ void FabricMMOGZone::despawn_humanoid_entities_for_player(int p_player_id) {
 	ERR_FAIL_COND_MSG(it == _player_bone_slots.end(),
 			"FabricMMOGZone: no bone entities found for player.");
 	for (int idx : it->value) {
+		int gid = _slot_entity_ref(idx).global_id;
+		_journal.journal_despawn(idx, gid);
 		_free_entity_slot(idx);
 	}
 	_player_bone_slots.remove(it);
@@ -188,4 +193,5 @@ void FabricMMOGZone::_on_cmd_instance_asset(uint32_t p_player_id,
 			(asset_id_lo & 0x00FFFFFFu);
 	ent.payload[1] = asset_id_hi;
 	ent.payload[2] = asset_id_lo;
+	_journal.journal_payload_update(slot_idx, ent);
 }
