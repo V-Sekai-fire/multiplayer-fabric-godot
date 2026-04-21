@@ -354,7 +354,7 @@ struct QueueOp {
 // Section 6: RelReplica
 // Ghost entity with causal provenance.
 // sent_at replaces the scalar lastTick : Nat from InterestReplica,
-// generalising single-node HLC to n-node VClock.
+// generalizing single-node HLC to n-node VClock.
 // Corresponds to Lean: structure RelReplica (n : Nat)
 // ---------------------------------------------------------------------------
 

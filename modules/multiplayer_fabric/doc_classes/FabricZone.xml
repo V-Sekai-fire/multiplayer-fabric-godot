@@ -24,7 +24,7 @@
 		godot --headless --main-loop FabricZone -- --player-id 0 --base-port 17500
 		[/codeblock]
 		[b]Graceful shutdown:[/b] The drain protocol (DRAIN_MAGIC on CH_MIGRATION) force-migrates all entities to zone 0, which writes a [FabricSnapshot] Resource to disk. On restart, [code]_load_snapshot[/code] redistributes entities across the new zone topology.
-		[b]Crash recovery (journal):[/b] [code]FabricZoneJournal[/code] writes discrete entity mutations — spawn, despawn, payload_update — to a per-zone SQLite database ([code]fabric_journal_N.db[/code] in the user data directory). On restart, [code]replay()[/code] restores dynamic entities (humanoid players, asset instances) on top of the deterministic static-world initialisation. Physics-step position updates are not journaled because they are deterministic from the simulation. Periodic full-snapshot records prune the mutation log and bound replay time. WAL mode ([code]PRAGMA journal_mode=WAL[/code]) is used when available for better crash-consistency.
+		[b]Crash recovery (journal):[/b] [code]FabricZoneJournal[/code] writes discrete entity mutations — spawn, despawn, payload_update — to a per-zone SQLite database ([code]fabric_journal_N.db[/code] in the user data directory). On restart, [code]replay()[/code] restores dynamic entities (humanoid players, asset instances) on top of the deterministic static-world initialization. Physics-step position updates are not journaled because they are deterministic from the simulation. Periodic full-snapshot records prune the mutation log and bound replay time. WAL mode ([code]PRAGMA journal_mode=WAL[/code]) is used when available for better crash-consistency.
 	</description>
 	<tutorials>
 	</tutorials>

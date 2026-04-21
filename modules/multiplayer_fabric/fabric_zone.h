@@ -30,16 +30,16 @@
 
 #pragma once
 
+#include "fabric_zone_journal.h"
+#include "relativistic_zone.h"
+
 #include "core/templates/hash_map.h"
 #include "core/templates/local_vector.h"
 #include "core/templates/vector.h"
 #include "scene/main/fabric_zone_peer_callbacks.h"
 #include "scene/main/scene_tree.h"
 
-#include "thirdparty/misc/predictive_bvh.h"
-
-#include "relativistic_zone.h"
-#include "fabric_zone_journal.h"
+#include <thirdparty/misc/predictive_bvh.h>
 
 // Timing and migration constants come from predictive_bvh.h (generated from Lean):
 //   PBVH_SIM_TICK_HZ, PBVH_LATENCY_TICKS, PBVH_HYSTERESIS_THRESHOLD,
@@ -260,7 +260,7 @@ private:
 
 	// ── Relativistic zone state (NoGod theory) ──────────────────────────
 	// Gossip-maintained view of the cluster's Hilbert-range partition.
-	// Replaces the computed _zone_for_hilbert / _hilbert_aoi_band statics.
+	// Replaces the computed _zone_for_hilbert / _hilbert_aoi_band statistics.
 	RelZone::NodeView<MAX_ZONES> _node_view;
 	// Hybrid Logical Clock for causal ordering of CH_INTEREST packets.
 	RelZone::HLC _hlc;
@@ -342,7 +342,6 @@ private:
 	EntitySlot *slots = nullptr;
 	int entity_count = 0;
 	int free_hint = 0;
-
 
 	// Stroke chain FIFOs: stroke_id → slot indices (oldest at front, newest at back).
 	// push_back new head; when size > MAX_STROKE_KNOTS, deactivate front (tail).
