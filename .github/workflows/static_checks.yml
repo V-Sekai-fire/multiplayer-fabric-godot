@@ -39,6 +39,16 @@ jobs:
           skip_initial_fetch: true
           files_yaml_from_source_file: .github/changed_files.yml
 
+      - name: Write changed file list to response file
+        run: |
+          echo '${{ steps.changed-files.outputs.everything_all_changed_files }}' \
+            | tr '" "' '\n' | sed 's/^"//;s/"$//' | grep -v '^$' \
+            > /tmp/changed_files.txt || true
+          echo "Changed files: $(wc -l < /tmp/changed_files.txt)"
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
       - name: Style checks via pre-commit
         uses: ./.github/actions/pre-commit
         env:

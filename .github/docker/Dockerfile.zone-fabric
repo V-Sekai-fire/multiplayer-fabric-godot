@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1
+# zone-fabric: Godot headless editor + zone_console management tool.
+# One container per zone process.
+#
+# Build context layout:
+#   godot-bin/    — pre-built Godot Linux editor binary from CI
+#   zone_console/ — zone_console Elixir/Rust source tree
+
+ARG ELIXIR_IMAGE=elixir:1.17.3-otp-27
+
+# ── Build zone_console escript ────────────────────────────────────────────────
+FROM ${ELIXIR_IMAGE} AS zone-console-build
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain stable --profile minimal
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN mix local.hex --force && mix local.rebar --force
+
+WORKDIR /build
+COPY zone_console/mix.exs zone_console/mix.lock ./
+COPY zone_console/vendor ./vendor
+RUN MIX_ENV=prod mix deps.get --only prod
+COPY zone_console/lib ./lib
+RUN MIX_ENV=prod mix escript.build
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
+FROM ubuntu:22.04
+
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglu1-mesa libasound2 libpulse0 \
+    libstdc++6 libgcc-s1 ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -r -s /bin/bash -m -d /home/vsekai vsekai
+
+# Godot binary (pre-built in CI)
+COPY godot-bin/godot.linuxbsd.editor.x86_64.mono /usr/local/bin/godot
+RUN chmod +x /usr/local/bin/godot
+
+# zone_console management tool
+COPY --from=zone-console-build /build/zone_console /usr/local/bin/zone_console
+RUN chmod +x /usr/local/bin/zone_console
+
+# WebTransport port (one zone per container; map to host as needed)
+EXPOSE 54370/udp
+
+USER vsekai
+WORKDIR /home/vsekai
+
+# Default: run Godot headless. Override CMD or mount a project volume.
+ENTRYPOINT ["/usr/local/bin/godot", "--headless"]
+CMD []
