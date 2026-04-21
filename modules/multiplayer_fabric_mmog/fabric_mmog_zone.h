@@ -70,6 +70,11 @@ public:
 	// PLAYER_ENTITY_BASE (2M) to avoid collisions.
 	static constexpr int HUMANOID_BONE_ENTITY_BASE = 3000000;
 
+	// ── Entity class tag for instanced scene assets ───────────────────────
+	static constexpr uint8_t ENTITY_CLASS_ASSET_INSTANCE = 5;
+	// global_id base for instanced scene entities — above HUMANOID_BONE_ENTITY_BASE.
+	static constexpr int ASSET_INSTANCE_ENTITY_BASE = 4000000;
+
 	// ── Script registry entry (one per godot-sandbox ELF or scene asset) ──
 	// Wire format per CONCEPT_MMOG.md §Asset delivery:
 	//   [slot: u16][index_chunk_id: 32B SHA-512/256][uro_uuid: 16B] = 50 B
@@ -115,7 +120,12 @@ private:
 	// Ordered list of registered script/asset entries broadcast on CH_MIGRATION
 	// to each newly-joined peer via send_script_registry().
 	LocalVector<ScriptRegistryEntry> _script_registry;
+	// Monotonically increasing counter for asset-instance global_ids.
+	int _asset_instance_counter = 0;
 
 protected:
 	static void _bind_methods();
+	virtual void _on_cmd_instance_asset(uint32_t p_player_id,
+			real_t p_pcx, real_t p_pcy, real_t p_pcz,
+			const Vector<uint8_t> &p_pkt) override;
 };

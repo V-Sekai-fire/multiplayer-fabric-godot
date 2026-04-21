@@ -31,6 +31,7 @@
 #include "fabric_mmog_zone.h"
 
 #include "core/object/class_db.h"
+#include "core/os/os.h"
 #include "core/string/print_string.h"
 
 #include <cstring>
@@ -126,4 +127,67 @@ void FabricMMOGZone::send_script_registry(int p_peer_id) {
 				e.uro_uuid, FabricMMOGAsset::REGISTRY_URO_UUID_BYTES);
 	}
 	_send_to_peer_raw(p_peer_id, CH_MIGRATION, buf.ptr(), buf.size());
+}
+
+void FabricMMOGZone::_on_cmd_instance_asset(uint32_t p_player_id,
+		real_t p_pcx, real_t p_pcy, real_t p_pcz,
+		const Vector<uint8_t> &p_pkt) {
+	if (p_pkt.size() < 68) {
+		return;
+	}
+
+	// payload[1] = asset_id high 32 bits (offset 48)
+	// payload[2] = asset_id low  32 bits (offset 52)
+	uint32_t asset_id_hi = 0, asset_id_lo = 0;
+	memcpy(&asset_id_hi, p_pkt.ptr() + 48, 4);
+	memcpy(&asset_id_lo, p_pkt.ptr() + 52, 4);
+	const uint64_t asset_id64 = ((uint64_t)asset_id_hi << 32u) | asset_id_lo;
+
+	// payload[3-5] = target position as f32 bit patterns (offset 56-67)
+	uint32_t xu = 0, yu = 0, zu = 0;
+	memcpy(&xu, p_pkt.ptr() + 56, 4);
+	memcpy(&yu, p_pkt.ptr() + 60, 4);
+	memcpy(&zu, p_pkt.ptr() + 64, 4);
+	float tx, ty, tz;
+	memcpy(&tx, &xu, 4);
+	memcpy(&ty, &yu, 4);
+	memcpy(&tz, &zu, 4);
+
+	// Build hex string from 64-bit asset id for the uro manifest endpoint.
+	String asset_id_str = String::num_uint64(asset_id64, 16).lpad(16, "0");
+
+	String uro_url = OS::get_singleton()->get_environment("URO_URL");
+	if (uro_url.is_empty()) {
+		uro_url = "http://zone-backend:4000";
+	}
+
+	// Blocking manifest fetch — runs on physics thread, acceptable for GREEN.
+	// REFACTOR: move to WorkerThreadPool so the zone tick is not stalled.
+	Vector<FabricMMOGAsset::CaibxChunk> chunks;
+	String manifest_error;
+	const Error err = FabricMMOGAsset::request_manifest(uro_url, asset_id_str,
+			chunks, manifest_error);
+	if (err != OK) {
+		print_error(vformat("CMD_INSTANCE_ASSET: manifest fetch failed for %s: %s",
+				asset_id_str, manifest_error));
+		return;
+	}
+
+	// Allocate a slot at the target position and broadcast it via CH_INTEREST.
+	const int slot_idx = _alloc_entity_slot();
+	if (slot_idx < 0) {
+		print_error("CMD_INSTANCE_ASSET: zone full, cannot allocate slot");
+		return;
+	}
+
+	FabricEntity &ent = _slot_entity_ref(slot_idx);
+	ent.cx = (real_t)tx;
+	ent.cy = (real_t)ty;
+	ent.cz = (real_t)tz;
+	ent.global_id = ASSET_INSTANCE_ENTITY_BASE + _asset_instance_counter++;
+	// payload[0]: entity_class(8b) | asset_id_lo bits 0-23 for client lookup
+	ent.payload[0] = ((uint32_t)ENTITY_CLASS_ASSET_INSTANCE << 24u) |
+			(asset_id_lo & 0x00FFFFFFu);
+	ent.payload[1] = asset_id_hi;
+	ent.payload[2] = asset_id_lo;
 }

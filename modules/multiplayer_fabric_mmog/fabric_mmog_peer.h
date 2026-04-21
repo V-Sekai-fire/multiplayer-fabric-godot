@@ -73,6 +73,9 @@ public:
 		CMD_CURRENT_FUNNEL = 1, // C7 rip-current velocity spike, interest-radius scoped
 		CMD_NUDGE = 2, // payload[1] = target_entity_id (u32)
 		CMD_SPAWN_STROKE = 3, // payload[1] = stroke_id (u32), payload[2] = RGBA8888 (u32)
+		// payload[1]=asset_id_hi u32, payload[2]=asset_id_lo u32,
+		// payload[3-5]=target pos xyz as f32 bit patterns
+		CMD_INSTANCE_ASSET = 4,
 	};
 
 	// ── Muscle triplet (swing-twist rotation encoding) ──────────────────
