@@ -1,3 +1,33 @@
+/**************************************************************************/
+/*  fabric_zone_journal.cpp                                               */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
+
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 K. S. Ernest (iFire) Lee
 #include "fabric_zone_journal.h"
@@ -26,9 +56,15 @@ void FabricZoneJournal::_pack_entity(const FabricZone::FabricEntity &p_e, uint8_
 void FabricZoneJournal::_unpack_entity(const uint8_t *p_in, FabricZone::FabricEntity &r_e) {
 	float tmp[9];
 	memcpy(tmp, p_in, 36);
-	r_e.cx = tmp[0]; r_e.cy = tmp[1]; r_e.cz = tmp[2];
-	r_e.vx = tmp[3]; r_e.vy = tmp[4]; r_e.vz = tmp[5];
-	r_e.ax = tmp[6]; r_e.ay = tmp[7]; r_e.az = tmp[8];
+	r_e.cx = tmp[0];
+	r_e.cy = tmp[1];
+	r_e.cz = tmp[2];
+	r_e.vx = tmp[3];
+	r_e.vy = tmp[4];
+	r_e.vz = tmp[5];
+	r_e.ax = tmp[6];
+	r_e.ay = tmp[7];
+	r_e.az = tmp[8];
 	int32_t gid;
 	memcpy(&gid, p_in + 36, 4);
 	r_e.global_id = gid;
@@ -174,7 +210,7 @@ void FabricZoneJournal::journal_snapshot(int p_capacity, const FabricZone::Entit
 	if (!_db) {
 		return;
 	}
-	// Serialise active slots: [slot_idx u32][entity ENTITY_BYTES] per active entry.
+	// Serialize active slots: [slot_idx u32][entity ENTITY_BYTES] per active entry.
 	// Inactive slots are skipped — replay allocates only active ones.
 	static constexpr int SLOT_RECORD = 4 + ENTITY_BYTES; // 100 bytes
 	Vector<uint8_t> buf;
