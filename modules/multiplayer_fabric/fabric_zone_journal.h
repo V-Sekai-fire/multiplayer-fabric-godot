@@ -28,8 +28,6 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-// SPDX-License-Identifier: MIT
-// Copyright (c) 2026 K. S. Ernest (iFire) Lee
 #pragma once
 
 #include "fabric_zone.h"
