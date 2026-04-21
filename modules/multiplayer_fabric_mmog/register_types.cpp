@@ -32,6 +32,7 @@
 
 #include "fabric_mmog_asset.h"
 #include "fabric_mmog_peer.h"
+#include "fabric_mmog_transport_peer.h"
 #include "fabric_mmog_zone.h"
 
 #include "core/object/class_db.h"
@@ -44,6 +45,7 @@ void initialize_multiplayer_fabric_mmog_module(ModuleInitializationLevel p_level
 	GDREGISTER_CLASS(FabricMMOGZone);
 	GDREGISTER_CLASS(FabricMMOGPeer);
 	GDREGISTER_CLASS(FabricMMOGAsset);
+	GDREGISTER_CLASS(FabricMMOGTransportPeer);
 }
 
 void uninitialize_multiplayer_fabric_mmog_module(ModuleInitializationLevel p_level) {
