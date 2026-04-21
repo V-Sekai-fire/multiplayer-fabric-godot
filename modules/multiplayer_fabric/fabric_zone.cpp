@@ -1592,6 +1592,12 @@ bool FabricZone::physics_process(double p_time) {
 						break;
 					}
 				}
+			} else if (cmd == 4) {
+				// instance_asset: place a scene entity at a target position.
+				// payload[1] (offset 48): asset_id_hi (upper 32 bits of 64-bit id)
+				// payload[2] (offset 52): asset_id_lo (lower 32 bits of 64-bit id)
+				// payload[3-5] (offset 56-67): target x/y/z as f32 bit patterns
+				_on_cmd_instance_asset(player_id_field, pcx, pcy, pcz, p);
 			} else if (cmd == 3) {
 				// spawn_stroke_knot: place a knot entity at player position.
 				// payload[1] (offset 48): stroke_id (u32)

@@ -446,6 +446,14 @@ private:
 protected:
 	static void _bind_methods();
 
+	// ── Command hooks for MMOG-layer subclasses ──────────────────────────
+	// Called when a CMD_INSTANCE_ASSET packet arrives on CH_PLAYER.
+	// p_player_id = sender, p_pcx/y/z = sender position, p_pkt = full 100-byte packet.
+	// Default is a no-op; FabricMMOGZone overrides to fetch the manifest and allocate a slot.
+	virtual void _on_cmd_instance_asset(uint32_t p_player_id,
+			real_t p_pcx, real_t p_pcy, real_t p_pcz,
+			const Vector<uint8_t> &p_pkt) {}
+
 	// ── Slot helpers for MMOG-layer subclasses ───────────────────────────
 	// Finds the next free slot, reinitializes it, marks it active, and
 	// increments entity_count.  Returns the slot index, or -1 when full.
