@@ -843,6 +843,10 @@ void FabricZone::finalize() {
 		// Already draining — save whatever we've collected plus our own.
 		_drain_save_snapshot();
 	}
+	if (_journal.is_open() && slots) {
+		_journal.journal_snapshot(_zone_capacity, slots);
+	}
+	_journal.close();
 	SceneTree::finalize();
 }
 
@@ -1033,6 +1037,13 @@ void FabricZone::initialize() {
 	}
 	entity_count = 0;
 
+	// ── Open crash-recovery journal ──────────────────────────────────────
+	{
+		String journal_path = OS::get_singleton()->get_user_data_dir() +
+				"/fabric_journal_" + itos(my_id) + ".db";
+		_journal.open(journal_path);
+	}
+
 	// ── Create entities, keep our partition; accumulate per-zone centroids ──
 	// All zone centroids are computed here so every zone process knows the
 	// waypoint targets for choke_point without any inter-zone comms.
@@ -1087,6 +1098,17 @@ void FabricZone::initialize() {
 	if (snapshot_loaded > 0) {
 		print_line(vformat("[zone %d] restored %d entities from snapshot", my_id, snapshot_loaded));
 	}
+
+	// ── Replay crash-recovery journal (dynamic mutations on top of static world) ─
+	if (_journal.is_open()) {
+		int journal_count = 0;
+		bool replayed = _journal.replay(_zone_capacity, slots, journal_count);
+		if (replayed) {
+			entity_count += journal_count;
+			print_line(vformat("[zone %d] replayed %d dynamic entities from journal", my_id, journal_count));
+		}
+	}
+
 	int n = entity_count;
 
 	// ── ENet: always create server (for player connections + zone neighbors) ─

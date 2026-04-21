@@ -39,6 +39,7 @@
 #include "thirdparty/misc/predictive_bvh.h"
 
 #include "relativistic_zone.h"
+#include "fabric_zone_journal.h"
 
 // Timing and migration constants come from predictive_bvh.h (generated from Lean):
 //   PBVH_SIM_TICK_HZ, PBVH_LATENCY_TICKS, PBVH_HYSTERESIS_THRESHOLD,
@@ -342,6 +343,7 @@ private:
 	int entity_count = 0;
 	int free_hint = 0;
 
+
 	// Stroke chain FIFOs: stroke_id → slot indices (oldest at front, newest at back).
 	// push_back new head; when size > MAX_STROKE_KNOTS, deactivate front (tail).
 	HashMap<uint32_t, LocalVector<int>> _stroke_chains;
@@ -453,6 +455,9 @@ protected:
 	virtual void _on_cmd_instance_asset(uint32_t p_player_id,
 			real_t p_pcx, real_t p_pcy, real_t p_pcz,
 			const Vector<uint8_t> &p_pkt) {}
+
+	// ── Discrete-mutation journal (crash-recovery) ───────────────────────
+	FabricZoneJournal _journal;
 
 	// ── Slot helpers for MMOG-layer subclasses ───────────────────────────
 	// Finds the next free slot, reinitializes it, marks it active, and
