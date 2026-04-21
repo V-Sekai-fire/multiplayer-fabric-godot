@@ -34,33 +34,39 @@
 
 #include "tests/test_macros.h"
 
+#ifdef MODULE_HTTP3_ENABLED
 #include "modules/http3/quic_client.h"
 #include "modules/http3/web_transport_peer.h"
+#endif
 
 namespace TestFabricMMOGTransportPeer {
 
+#ifdef MODULE_HTTP3_ENABLED
 // Build a WebTransportPeer that is already in DISCONNECTED state by binding
 // it to a QUICClient that has never connected (STATUS_DISCONNECTED == 0).
 static Ref<WebTransportPeer> _make_disconnected_wt_peer() {
 	Ref<QUICClient> quic;
 	quic.instantiate();
-	// Default QUICClient status is STATUS_DISCONNECTED — no _set_status call needed.
 	Ref<WebTransportPeer> peer;
 	peer.instantiate();
 	peer->_bind_quic(quic, WebTransportPeer::MODE_CLIENT);
 	return peer;
 }
+#endif
 
 TEST_CASE("[FabricMMOGTransportPeer] initial state is DISCONNECTED") {
 	Ref<FabricMMOGTransportPeer> tp;
 	tp.instantiate();
 
 	CHECK(tp->get_connection_status() == MultiplayerPeer::CONNECTION_DISCONNECTED);
+#ifdef MODULE_HTTP3_ENABLED
 	CHECK(tp->get_wt_peer().is_null());
+#endif
 	CHECK(tp->get_ws_peer().is_null());
 }
 
-TEST_CASE("[FabricMMOGTransportPeer] create_client returns OK and reports CONNECTING") {
+#ifdef MODULE_HTTP3_ENABLED
+TEST_CASE("[FabricMMOGTransportPeer] create_client returns OK and reports CONNECTING via WT") {
 	Ref<FabricMMOGTransportPeer> tp;
 	tp.instantiate();
 
@@ -83,7 +89,6 @@ TEST_CASE("[FabricMMOGTransportPeer] poll triggers WS fallback when WT is DISCON
 
 	// Still CONNECTING — now attempting the WS fallback.
 	CHECK(tp->get_connection_status() == MultiplayerPeer::CONNECTION_CONNECTING);
-	// WS peer was created by the fallback path.
 	CHECK(tp->get_ws_peer().is_valid());
 }
 
@@ -91,17 +96,11 @@ TEST_CASE("[FabricMMOGTransportPeer] poll reaches FAILED after both transports d
 	Ref<FabricMMOGTransportPeer> tp;
 	tp.instantiate();
 
-	// Start with a pre-failed WT peer; trigger fallback.
 	tp->_set_wt_peer_for_test(_make_disconnected_wt_peer());
 	tp->poll(); // WT fails → WS created (STATE_TRYING_FALLBACK)
 
-	// The WS peer connects to port 1 which will be refused; poll once more to
-	// drain whatever state the WebSocketPeer surfaces immediately.
-	// On most platforms a refused TCP connect is visible after one poll.
 	CHECK(tp->get_ws_peer().is_valid());
 
-	// After the WS peer also reaches DISCONNECTED the overall state is FAILED.
-	// Poll until either DISCONNECTED is observed or we exhaust a safety cap.
 	constexpr int MAX_POLLS = 50;
 	for (int i = 0; i < MAX_POLLS; i++) {
 		tp->poll();
@@ -109,11 +108,10 @@ TEST_CASE("[FabricMMOGTransportPeer] poll reaches FAILED after both transports d
 			break;
 		}
 	}
-	// WS fallback to 127.0.0.1:1 must eventually fail.
 	CHECK(tp->get_connection_status() == MultiplayerPeer::CONNECTION_DISCONNECTED);
 }
 
-TEST_CASE("[FabricMMOGTransportPeer] close resets to DISCONNECTED") {
+TEST_CASE("[FabricMMOGTransportPeer] close resets to DISCONNECTED (with WT)") {
 	Ref<FabricMMOGTransportPeer> tp;
 	tp.instantiate();
 
@@ -136,5 +134,34 @@ TEST_CASE("[FabricMMOGTransportPeer] wt_path and ws_path are configurable") {
 	CHECK(tp->get_wt_path() == "/webtransport");
 	CHECK(tp->get_ws_path() == "/websocket");
 }
+#else
+TEST_CASE("[FabricMMOGTransportPeer] create_client returns OK and reports CONNECTING via WS (no http3)") {
+	Ref<FabricMMOGTransportPeer> tp;
+	tp.instantiate();
+
+	// Without http3, create_client goes straight to WebSocket.
+	CHECK(tp->create_client("127.0.0.1", 1) == OK);
+	CHECK(tp->get_connection_status() == MultiplayerPeer::CONNECTION_CONNECTING);
+	CHECK(tp->get_ws_peer().is_valid());
+}
+
+TEST_CASE("[FabricMMOGTransportPeer] close resets to DISCONNECTED (WS only)") {
+	Ref<FabricMMOGTransportPeer> tp;
+	tp.instantiate();
+
+	tp->create_client("127.0.0.1", 1);
+	tp->close();
+	CHECK(tp->get_connection_status() == MultiplayerPeer::CONNECTION_DISCONNECTED);
+	CHECK(tp->get_ws_peer().is_null());
+}
+
+TEST_CASE("[FabricMMOGTransportPeer] ws_path is configurable") {
+	Ref<FabricMMOGTransportPeer> tp;
+	tp.instantiate();
+
+	tp->set_ws_path("/websocket");
+	CHECK(tp->get_ws_path() == "/websocket");
+}
+#endif
 
 } // namespace TestFabricMMOGTransportPeer
