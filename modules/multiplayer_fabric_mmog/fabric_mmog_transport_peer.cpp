@@ -53,14 +53,26 @@ void FabricMMOGTransportPeer::_bind_methods() {
 
 // ── config ───────────────────────────────────────────────────────────────────
 
-void FabricMMOGTransportPeer::set_wt_path(const String &p_path) { _wt_path = p_path; }
-String FabricMMOGTransportPeer::get_wt_path() const { return _wt_path; }
+void FabricMMOGTransportPeer::set_wt_path(const String &p_path) {
+	_wt_path = p_path;
+}
+String FabricMMOGTransportPeer::get_wt_path() const {
+	return _wt_path;
+}
 
-void FabricMMOGTransportPeer::set_ws_path(const String &p_path) { _ws_path = p_path; }
-String FabricMMOGTransportPeer::get_ws_path() const { return _ws_path; }
+void FabricMMOGTransportPeer::set_ws_path(const String &p_path) {
+	_ws_path = p_path;
+}
+String FabricMMOGTransportPeer::get_ws_path() const {
+	return _ws_path;
+}
 
-Ref<WebTransportPeer> FabricMMOGTransportPeer::get_wt_peer() const { return _wt_peer; }
-Ref<WebSocketMultiplayerPeer> FabricMMOGTransportPeer::get_ws_peer() const { return _ws_peer; }
+Ref<WebTransportPeer> FabricMMOGTransportPeer::get_wt_peer() const {
+	return _wt_peer;
+}
+Ref<WebSocketMultiplayerPeer> FabricMMOGTransportPeer::get_ws_peer() const {
+	return _ws_peer;
+}
 
 // ── connection ───────────────────────────────────────────────────────────────
 

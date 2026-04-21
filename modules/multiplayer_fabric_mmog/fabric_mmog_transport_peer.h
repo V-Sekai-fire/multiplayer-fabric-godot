@@ -30,9 +30,10 @@
 
 #pragma once
 
+#include "scene/main/multiplayer_peer.h"
+
 #include "modules/http3/web_transport_peer.h"
 #include "modules/websocket/websocket_multiplayer_peer.h"
-#include "scene/main/multiplayer_peer.h"
 
 // FabricMMOGTransportPeer — client-side MultiplayerPeer with automatic fallback.
 //
