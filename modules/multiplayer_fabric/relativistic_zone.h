@@ -28,6 +28,8 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
+#pragma once
+
 // Relativistic zone theory: no ego, no god, no determinism, gossip authority.
 //
 // C++ translation of PredictiveBVH.Relativistic.NoGod (Lean 4).
@@ -44,8 +46,6 @@
 //   3. No canonical ordering: concurrent ops are freely reorderable.
 //   4. DisjointRanges: every Hilbert code is owned by at most one zone.
 //   5. HLC embeds into VClock<1> for single-node backward compatibility.
-
-#pragma once
 
 // Requires the consumer to include core/templates/local_vector.h first.
 // In fabric_zone.h this is satisfied by the core includes preceding this header.
