@@ -161,8 +161,6 @@ void FabricMMOGZone::_on_cmd_instance_asset(uint32_t p_player_id,
 		uro_url = "http://zone-backend:4000";
 	}
 
-	// Blocking manifest fetch — runs on physics thread, acceptable for GREEN.
-	// REFACTOR: move to WorkerThreadPool so the zone tick is not stalled.
 	Vector<FabricMMOGAsset::CaibxChunk> chunks;
 	String manifest_error;
 	const Error err = FabricMMOGAsset::request_manifest(uro_url, asset_id_str,
