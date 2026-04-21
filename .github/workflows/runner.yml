@@ -54,3 +54,17 @@ jobs:
     needs: static-checks
     if: needs.static-checks.outputs.sources-changed == 'true' || github.event_name != 'pull_request'
     uses: ./.github/workflows/web_builds.yml
+
+  # Third stage: Docker images — only after the Linux Godot binary is ready.
+  docker-images:
+    name: 🐳 Docker images
+    needs: linux-build
+    # Only push images from tracked long-lived branches, not from PRs.
+    if: >
+      (needs.linux-build.result == 'success') &&
+      (github.ref == 'refs/heads/main' ||
+       startsWith(github.ref, 'refs/heads/vsk-multiplayer-fabric'))
+    uses: ./.github/workflows/docker_zone_server.yml
+    with:
+      push-image: true
+    secrets: inherit

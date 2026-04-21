@@ -1,0 +1,52 @@
+# syntax=docker/dockerfile:1
+# uro: Elixir/Phoenix API server (mix release).
+#
+# Build context layout:
+#   uro/ — thirdparty/uro Elixir Phoenix source tree
+
+ARG ELIXIR_IMAGE=elixir:1.17.3-otp-27
+
+# ── Build ─────────────────────────────────────────────────────────────────────
+FROM ${ELIXIR_IMAGE} AS build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nodejs npm git make gcc libc-dev curl && \
+    rm -rf /var/lib/apt/lists/*
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain stable --profile minimal
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN mix local.hex --force && mix local.rebar --force
+
+WORKDIR /build
+COPY uro/mix.exs uro/mix.lock ./
+RUN MIX_ENV=prod mix do deps.get, patch.exmarcel
+COPY uro/config ./config
+COPY uro/priv   ./priv
+COPY uro/lib    ./lib
+# Remove the Protocol.derive(Inspect, Plug.Conn) call that duplicates a module
+# already defined by plug, which causes `mix release` to fail.
+# This line is removed in uro/fix-otel-warnings (PR #19); drop this sed once merged.
+RUN sed -i '/require Protocol/{N;/Protocol\.derive(Inspect, Plug\.Conn/,/^  )$/d}' lib/uro/uro.ex || true
+RUN MIX_ENV=prod mix do compile, phx.digest, release
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
+FROM ubuntu:22.04
+
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 PHX_SERVER=true
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssl ca-certificates libncurses6 libstdc++6 libgcc-s1 curl && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -r -s /bin/bash -m -d /home/vsekai vsekai
+
+COPY --from=build /build/_build/prod/rel/uro /opt/uro
+RUN chown -R vsekai:vsekai /opt/uro
+
+USER vsekai
+WORKDIR /opt/uro
+
+# Uro API
+EXPOSE 4000
+
+ENTRYPOINT ["/opt/uro/bin/uro"]
+CMD ["start"]
