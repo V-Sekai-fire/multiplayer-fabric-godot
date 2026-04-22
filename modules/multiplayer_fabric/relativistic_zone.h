@@ -47,8 +47,7 @@
 //   4. DisjointRanges: every Hilbert code is owned by at most one zone.
 //   5. HLC embeds into VClock<1> for single-node backward compatibility.
 
-// Requires the consumer to include core/templates/local_vector.h first.
-// In fabric_zone.h this is satisfied by the core includes preceding this header.
+#include "core/templates/local_vector.h"
 
 #include <algorithm>
 #include <array>
