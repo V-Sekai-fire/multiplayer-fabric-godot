@@ -19,22 +19,24 @@ env.Append(
     ],
 )
 
-env.Append(CPPPATH=["thirdparty"])
+env.Append(CPPPATH=["#thirdparty"])
 
 env["builtin_zstd"] = False
 
 env_thirdparty = env.Clone()
 env_thirdparty.disable_warnings()
 
-source_files = [
+module_sources = [
     "src/*.cpp",
     "src/*.c",
     "*.cpp",
-    "thirdparty/sqlite/*.c",
-    "thirdparty/spmemvfs/*.c",
 ]
 
-for source_file in source_files:
+for source_file in module_sources:
     env_thirdparty.add_source_files(env_thirdparty.modules_sources, source_file)
+
+# sqlite and spmemvfs amalgamations are now in the root thirdparty/sqlite/ directory.
+env_thirdparty.add_source_files(env_thirdparty.modules_sources, "#thirdparty/sqlite/sqlite3.c")
+env_thirdparty.add_source_files(env_thirdparty.modules_sources, "#thirdparty/sqlite/spmemvfs.c")
 
 env.modules_sources += env_thirdparty.modules_sources

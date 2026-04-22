@@ -30,8 +30,9 @@
 
 #pragma once
 
-#include "fabric_zone.h"
-#include "sqlite/sqlite3.h"
+#include "fabric_zone_types.h"
+#include "core/string/ustring.h"
+#include "thirdparty/sqlite/sqlite3.h"
 
 // Discrete-mutation journal backed by SQLite.
 //
@@ -61,17 +62,17 @@ public:
 	bool is_open() const { return _db != nullptr; }
 
 	// Discrete mutation writers — no-op when not open.
-	void journal_spawn(int p_slot_idx, const FabricZone::FabricEntity &p_entity);
+	void journal_spawn(int p_slot_idx, const FabricEntity &p_entity);
 	void journal_despawn(int p_slot_idx, int p_global_id);
 	// Records changed payload words (asset instance, player state update).
-	void journal_payload_update(int p_slot_idx, const FabricZone::FabricEntity &p_entity);
+	void journal_payload_update(int p_slot_idx, const FabricEntity &p_entity);
 	// Periodic full snapshot — resets the replay start point.
-	void journal_snapshot(int p_capacity, const FabricZone::EntitySlot *p_slots);
+	void journal_snapshot(int p_capacity, const EntitySlot *p_slots);
 
 	// Replay journal into p_slots.  p_slots must already be zero-initialised
 	// with capacity p_capacity.  Sets r_entity_count to the number of active
 	// slots after replay.  Returns true if any data was replayed.
-	bool replay(int p_capacity, FabricZone::EntitySlot *p_slots, int &r_entity_count);
+	bool replay(int p_capacity, EntitySlot *p_slots, int &r_entity_count);
 
 private:
 	sqlite3 *_db = nullptr;
@@ -80,6 +81,6 @@ private:
 	void _create_schema();
 	int64_t _latest_snapshot_seq();
 
-	static void _pack_entity(const FabricZone::FabricEntity &p_e, uint8_t *p_out);
-	static void _unpack_entity(const uint8_t *p_in, FabricZone::FabricEntity &r_e);
+	static void _pack_entity(const FabricEntity &p_e, uint8_t *p_out);
+	static void _unpack_entity(const uint8_t *p_in, FabricEntity &r_e);
 };
