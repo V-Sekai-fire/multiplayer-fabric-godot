@@ -128,6 +128,7 @@
 /modules/multiplayer/doc_classes/             @godotengine/network @godotengine/documentation
 /modules/multiplayer/editor/                  @godotengine/network @godotengine/editor
 /modules/multiplayer/tests/                   @godotengine/network @godotengine/tests
+/modules/http3/                               @godotengine/network
 /modules/upnp/                                @godotengine/network
 /modules/upnp/doc_classes/                    @godotengine/network @godotengine/documentation
 /modules/webrtc/                              @godotengine/network
@@ -147,8 +148,6 @@
 /modules/meshoptimizer/                       @godotengine/rendering
 /modules/raycast/                             @godotengine/rendering
 /modules/vhacd/                               @godotengine/rendering
-/modules/visual_shader/                       @godotengine/shaders
-/modules/visual_shader/doc_classes/           @godotengine/shaders @godotengine/documentation
 /modules/xatlas_unwrap/                       @godotengine/rendering
 
 ## Scripting
@@ -202,6 +201,7 @@
 /modules/regex/                               @godotengine/core
 /modules/regex/doc_classes/                   @godotengine/core @godotengine/documentation
 /modules/regex/tests/                         @godotengine/core @godotengine/tests
+/modules/open_telemetry/                      @V-Sekai/vsekai
 /modules/zip/                                 @godotengine/core
 /modules/zip/doc_classes/                     @godotengine/core @godotengine/documentation
 /modules/zip/tests/                           @godotengine/core @godotengine/tests
@@ -254,6 +254,7 @@
 /scene/resources/shader*                      @godotengine/shaders
 /scene/resources/skeleton*                    @godotengine/animation
 /scene/resources/text_*                       @godotengine/gui-nodes
+/scene/resources/visual_shader*               @godotengine/shaders
 /scene/theme/                                 @godotengine/gui-nodes
 
 # Servers
