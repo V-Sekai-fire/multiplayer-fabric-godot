@@ -91,7 +91,7 @@ Error FabricMMOGTransportPeer::create_client(const String &p_host, int p_port) {
 void FabricMMOGTransportPeer::_try_fallback() {
 	_ws_peer.instantiate();
 	_active = _ws_peer;
-	_state = STATE_TRYING_FALLBACK;
+	_state = STATE_TRYING_WS;
 
 	const String url = vformat("ws://%s:%d%s", _host, _port, _ws_path);
 	_ws_peer->create_client(url, Ref<TLSOptions>());
@@ -117,9 +117,9 @@ void FabricMMOGTransportPeer::poll() {
 		_try_fallback();
 	} else if (_state == STATE_TRYING_PRIMARY && status == CONNECTION_CONNECTED) {
 		_state = STATE_CONNECTED;
-	} else if (_state == STATE_TRYING_FALLBACK && status == CONNECTION_DISCONNECTED) {
+	} else if (_state == STATE_TRYING_WS && status == CONNECTION_DISCONNECTED) {
 		_state = STATE_FAILED;
-	} else if (_state == STATE_TRYING_FALLBACK && status == CONNECTION_CONNECTED) {
+	} else if (_state == STATE_TRYING_WS && status == CONNECTION_CONNECTED) {
 		_state = STATE_CONNECTED;
 	}
 }
@@ -142,7 +142,7 @@ MultiplayerPeer::ConnectionStatus FabricMMOGTransportPeer::get_connection_status
 		case STATE_FAILED:
 			return CONNECTION_DISCONNECTED;
 		case STATE_TRYING_PRIMARY:
-		case STATE_TRYING_FALLBACK:
+		case STATE_TRYING_WS:
 			return CONNECTION_CONNECTING;
 		case STATE_CONNECTED:
 			return CONNECTION_CONNECTED;

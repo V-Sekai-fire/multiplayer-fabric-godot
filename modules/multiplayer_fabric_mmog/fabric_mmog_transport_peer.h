@@ -35,18 +35,19 @@
 #include "modules/http3/web_transport_peer.h"
 #include "modules/websocket/websocket_multiplayer_peer.h"
 
-// FabricMMOGTransportPeer — client-side MultiplayerPeer with automatic fallback.
+// FabricMMOGTransportPeer — client-side MultiplayerPeer with two transports.
 //
 // Tries WebTransportPeer (QUIC/HTTP3) first; on CONNECTION_DISCONNECTED before
-// connected, silently falls back to WebSocketMultiplayerPeer (TCP-WS) on the
-// same host:port.
+// connected, switches to WebSocketMultiplayerPeer (TCP-WS) on the same
+// host:port.  Both paths are first-class: iOS Safari clients use WS; desktop
+// and Android clients use WT when available.
 //
 // Callers see a single lifecycle: CONNECTION_CONNECTING during all attempts,
 // CONNECTION_CONNECTED once either transport succeeds.  The switch is invisible
 // to FabricMultiplayerPeer and FabricMMOGZone.
 //
 // Caveat: WebSocketMultiplayerPeer uses TCP, so CH_INTEREST and CH_PLAYER lose
-// their unreliable (drop-stale) semantics during fallback — snapshots queue up
+// their unreliable (drop-stale) semantics on the WS path — snapshots queue up
 // rather than being discarded.  Latency under congestion increases but the
 // session remains alive.
 class FabricMMOGTransportPeer : public MultiplayerPeer {
@@ -55,7 +56,7 @@ class FabricMMOGTransportPeer : public MultiplayerPeer {
 	enum State {
 		STATE_IDLE,
 		STATE_TRYING_PRIMARY, // waiting for WebTransportPeer to connect
-		STATE_TRYING_FALLBACK, // WT failed; waiting for WebSocketMultiplayerPeer
+		STATE_TRYING_WS, // WT unavailable; waiting for WebSocketMultiplayerPeer
 		STATE_CONNECTED,
 		STATE_FAILED,
 	};

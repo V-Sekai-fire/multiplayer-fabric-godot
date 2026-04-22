@@ -89,7 +89,7 @@ TEST_CASE("[FabricMMOGTransportPeer] poll reaches FAILED after both transports d
 	tp.instantiate();
 
 	tp->_set_wt_peer_for_test(_make_disconnected_wt_peer());
-	tp->poll(); // WT fails → WS created (STATE_TRYING_FALLBACK)
+	tp->poll(); // WT fails → WS created (STATE_TRYING_WS)
 
 	CHECK(tp->get_ws_peer().is_valid());
 
