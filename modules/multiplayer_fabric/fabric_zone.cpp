@@ -493,12 +493,12 @@ FabricZone::GhostSnap FabricZone::_make_ghost_snap(const FabricEntity &e) {
 	R128 cy_um = r128_from_real_um(e.cy);
 	R128 cz_um = r128_from_real_um(e.cz);
 	Aabb ghost;
-	ghost.min_x = r128_sub(cx_um, gex);
-	ghost.max_x = r128_add(cx_um, gex);
-	ghost.min_y = r128_sub(cy_um, gey);
-	ghost.max_y = r128_add(cy_um, gey);
-	ghost.min_z = r128_sub(cz_um, gez);
-	ghost.max_z = r128_add(cz_um, gez);
+	ghost.min_x = r128_to_coord(r128_sub(cx_um, gex));
+	ghost.max_x = r128_to_coord(r128_add(cx_um, gex));
+	ghost.min_y = r128_to_coord(r128_sub(cy_um, gey));
+	ghost.max_y = r128_to_coord(r128_add(cy_um, gey));
+	ghost.min_z = r128_to_coord(r128_sub(cz_um, gez));
+	ghost.max_z = r128_to_coord(r128_add(cz_um, gez));
 
 	Aabb scene = aabb_from_floats(-SIM_BOUND, SIM_BOUND, -SIM_BOUND, SIM_BOUND, -SIM_BOUND, SIM_BOUND);
 	uint32_t hcode = hilbert_of_aabb(&ghost, &scene);
@@ -564,12 +564,12 @@ Aabb FabricZone::_ghost_aabb_from_snap(const GhostSnap &snap) {
 	R128 cy = r128_from_real_um(snap.cy);
 	R128 cz = r128_from_real_um(snap.cz);
 	Aabb aabb;
-	aabb.min_x = r128_sub(cx, ex);
-	aabb.max_x = r128_add(cx, ex);
-	aabb.min_y = r128_sub(cy, ey);
-	aabb.max_y = r128_add(cy, ey);
-	aabb.min_z = r128_sub(cz, ez);
-	aabb.max_z = r128_add(cz, ez);
+	aabb.min_x = r128_to_coord(r128_sub(cx, ex));
+	aabb.max_x = r128_to_coord(r128_add(cx, ex));
+	aabb.min_y = r128_to_coord(r128_sub(cy, ey));
+	aabb.max_y = r128_to_coord(r128_add(cy, ey));
+	aabb.min_z = r128_to_coord(r128_sub(cz, ez));
+	aabb.max_z = r128_to_coord(r128_add(cz, ez));
 	return aabb;
 }
 
@@ -587,7 +587,7 @@ Aabb FabricZone::_scene_aabb() {
 ::AABB FabricZone::hilbert_cell_of_aabb(int p_code, int p_prefix_depth) {
 	Aabb scene = _scene_aabb();
 	Aabb cell = hilbert_cell_of((uint32_t)p_code, (uint32_t)p_prefix_depth, &scene);
-	auto um_to_m = [](R128 v) -> real_t { return (real_t)((int64_t)v.hi) * (real_t)0.000001; };
+	auto um_to_m = [](int64_t v) -> real_t { return (real_t)v * (real_t)0.000001; };
 	Vector3 min_pt(um_to_m(cell.min_x), um_to_m(cell.min_y), um_to_m(cell.min_z));
 	Vector3 max_pt(um_to_m(cell.max_x), um_to_m(cell.max_y), um_to_m(cell.max_z));
 	return ::AABB(min_pt, max_pt - min_pt);
@@ -2130,7 +2130,7 @@ bool FabricZone::physics_process(double p_time) {
 				continue;
 			}
 			Aabb g = _ghost_aabb_from_snap(slots[i].snap);
-			if (!r128_eq(g.max_x, g.min_x) || !r128_eq(g.max_y, g.min_y)) {
+			if (g.max_x != g.min_x || g.max_y != g.min_y) {
 				const FabricEntity &e = slots[i].entity;
 				uint32_t gid = (uint32_t)e.global_id;
 				double ecx = (double)e.cx, ecy = (double)e.cy, ecz = (double)e.cz;

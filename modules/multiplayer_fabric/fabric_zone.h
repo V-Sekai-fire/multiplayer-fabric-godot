@@ -58,6 +58,12 @@ static inline real_t r128_to_real_m(R128 v) {
 	return (real_t)((int64_t)v.hi) * (real_t)0.000001;
 }
 
+// Unambiguous R128 → int64_t (Aabb coord) conversion.
+// R128_S64 is long long; int64_t is long on Linux — direct cast is ambiguous.
+static inline int64_t r128_to_coord(R128 v) {
+	return (int64_t)r128ToInt(&v);
+}
+
 // ── FabricZone ─────────────────────────────────────────────────────────────
 
 class FabricZone : public SceneTree {
