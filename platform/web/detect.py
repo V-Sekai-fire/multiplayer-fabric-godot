@@ -36,14 +36,16 @@ def get_tools(env: "SConsEnvironment"):
 
 
 def get_opts():
-    from SCons.Variables import BoolVariable
+    from SCons.Variables import BoolVariable, EnumVariable
 
     return [
         ("initial_memory", "Initial WASM memory (in MiB)", 32),
         # Matches default values from before Emscripten 3.1.27. New defaults are too low for Godot.
         ("stack_size", "WASM stack size (in KiB)", 5120),
         ("default_pthread_stack_size", "WASM pthread default stack size (in KiB)", 2048),
-        BoolVariable("use_assertions", "Use Emscripten runtime assertions", False),
+        EnumVariable(
+            "use_assertions", "Use Emscripten runtime assertions", "auto", ["auto", "no", "yes", "extra"], ignorecase=2
+        ),
         BoolVariable("use_ubsan", "Use Emscripten undefined behavior sanitizer (UBSAN)", False),
         BoolVariable("use_asan", "Use Emscripten address sanitizer (ASAN)", False),
         BoolVariable("use_lsan", "Use Emscripten leak sanitizer (LSAN)", False),
@@ -139,16 +141,19 @@ def configure(env: "SConsEnvironment"):
     emscripten_include_path = emcc_path.parent.joinpath("cache", "sysroot", "include")
     env.Append(CPPPATH=[emscripten_include_path])
 
-    ## Build type
+    ## Configure assertions.
+    if env["use_assertions"] == "auto":
+        env["use_assertions"] = "yes" if env.debug_features else "no"
+    if env["use_assertions"] == "yes":
+        print_info("Building with runtime assertions.")
+        env.Append(LINKFLAGS=["-sASSERTIONS=1"])
+    elif env["use_assertions"] == "extra":
+        print_info("Building with runtime assertions with extra tests.")
+        env.Append(LINKFLAGS=["-sASSERTIONS=2"])
 
-    if env.debug_features:
+    if env["debug_symbols"]:
         # Retain function names for backtraces at the cost of file size.
         env.Append(LINKFLAGS=["--profiling-funcs"])
-    else:
-        env["use_assertions"] = True
-
-    if env["use_assertions"]:
-        env.Append(LINKFLAGS=["-sASSERTIONS=1"])
 
     if env.editor_build and env["initial_memory"] < 64:
         print_info("Forcing `initial_memory=64` as it is required for the web editor.")
@@ -320,9 +325,19 @@ def configure(env: "SConsEnvironment"):
     # Wrap the JavaScript support code around a closure named Godot.
     env.Append(LINKFLAGS=["-sMODULARIZE=1", "-sEXPORT_NAME='Godot'"])
 
-    # Force long jump mode to 'wasm'
-    env.Append(CCFLAGS=["-sSUPPORT_LONGJMP='wasm'"])
-    env.Append(LINKFLAGS=["-sSUPPORT_LONGJMP='wasm'"])
+    # Use emscripten exception handling mode for better compatibility with C++ modules
+    env.Append(CCFLAGS=["-sSUPPORT_LONGJMP='emscripten'"])
+    env.Append(LINKFLAGS=["-sSUPPORT_LONGJMP='emscripten'"])
+
+    # Enable exception handling for web platform to support C++ modules like sandbox
+    env.Append(LINKFLAGS=["-sDISABLE_EXCEPTION_CATCHING=0"])
+    env.Append(LINKFLAGS=["-sDISABLE_EXCEPTION_THROWING=0"])
+
+    # Explicitly disable the disable_exceptions flag to allow sandbox module to build
+    env["disable_exceptions"] = False
+
+    # Configure third-party libraries to not use longjmp
+    env.Append(CPPDEFINES=["WEBP_NO_LONGJMP", "PNG_NO_SETJMP", "FT_NO_LONGJMP"])
 
     # Allow increasing memory buffer size during runtime. This is efficient
     # when using WebAssembly (in comparison to asm.js) and works well for

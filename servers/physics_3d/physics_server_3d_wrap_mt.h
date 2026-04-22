@@ -35,7 +35,7 @@
 #include "core/templates/command_queue_mt.h"
 #include "servers/physics_3d/physics_server_3d.h"
 
-#define ASYNC_COND_PUSH (Thread::get_caller_id() != server_thread)
+#define ASYNC_COND_PUSH (Thread::get_caller_id() != server_thread && !(doing_sync.is_set() && Thread::is_main_thread()))
 #define ASYNC_COND_PUSH_AND_RET (Thread::get_caller_id() != server_thread && !(doing_sync.is_set() && Thread::is_main_thread()))
 #define ASYNC_COND_PUSH_AND_SYNC (Thread::get_caller_id() != server_thread && !(doing_sync.is_set() && Thread::is_main_thread()))
 
@@ -87,6 +87,8 @@ public:
 	FUNCRID(box_shape)
 	FUNCRID(capsule_shape)
 	FUNCRID(cylinder_shape)
+	FUNCRID(tapered_capsule_shape)
+	FUNCRID(tapered_cylinder_shape)
 	FUNCRID(convex_polygon_shape)
 	FUNCRID(concave_polygon_shape)
 	FUNCRID(heightmap_shape)
