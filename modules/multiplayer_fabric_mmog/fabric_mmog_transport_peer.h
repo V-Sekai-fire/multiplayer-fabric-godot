@@ -32,20 +32,14 @@
 
 #include "scene/main/multiplayer_peer.h"
 
-#include "modules/websocket/websocket_multiplayer_peer.h"
-
-#ifdef MODULE_HTTP3_ENABLED
 #include "modules/http3/web_transport_peer.h"
-#endif
+#include "modules/websocket/websocket_multiplayer_peer.h"
 
 // FabricMMOGTransportPeer — client-side MultiplayerPeer with automatic fallback.
 //
-// When MODULE_HTTP3_ENABLED: tries WebTransportPeer (QUIC/HTTP3) first; on
-// CONNECTION_DISCONNECTED before connected, silently falls back to
-// WebSocketMultiplayerPeer (TCP-WS) on the same host:port.
-//
-// When MODULE_HTTP3_ENABLED is absent: connects via WebSocketMultiplayerPeer
-// directly — no primary attempt, STATE_TRYING_FALLBACK from the start.
+// Tries WebTransportPeer (QUIC/HTTP3) first; on CONNECTION_DISCONNECTED before
+// connected, silently falls back to WebSocketMultiplayerPeer (TCP-WS) on the
+// same host:port.
 //
 // Callers see a single lifecycle: CONNECTION_CONNECTING during all attempts,
 // CONNECTION_CONNECTED once either transport succeeds.  The switch is invisible
@@ -60,15 +54,13 @@ class FabricMMOGTransportPeer : public MultiplayerPeer {
 
 	enum State {
 		STATE_IDLE,
-		STATE_TRYING_PRIMARY, // waiting for WebTransportPeer to connect (http3 only)
-		STATE_TRYING_FALLBACK, // WT failed (or http3 absent); waiting for WebSocketMultiplayerPeer
+		STATE_TRYING_PRIMARY, // waiting for WebTransportPeer to connect
+		STATE_TRYING_FALLBACK, // WT failed; waiting for WebSocketMultiplayerPeer
 		STATE_CONNECTED,
 		STATE_FAILED,
 	};
 
-#ifdef MODULE_HTTP3_ENABLED
 	Ref<WebTransportPeer> _wt_peer;
-#endif
 	Ref<WebSocketMultiplayerPeer> _ws_peer;
 	Ref<MultiplayerPeer> _active; // points to whichever peer is currently active
 
@@ -84,30 +76,20 @@ protected:
 	static void _bind_methods();
 
 public:
-	// When http3 is enabled: dials WebTransportPeer, falls back to WS on failure.
-	// When http3 is absent: dials WebSocketMultiplayerPeer directly.
 	Error create_client(const String &p_host, int p_port);
 
-#ifdef MODULE_HTTP3_ENABLED
 	void set_wt_path(const String &p_path);
 	String get_wt_path() const;
-#endif
 
 	void set_ws_path(const String &p_path);
 	String get_ws_path() const;
 
-	// Inspect the underlying transport peers (available after create_client).
-#ifdef MODULE_HTTP3_ENABLED
 	Ref<WebTransportPeer> get_wt_peer() const;
-#endif
 	Ref<WebSocketMultiplayerPeer> get_ws_peer() const;
 
-#ifdef MODULE_HTTP3_ENABLED
-	// TEST HOOK: inject a pre-configured WebTransportPeer (e.g. one bound to a
-	// fake QUICClient via _bind_quic) and advance to TRYING_PRIMARY without
-	// initiating a real network connection.
+	// TEST HOOK: inject a pre-configured WebTransportPeer and advance to
+	// TRYING_PRIMARY without initiating a real network connection.
 	void _set_wt_peer_for_test(Ref<WebTransportPeer> p_peer);
-#endif
 
 	// MultiplayerPeer interface — all delegate to the active peer.
 	virtual void set_target_peer(int p_peer_id) override;

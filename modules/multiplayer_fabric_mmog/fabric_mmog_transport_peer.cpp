@@ -32,18 +32,15 @@
 
 #include "core/object/class_db.h"
 #include "core/string/ustring.h"
-#include "modules/modules_enabled.gen.h"
 
 void FabricMMOGTransportPeer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("create_client", "host", "port"),
 			&FabricMMOGTransportPeer::create_client);
 
-#ifdef MODULE_HTTP3_ENABLED
 	ClassDB::bind_method(D_METHOD("set_wt_path", "path"), &FabricMMOGTransportPeer::set_wt_path);
 	ClassDB::bind_method(D_METHOD("get_wt_path"), &FabricMMOGTransportPeer::get_wt_path);
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "wt_path"), "set_wt_path", "get_wt_path");
 	ClassDB::bind_method(D_METHOD("get_wt_peer"), &FabricMMOGTransportPeer::get_wt_peer);
-#endif
 
 	ClassDB::bind_method(D_METHOD("set_ws_path", "path"), &FabricMMOGTransportPeer::set_ws_path);
 	ClassDB::bind_method(D_METHOD("get_ws_path"), &FabricMMOGTransportPeer::get_ws_path);
@@ -54,14 +51,12 @@ void FabricMMOGTransportPeer::_bind_methods() {
 
 // ── config ───────────────────────────────────────────────────────────────────
 
-#ifdef MODULE_HTTP3_ENABLED
 void FabricMMOGTransportPeer::set_wt_path(const String &p_path) {
 	_wt_path = p_path;
 }
 String FabricMMOGTransportPeer::get_wt_path() const {
 	return _wt_path;
 }
-#endif
 
 void FabricMMOGTransportPeer::set_ws_path(const String &p_path) {
 	_ws_path = p_path;
@@ -70,11 +65,9 @@ String FabricMMOGTransportPeer::get_ws_path() const {
 	return _ws_path;
 }
 
-#ifdef MODULE_HTTP3_ENABLED
 Ref<WebTransportPeer> FabricMMOGTransportPeer::get_wt_peer() const {
 	return _wt_peer;
 }
-#endif
 
 Ref<WebSocketMultiplayerPeer> FabricMMOGTransportPeer::get_ws_peer() const {
 	return _ws_peer;
@@ -86,16 +79,12 @@ Error FabricMMOGTransportPeer::create_client(const String &p_host, int p_port) {
 	_host = p_host;
 	_port = p_port;
 
-#ifdef MODULE_HTTP3_ENABLED
 	_wt_peer.instantiate();
 	_active = _wt_peer;
 	_state = STATE_TRYING_PRIMARY;
 	// Failure is detected asynchronously in poll() via CONNECTION_DISCONNECTED.
 	_wt_peer->create_client(p_host, p_port, _wt_path);
-#else
-	// No http3 — go straight to WebSocket.
-	_try_fallback();
-#endif
+
 	return OK;
 }
 
@@ -108,13 +97,11 @@ void FabricMMOGTransportPeer::_try_fallback() {
 	_ws_peer->create_client(url, Ref<TLSOptions>());
 }
 
-#ifdef MODULE_HTTP3_ENABLED
 void FabricMMOGTransportPeer::_set_wt_peer_for_test(Ref<WebTransportPeer> p_peer) {
 	_wt_peer = p_peer;
 	_active = _wt_peer;
 	_state = STATE_TRYING_PRIMARY;
 }
-#endif
 
 // ── poll / close ─────────────────────────────────────────────────────────────
 
@@ -126,14 +113,11 @@ void FabricMMOGTransportPeer::poll() {
 
 	const ConnectionStatus status = _active->get_connection_status();
 
-#ifdef MODULE_HTTP3_ENABLED
 	if (_state == STATE_TRYING_PRIMARY && status == CONNECTION_DISCONNECTED) {
 		_try_fallback();
 	} else if (_state == STATE_TRYING_PRIMARY && status == CONNECTION_CONNECTED) {
 		_state = STATE_CONNECTED;
-	} else
-#endif
-			if (_state == STATE_TRYING_FALLBACK && status == CONNECTION_DISCONNECTED) {
+	} else if (_state == STATE_TRYING_FALLBACK && status == CONNECTION_DISCONNECTED) {
 		_state = STATE_FAILED;
 	} else if (_state == STATE_TRYING_FALLBACK && status == CONNECTION_CONNECTED) {
 		_state = STATE_CONNECTED;
@@ -145,9 +129,7 @@ void FabricMMOGTransportPeer::close() {
 		_active->close();
 	}
 	_active.unref();
-#ifdef MODULE_HTTP3_ENABLED
 	_wt_peer.unref();
-#endif
 	_ws_peer.unref();
 	_state = STATE_IDLE;
 }

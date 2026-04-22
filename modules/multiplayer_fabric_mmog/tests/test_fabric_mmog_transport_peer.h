@@ -32,18 +32,14 @@
 
 #include "../fabric_mmog_transport_peer.h"
 
-#include "tests/test_macros.h"
-
-#ifdef MODULE_HTTP3_ENABLED
 #include "modules/http3/quic_client.h"
 #include "modules/http3/web_transport_peer.h"
-#endif
+#include "tests/test_macros.h"
 
 namespace TestFabricMMOGTransportPeer {
 
-#ifdef MODULE_HTTP3_ENABLED
-// Build a WebTransportPeer that is already in DISCONNECTED state by binding
-// it to a QUICClient that has never connected (STATUS_DISCONNECTED == 0).
+// Build a WebTransportPeer already in DISCONNECTED state by binding it to a
+// QUICClient that has never connected (STATUS_DISCONNECTED == 0).
 static Ref<WebTransportPeer> _make_disconnected_wt_peer() {
 	Ref<QUICClient> quic;
 	quic.instantiate();
@@ -52,20 +48,16 @@ static Ref<WebTransportPeer> _make_disconnected_wt_peer() {
 	peer->_bind_quic(quic, WebTransportPeer::MODE_CLIENT);
 	return peer;
 }
-#endif
 
 TEST_CASE("[FabricMMOGTransportPeer] initial state is DISCONNECTED") {
 	Ref<FabricMMOGTransportPeer> tp;
 	tp.instantiate();
 
 	CHECK(tp->get_connection_status() == MultiplayerPeer::CONNECTION_DISCONNECTED);
-#ifdef MODULE_HTTP3_ENABLED
 	CHECK(tp->get_wt_peer().is_null());
-#endif
 	CHECK(tp->get_ws_peer().is_null());
 }
 
-#ifdef MODULE_HTTP3_ENABLED
 TEST_CASE("[FabricMMOGTransportPeer] create_client returns OK and reports CONNECTING via WT") {
 	Ref<FabricMMOGTransportPeer> tp;
 	tp.instantiate();
@@ -111,7 +103,7 @@ TEST_CASE("[FabricMMOGTransportPeer] poll reaches FAILED after both transports d
 	CHECK(tp->get_connection_status() == MultiplayerPeer::CONNECTION_DISCONNECTED);
 }
 
-TEST_CASE("[FabricMMOGTransportPeer] close resets to DISCONNECTED (with WT)") {
+TEST_CASE("[FabricMMOGTransportPeer] close resets to DISCONNECTED") {
 	Ref<FabricMMOGTransportPeer> tp;
 	tp.instantiate();
 
@@ -134,34 +126,5 @@ TEST_CASE("[FabricMMOGTransportPeer] wt_path and ws_path are configurable") {
 	CHECK(tp->get_wt_path() == "/webtransport");
 	CHECK(tp->get_ws_path() == "/websocket");
 }
-#else
-TEST_CASE("[FabricMMOGTransportPeer] create_client returns OK and reports CONNECTING via WS (no http3)") {
-	Ref<FabricMMOGTransportPeer> tp;
-	tp.instantiate();
-
-	// Without http3, create_client goes straight to WebSocket.
-	CHECK(tp->create_client("127.0.0.1", 1) == OK);
-	CHECK(tp->get_connection_status() == MultiplayerPeer::CONNECTION_CONNECTING);
-	CHECK(tp->get_ws_peer().is_valid());
-}
-
-TEST_CASE("[FabricMMOGTransportPeer] close resets to DISCONNECTED (WS only)") {
-	Ref<FabricMMOGTransportPeer> tp;
-	tp.instantiate();
-
-	tp->create_client("127.0.0.1", 1);
-	tp->close();
-	CHECK(tp->get_connection_status() == MultiplayerPeer::CONNECTION_DISCONNECTED);
-	CHECK(tp->get_ws_peer().is_null());
-}
-
-TEST_CASE("[FabricMMOGTransportPeer] ws_path is configurable") {
-	Ref<FabricMMOGTransportPeer> tp;
-	tp.instantiate();
-
-	tp->set_ws_path("/websocket");
-	CHECK(tp->get_ws_path() == "/websocket");
-}
-#endif
 
 } // namespace TestFabricMMOGTransportPeer
