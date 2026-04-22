@@ -32,6 +32,7 @@
 
 #include "core/object/class_db.h"
 #include "core/string/ustring.h"
+#include "modules/modules_enabled.gen.h"
 
 void FabricMMOGTransportPeer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("create_client", "host", "port"),
