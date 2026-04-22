@@ -1,0 +1,124 @@
+version: "3.9"
+
+# Zone-server stack: CockroachDB · VersityGW (S3) · Uro API · zone-fabric
+#
+# Required environment variables (copy .env.example to .env):
+#   SECRET_KEY_BASE   — 64-byte base64 Phoenix secret
+#   PHX_HOST          — public hostname for the Phoenix endpoint
+#   S3_ACCESS_KEY     — VersityGW access key (any string for local use)
+#   S3_SECRET_KEY     — VersityGW secret key (any string for local use)
+#
+# Scale zone containers:
+#   docker compose up --scale zone=4
+#
+# Each zone replica gets a Docker-assigned host UDP port (no fixed binding).
+# Uro discovers the actual port via the Docker socket and stores it on the
+# zone record so clients know where to connect WebTransport.
+# Uro must have access to the Docker socket:
+#   volumes:
+#     - /var/run/docker.sock:/var/run/docker.sock:ro
+
+services:
+
+  # ── CockroachDB — V-Sekai's Oxide-fork image ─────────────────────────────
+  # Using the V-Sekai packaged image for legal compliance.
+  # Load before first `docker compose up`:
+  #   curl -sSL -o /tmp/cockroachdb.tar \
+  #     https://github.com/V-Sekai/cockroach/releases/download/cockroach-2/cockroachdb.tar
+  #   docker load -i /tmp/cockroachdb.tar
+  database:
+    image: v-sekai/cockroach:latest
+    restart: unless-stopped
+    command: start-single-node --insecure
+    volumes:
+      - crdb-data:/cockroach/cockroach-data
+    ports:
+      - "26257:26257"
+      - "127.0.0.1:8082:8080"   # CRDB HTTP dashboard (localhost only)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health?ready=1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── VersityGW — S3-compatible object storage ─────────────────────────────
+  # https://github.com/versity/versitygw
+  s3:
+    image: ghcr.io/versity/versitygw:latest
+    restart: unless-stopped
+    command: >
+      posix /data
+      --access ${S3_ACCESS_KEY:-minioadmin}
+      --secret ${S3_SECRET_KEY:-minioadmin}
+    volumes:
+      - s3-data:/data
+    ports:
+      - "7070:7070"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7070/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Uro — Phoenix API server ──────────────────────────────────────────────
+  uro:
+    image: ghcr.io/v-sekai/uro:latest
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://root@database:26257/uro_prod?sslmode=disable"
+      SECRET_KEY_BASE: "${SECRET_KEY_BASE}"
+      PHX_HOST: "${PHX_HOST:-localhost}"
+      PHX_PORT: "4000"
+      AWS_ACCESS_KEY_ID: "${S3_ACCESS_KEY:-minioadmin}"
+      AWS_SECRET_ACCESS_KEY: "${S3_SECRET_KEY:-minioadmin}"
+      AWS_S3_BUCKET: "uro-uploads"
+      AWS_S3_REGION: "local"
+      AWS_S3_ENDPOINT: "http://s3:7070"
+      # Docker socket lets Uro inspect zone containers to discover their
+      # dynamically-assigned WebTransport ports.
+      DOCKER_HOST: "unix:///var/run/docker.sock"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "4000:4000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── zone-fabric — one Godot headless process per container ────────────────
+  #
+  # Port binding: no fixed host port is declared here.  Docker assigns a
+  # random available UDP port on the host for each replica so --scale works
+  # without conflicts.  Uro reads the assigned port from the Docker API:
+  #
+  #   docker inspect <container> \
+  #     --format '{{(index (index .NetworkSettings.Ports "54370/udp") 0).HostPort}}'
+  #
+  # The zone service label "vsekai.zone.id" is set at runtime by Uro when it
+  # starts each container so it can match containers back to zone DB records.
+  zone:
+    image: ghcr.io/v-sekai/zone-fabric:latest
+    restart: "no"        # Uro manages lifecycle; don't auto-restart crashed zones
+    depends_on:
+      uro:
+        condition: service_healthy
+    environment:
+      URO_API_URL: "http://uro:4000"
+    # Expose container port 54370/udp; Docker picks the host port per replica.
+    ports:
+      - "54370/udp"
+    # Mount a Godot project (override at deploy time):
+    #   volumes:
+    #     - ./godot-project:/godot-project:ro
+    command: ["--", "res://wt_server_demo.tscn"]
+
+volumes:
+  crdb-data:
+  s3-data:
