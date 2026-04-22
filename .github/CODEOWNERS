@@ -126,6 +126,10 @@
 /modules/mbedtls/tests/                       @godotengine/network @godotengine/tests
 /modules/multiplayer/                         @godotengine/network
 /modules/multiplayer/doc_classes/             @godotengine/network @godotengine/documentation
+/modules/keychain/                            @fire
+/designs/                                     @fire
+/modules/multiplayer_fabric/                  @fire
+/modules/multiplayer_fabric_mmog/             @fire
 /modules/multiplayer/editor/                  @godotengine/network @godotengine/editor
 /modules/multiplayer/tests/                   @godotengine/network @godotengine/tests
 /modules/http3/                               @godotengine/network
@@ -155,6 +159,8 @@
 /modules/gdscript/doc_classes/                @godotengine/gdscript @godotengine/documentation
 /modules/gdscript/editor/                     @godotengine/gdscript @godotengine/script-editor
 /modules/gdscript/tests/                      @godotengine/gdscript @godotengine/tests
+/modules/sandbox/                             @fire
+/modules/speech/                              @fire
 /modules/jsonrpc/                             @godotengine/gdscript @godotengine/network
 /modules/jsonrpc/tests/                       @godotengine/gdscript @godotengine/network @godotengine/tests
 /modules/mono/                                @godotengine/dotnet
@@ -188,6 +194,8 @@
 /modules/gridmap/                             @godotengine/3d-nodes
 /modules/gridmap/doc_classes/                 @godotengine/3d-nodes @godotengine/documentation
 /modules/gridmap/editor/                      @godotengine/3d-nodes @godotengine/editor
+/modules/lasso/                               @fire
+/modules/sqlite/                              @fire
 /modules/navigation_2d/                       @godotengine/navigation
 /modules/navigation_2d/editor/                @godotengine/navigation @godotengine/editor
 /modules/navigation_3d/                       @godotengine/navigation
