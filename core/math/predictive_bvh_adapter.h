@@ -33,7 +33,7 @@
 // Drop-in adapter exposing a DynamicBVH-shaped C++ surface over predictive_bvh's
 // codegen'd pbvh_tree_* symbols. Hand-written once; no algorithm content —
 // every method is dispatch glue onto the emitted C primitives in
-// modules/multiplayer_fabric_mmog/predictive_bvh/predictive_bvh.h (from TreeC.lean). Lean-side
+// thirdparty/predictive_bvh/predictive_bvh.h (from TreeC.lean). Lean-side
 // proofs reason over EClassId; this adapter treats the pbvh_node_id_t as the
 // eclass id and stores caller-supplied void * payloads in a parallel sidecar.
 
@@ -43,7 +43,7 @@
 #include "core/templates/local_vector.h"
 #include "core/typedefs.h"
 
-#include "modules/multiplayer_fabric_mmog/predictive_bvh/predictive_bvh.h"
+#include <thirdparty/predictive_bvh/predictive_bvh.h>
 
 // Portable count-leading-zeros for uint64_t.
 // MSVC lacks __builtin_clzll; use _BitScanReverse64 instead.

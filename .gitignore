@@ -405,4 +405,3 @@ $RECYCLE.BIN/
 /*.db*
 thirdparty/uro/cockroach/
 native/keychain_nif/target/
-.lake/
