@@ -58,8 +58,8 @@ Every jellyfish is a content-addressed asset bundle in Uro. The bundle packs a b
 | ReBAC permissions  | Working     | Uro.Acl — creator remix/export control            |
 | Swarm physics      | In scope    | jellygrid_swarm_sim.hpp — pure C++, no sandbox needed   |
 | Current simulation | In scope    | jellygrid_current_sim.hpp — pure C++, no sandbox needed |
-| Behavior scripts   | ~~Tombstoned~~ | godot-sandbox / RISC-V ELF deployment — not in scope |
-| HTN planning       | ~~Tombstoned~~ | taskweft — not in scope                        |
+| Behavior scripts   | ~~Tombstoned~~ | godot-sandbox / RISC-V ELF guest — not in scope; standalone headers used instead |
+| RECTGTN planning   | In scope       | tw_planner.hpp standalone headers in fabric_mmog_zone.cpp — per-entity jellyfish behaviour domains (JSON-LD), incremental replan on threat detection; see 20260421-rectgtn-jellyfish-behavior.md |
 | Pulse waveform     | ~~Tombstoned~~ | dropped from asset bundle for now              |
 | Remix system       | ~~Tombstoned~~ | clone + fork provenance chain                  |
 | Moderation layer   | ~~Tombstoned~~ | Uro ACL + operator tombstone endpoint          |
