@@ -397,4 +397,8 @@ $RECYCLE.BIN/
 *.msp
 *.lnk
 *.generated.props
+
+/*.db*
+thirdparty/uro/cockroach/
+native/keychain_nif/target/
 .lake/
