@@ -43,7 +43,7 @@
 #include "core/templates/local_vector.h"
 #include "core/typedefs.h"
 
-#include "modules/multiplayer_fabric_mmog/predictive_bvh/predictive_bvh.h"
+#include "thirdparty/misc/predictive_bvh.h"
 
 // Portable count-leading-zeros for uint64_t.
 // MSVC lacks __builtin_clzll; use _BitScanReverse64 instead.
