@@ -75,16 +75,27 @@ Ref<UDSServer> create_server(const String &p_path) {
 	return server;
 }
 
+// Returns an invalid Ref and records CHECK failure if the connection cannot be
+// established. Callers must check .is_valid() before using the returned value —
+// REQUIRE is intentionally avoided here because with disable_exceptions=yes
+// (Godot's default) REQUIRE is a no-op, execution continues, and subsequent
+// null dereferences crash the process.
 Ref<StreamPeerUDS> create_client(const String &p_path) {
 	Ref<StreamPeerUDS> client;
 	client.instantiate();
 
 	Error err = client->connect_to_host(p_path);
-	REQUIRE_EQ(err, Error::OK);
+	CHECK_EQ(err, Error::OK);
+	if (err != Error::OK) {
+		return {};
+	}
 
-	// UDS connections may be immediately connected or in connecting state
+	// UDS connections may be immediately connected or in connecting state.
 	StreamPeerUDS::Status status = client->get_status();
-	REQUIRE((status == StreamPeerUDS::STATUS_CONNECTED || status == StreamPeerUDS::STATUS_CONNECTING));
+	CHECK((status == StreamPeerUDS::STATUS_CONNECTED || status == StreamPeerUDS::STATUS_CONNECTING));
+	if (status != StreamPeerUDS::STATUS_CONNECTED && status != StreamPeerUDS::STATUS_CONNECTING) {
+		return {};
+	}
 
 	if (status == StreamPeerUDS::STATUS_CONNECTED) {
 		CHECK_EQ(client->get_connected_path(), p_path);
@@ -93,14 +104,21 @@ Ref<StreamPeerUDS> create_client(const String &p_path) {
 	return client;
 }
 
+// Same null-guard pattern as create_client — see comment above.
 Ref<StreamPeerUDS> accept_connection(Ref<UDSServer> &p_server) {
 	wait_for_condition([&]() {
 		return p_server->is_connection_available();
 	});
 
-	REQUIRE(p_server->is_connection_available());
+	CHECK(p_server->is_connection_available());
+	if (!p_server->is_connection_available()) {
+		return {};
+	}
 	Ref<StreamPeerUDS> client_from_server = p_server->take_connection();
-	REQUIRE(client_from_server.is_valid());
+	CHECK(client_from_server.is_valid());
+	if (!client_from_server.is_valid()) {
+		return {};
+	}
 	CHECK_EQ(client_from_server->get_status(), StreamPeerUDS::STATUS_CONNECTED);
 
 	return client_from_server;
@@ -118,6 +136,9 @@ TEST_CASE("[UDSServer] Accept a connection and receive/send data") {
 	Ref<UDSServer> server = create_server(SOCKET_PATH);
 	Ref<StreamPeerUDS> client = create_client(SOCKET_PATH);
 	Ref<StreamPeerUDS> client_from_server = accept_connection(server);
+	if (!client.is_valid() || !client_from_server.is_valid()) {
+		return;
+	}
 
 	wait_for_condition([&]() {
 		return client->poll() != Error::OK || client->get_status() == StreamPeerUDS::STATUS_CONNECTED;
@@ -147,12 +168,20 @@ TEST_CASE("[UDSServer] Handle multiple clients at the same time") {
 
 	Vector<Ref<StreamPeerUDS>> clients;
 	for (int i = 0; i < 5; i++) {
-		clients.push_back(create_client(SOCKET_PATH));
+		Ref<StreamPeerUDS> c = create_client(SOCKET_PATH);
+		if (!c.is_valid()) {
+			return;
+		}
+		clients.push_back(c);
 	}
 
 	Vector<Ref<StreamPeerUDS>> clients_from_server;
 	for (int i = 0; i < clients.size(); i++) {
-		clients_from_server.push_back(accept_connection(server));
+		Ref<StreamPeerUDS> c = accept_connection(server);
+		if (!c.is_valid()) {
+			return;
+		}
+		clients_from_server.push_back(c);
 	}
 
 	wait_for_condition([&]() {
@@ -173,7 +202,7 @@ TEST_CASE("[UDSServer] Handle multiple clients at the same time") {
 	});
 
 	for (Ref<StreamPeerUDS> &c : clients) {
-		REQUIRE_EQ(c->get_status(), StreamPeerUDS::STATUS_CONNECTED);
+		CHECK_EQ(c->get_status(), StreamPeerUDS::STATUS_CONNECTED);
 	}
 
 	// Sending data from each client to server.
@@ -195,6 +224,9 @@ TEST_CASE("[UDSServer] When stopped shouldn't accept new connections") {
 	Ref<UDSServer> server = create_server(SOCKET_PATH);
 	Ref<StreamPeerUDS> client = create_client(SOCKET_PATH);
 	Ref<StreamPeerUDS> client_from_server = accept_connection(server);
+	if (!client.is_valid() || !client_from_server.is_valid()) {
+		return;
+	}
 
 	wait_for_condition([&]() {
 		return client->poll() != Error::OK || client->get_status() == StreamPeerUDS::STATUS_CONNECTED;
@@ -230,6 +262,9 @@ TEST_CASE("[UDSServer] Should disconnect client") {
 	Ref<UDSServer> server = create_server(SOCKET_PATH);
 	Ref<StreamPeerUDS> client = create_client(SOCKET_PATH);
 	Ref<StreamPeerUDS> client_from_server = accept_connection(server);
+	if (!client.is_valid() || !client_from_server.is_valid()) {
+		return;
+	}
 
 	wait_for_condition([&]() {
 		return client->poll() != Error::OK || client->get_status() == StreamPeerUDS::STATUS_CONNECTED;
@@ -279,6 +314,9 @@ TEST_CASE("[UDSServer] Test with different socket paths") {
 	Ref<UDSServer> server = create_server(alt_socket_path);
 	Ref<StreamPeerUDS> client = create_client(alt_socket_path);
 	Ref<StreamPeerUDS> client_from_server = accept_connection(server);
+	if (!client.is_valid() || !client_from_server.is_valid()) {
+		return;
+	}
 
 	wait_for_condition([&]() {
 		return client->poll() != Error::OK || client->get_status() == StreamPeerUDS::STATUS_CONNECTED;
