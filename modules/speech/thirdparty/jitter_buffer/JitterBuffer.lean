@@ -27,6 +27,7 @@ import JitterBuffer.PCM
 import JitterBuffer.Queue
 import JitterBuffer.Decoder
 import JitterBuffer.Sequence
+import JitterBuffer.MutexInvariant
 
 import AmoLean.EGraph.Verified.Core
 import AmoLean.EGraph.Verified.CoreSpec
