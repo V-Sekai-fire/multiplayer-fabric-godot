@@ -11,3 +11,4 @@ func _enter_tree():
 
 	if not _xr_interface_openvr.initialize():
 		print("Failed to connect to OpenVR")
+

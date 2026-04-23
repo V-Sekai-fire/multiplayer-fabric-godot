@@ -21,7 +21,7 @@ More frequent updates may be available on the source repository.
 --------------------
 - Now using OpenVR 1.9.16
 - Added support for overlays
-- Proper asynchronous loading of controller meshes and textures
+- Proper asynchronious loading of controller meshes and textures
 - Rewrite to using godot_cpp classes
 
 1.0.4 - 27 March 2019
