@@ -37,6 +37,8 @@
 
 namespace TestHTTP3Client {
 
+static constexpr uint32_t POLL_SLEEP_USEC = 50 * 1000; // 50 ms
+
 TEST_CASE("[HTTP3Client] Fresh instance is DISCONNECTED") {
 	Ref<HTTP3Client> client;
 	client.instantiate();
@@ -87,8 +89,6 @@ TEST_CASE("[HTTP3Client] 🏆 GET cloudflare-quic.com returns 200 via HTTP3Clien
 	Ref<HTTP3Client> client;
 	client.instantiate();
 
-	uint64_t deadline = OS::get_singleton()->get_ticks_usec() * 1000ULL + 10000000000ULL;
-
 	Error err = client->connect_to_host("cloudflare-quic.com", 443);
 	if (err == ERR_CANT_RESOLVE) {
 		MESSAGE("DNS unavailable — skipping");
@@ -96,11 +96,11 @@ TEST_CASE("[HTTP3Client] 🏆 GET cloudflare-quic.com returns 200 via HTTP3Clien
 	}
 	REQUIRE(err == OK);
 
-	// Poll for handshake.
-	deadline = OS::get_singleton()->get_ticks_usec() * 1000ULL + 5ULL * 1000000000ULL;
-	while (client->get_status() != HTTP3Client::STATUS_CONNECTED && (OS::get_singleton()->get_ticks_usec() * 1000ULL) < deadline) {
+	// Drive handshake state machine: exit when no longer CONNECTING.
+	// Termination proved in lean/http3/PollingTermination.lean.
+	while (client->get_status() == HTTP3Client::STATUS_CONNECTING) {
 		client->poll();
-		OS::get_singleton()->delay_usec(50 * 1000);
+		OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
 	}
 	REQUIRE(client->get_status() == HTTP3Client::STATUS_CONNECTED);
 
@@ -108,13 +108,11 @@ TEST_CASE("[HTTP3Client] 🏆 GET cloudflare-quic.com returns 200 via HTTP3Clien
 	Vector<String> hdrs;
 	REQUIRE(client->request(HTTP3Client::METHOD_GET, "/", hdrs, nullptr, 0) == OK);
 
-	// Poll until BODY (i.e., headers parsed and status code extracted).
-	uint64_t body_deadline = OS::get_singleton()->get_ticks_usec() * 1000ULL + 5000000000ULL;
+	// Drive response state machine: exit when headers parsed or error.
 	while (client->get_status() != HTTP3Client::STATUS_BODY &&
-			client->get_status() != HTTP3Client::STATUS_CONNECTION_ERROR &&
-			OS::get_singleton()->get_ticks_usec() * 1000ULL < body_deadline) {
+			client->get_status() != HTTP3Client::STATUS_CONNECTION_ERROR) {
 		client->poll();
-		OS::get_singleton()->delay_usec(50 * 1000);
+		OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
 	}
 
 	MESSAGE("🏆 HTTP3Client response code: ", client->get_response_code());

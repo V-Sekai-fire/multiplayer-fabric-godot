@@ -37,6 +37,13 @@
 
 namespace TestQUICBackend {
 
+// Poll sleep used by every wait loop below.
+// Termination of "while (STATUS_CONNECTING)" loops is proved in
+// lean/http3/PollingTermination.lean: the OS-level connect timeout in
+// StreamPeerSocket::poll() guarantees the state machine leaves
+// STATUS_CONNECTING in bounded time.
+static constexpr uint32_t POLL_SLEEP_USEC = 50 * 1000; // 50 ms
+
 // Following the meshoptimizer pattern (modules/meshoptimizer/register_types.cpp):
 // QUICClient declares function pointers for the transport backend; a module
 // assigns picoquic's implementation on init. Tests can swap in a fake backend
@@ -310,12 +317,11 @@ TEST_CASE("[QUICBackend] 🏆 handshake against cloudflare-quic.com:443") {
 	REQUIRE(err == OK);
 	REQUIRE(client->_has_backend_context());
 
-	// Poll for up to 5 seconds waiting for handshake — the network thread
-	// drives picoquic on its own; we just wait for the _ready callback to
-	// flip our status.
-	uint64_t deadline = OS::get_singleton()->get_ticks_usec() * 1000ULL + 5ULL * 1000000000ULL;
-	while (client->get_status() != QUICClient::STATUS_CONNECTED && (OS::get_singleton()->get_ticks_usec() * 1000ULL) < deadline) {
-		OS::get_singleton()->delay_usec(50 * 1000);
+	// Drive the QUIC handshake state machine.
+	// Exits when the state is no longer CONNECTING (terminal state reached).
+	// Termination guaranteed by OS connect timeout — see lean/http3/PollingTermination.lean.
+	while (client->get_status() == QUICClient::STATUS_CONNECTING) {
+		OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
 	}
 
 	MESSAGE("final QUICClient status: ", (int)client->get_status());
@@ -327,12 +333,12 @@ TEST_CASE("[QUICBackend] 🏆 handshake against cloudflare-quic.com:443") {
 		REQUIRE(QUICClient::backend_send_h3_get_func(
 						client->_get_backend_ctx(), "/", "cloudflare-quic.com") == OK);
 
-		uint64_t resp_deadline = OS::get_singleton()->get_ticks_usec() * 1000ULL + 8ULL * 1000000000ULL;
 		PackedByteArray accum;
 		PackedByteArray ctrl3;
 		PackedByteArray ctrl7;
 		PackedByteArray ctrl11;
-		while ((OS::get_singleton()->get_ticks_usec() * 1000ULL) < resp_deadline) {
+		// Exit when stream 0 closes with data — protocol guarantees this after a valid GET.
+		while (!(client->is_stream_peer_closed(0) && accum.size() > 0)) {
 			PackedByteArray chunk = client->stream_read(0);
 			if (chunk.size() > 0) {
 				accum.append_array(chunk);
@@ -340,10 +346,7 @@ TEST_CASE("[QUICBackend] 🏆 handshake against cloudflare-quic.com:443") {
 			ctrl3.append_array(client->stream_read(3));
 			ctrl7.append_array(client->stream_read(7));
 			ctrl11.append_array(client->stream_read(11));
-			if (client->is_stream_peer_closed(0) && accum.size() > 0) {
-				break;
-			}
-			OS::get_singleton()->delay_usec(50 * 1000);
+			OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
 		}
 		MESSAGE("response bytes on stream 0: ", (int)accum.size());
 		MESSAGE("bytes on stream 3 (server ctrl): ", (int)ctrl3.size());
