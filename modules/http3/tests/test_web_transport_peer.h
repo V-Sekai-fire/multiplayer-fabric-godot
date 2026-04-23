@@ -35,12 +35,10 @@
 
 #include "core/os/os.h"
 #include "tests/test_macros.h"
+#include "modules/http3/tests/test_poll_until.h"
 
 namespace TestWebTransportPeer {
-
-static constexpr uint32_t POLL_SLEEP_USEC = 50 * 1000; // 50 ms
-// Termination of all "while (!terminal_state)" loops is proved in
-// lean/http3/PollingTermination.lean.
+// Termination of all poll_until loops is proved in lean/http3/PollingTermination.lean.
 
 // Acceptance gate for the second-tier trophy: two WebTransportPeers exchange
 // one unreliable datagram and one reliable (stream) packet via the
@@ -177,9 +175,10 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 in-process WT loopback: session opens" * 
 		return;
 	}
 
-	while (peer->get_connection_status() != MultiplayerPeer::CONNECTION_CONNECTED) {
-		OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
-	}
+	poll_until(
+			[&]() { return peer->get_connection_status(); },
+			[](MultiplayerPeer::ConnectionStatus s) { return s == MultiplayerPeer::CONNECTION_CONNECTED; },
+			[&]() { peer->poll(); });
 
 	int ss = (int)peer->get_session_state();
 	MESSAGE("🏆🏆 session state: ", ss, " (4=SESSION_OPEN)");
@@ -204,11 +203,10 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 in-process WT loopback: session opens" * 
 		return;
 	}
 
-	// Wait for the echo — exits when the server echoes the packet back.
-	while (peer->get_available_packet_count() == 0) {
-		peer->poll();
-		OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
-	}
+	poll_until(
+			[&]() { return peer->get_available_packet_count(); },
+			[](int n) { return n > 0; },
+			[&]() { peer->poll(); });
 
 	int avail = peer->get_available_packet_count();
 	MESSAGE("🏆🏆 datagram echo packets available: ", avail);
@@ -238,10 +236,10 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 in-process WT loopback: session opens" * 
 		return;
 	}
 
-	while (peer->get_available_packet_count() == 0) {
-		peer->poll();
-		OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
-	}
+	poll_until(
+			[&]() { return peer->get_available_packet_count(); },
+			[](int n) { return n > 0; },
+			[&]() { peer->poll(); });
 
 	int stream_avail = peer->get_available_packet_count();
 	MESSAGE("🏆🏆 stream echo packets available: ", stream_avail);
@@ -293,17 +291,22 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 3 clients + 1 server datagram echo" * doc
 
 	// Drive state machine: exit when all clients reach SESSION_OPEN.
 	int open_count = 0;
-	while (open_count < NUM_CLIENTS) {
-		open_count = 0;
-		for (int i = 0; i < NUM_CLIENTS; i++) {
-			if (clients[i]->get_session_state() == WebTransportPeer::SESSION_OPEN) {
-				open_count++;
-			}
-		}
-		if (open_count < NUM_CLIENTS) {
-			OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
-		}
-	}
+	poll_until(
+			[&]() {
+				open_count = 0;
+				for (int i = 0; i < NUM_CLIENTS; i++) {
+					if (clients[i]->get_session_state() == WebTransportPeer::SESSION_OPEN) {
+						open_count++;
+					}
+				}
+				return open_count;
+			},
+			[](int n) { return n >= NUM_CLIENTS; },
+			[&]() {
+				for (int i = 0; i < NUM_CLIENTS; i++) {
+					clients[i]->poll();
+				}
+			});
 	MESSAGE("🏆🏆 clients with SESSION_OPEN: ", open_count, "/", NUM_CLIENTS);
 	if (open_count != NUM_CLIENTS) {
 		MESSAGE("Not all clients reached SESSION_OPEN — skipping echo tests");
@@ -323,18 +326,22 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 3 clients + 1 server datagram echo" * doc
 
 	// Wait for all echoes — exits when all clients have a packet ready.
 	int echo_count = 0;
-	while (echo_count < NUM_CLIENTS) {
-		echo_count = 0;
-		for (int i = 0; i < NUM_CLIENTS; i++) {
-			clients[i]->poll();
-			if (clients[i]->get_available_packet_count() > 0) {
-				echo_count++;
-			}
-		}
-		if (echo_count < NUM_CLIENTS) {
-			OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
-		}
-	}
+	poll_until(
+			[&]() {
+				echo_count = 0;
+				for (int i = 0; i < NUM_CLIENTS; i++) {
+					if (clients[i]->get_available_packet_count() > 0) {
+						echo_count++;
+					}
+				}
+				return echo_count;
+			},
+			[](int n) { return n >= NUM_CLIENTS; },
+			[&]() {
+				for (int i = 0; i < NUM_CLIENTS; i++) {
+					clients[i]->poll();
+				}
+			});
 	MESSAGE("🏆🏆 clients with datagram echo: ", echo_count, "/", NUM_CLIENTS);
 	if (echo_count != NUM_CLIENTS) {
 		MESSAGE("Not all datagram echoes received — skipping verification");
@@ -364,18 +371,22 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 3 clients + 1 server datagram echo" * doc
 
 	// Wait for stream echoes — exits when all clients have a packet ready.
 	int stream_echo_count = 0;
-	while (stream_echo_count < NUM_CLIENTS) {
-		stream_echo_count = 0;
-		for (int i = 0; i < NUM_CLIENTS; i++) {
-			clients[i]->poll();
-			if (clients[i]->get_available_packet_count() > 0) {
-				stream_echo_count++;
-			}
-		}
-		if (stream_echo_count < NUM_CLIENTS) {
-			OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
-		}
-	}
+	poll_until(
+			[&]() {
+				stream_echo_count = 0;
+				for (int i = 0; i < NUM_CLIENTS; i++) {
+					if (clients[i]->get_available_packet_count() > 0) {
+						stream_echo_count++;
+					}
+				}
+				return stream_echo_count;
+			},
+			[](int n) { return n >= NUM_CLIENTS; },
+			[&]() {
+				for (int i = 0; i < NUM_CLIENTS; i++) {
+					clients[i]->poll();
+				}
+			});
 	MESSAGE("🏆🏆 clients with stream echo: ", stream_echo_count, "/", NUM_CLIENTS);
 	if (stream_echo_count != NUM_CLIENTS) {
 		MESSAGE("Not all stream echoes received — skipping verification");
@@ -430,10 +441,13 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 online WT echo against public servers" * 
 			continue;
 		}
 
-		while (peer->get_session_state() != WebTransportPeer::SESSION_OPEN &&
-				peer->get_session_state() != WebTransportPeer::SESSION_CLOSED) {
-			OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
-		}
+		poll_until(
+				[&]() { return peer->get_session_state(); },
+				[](WebTransportPeer::SessionState s) {
+					return s == WebTransportPeer::SESSION_OPEN ||
+							s == WebTransportPeer::SESSION_CLOSED;
+				},
+				[&]() { peer->poll(); });
 
 		WebTransportPeer::SessionState ss = peer->get_session_state();
 		MESSAGE("  ", String(ep.host), " session_state=", (int)ss);
@@ -443,10 +457,10 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 online WT echo against public servers" * 
 			peer->set_transfer_mode(MultiplayerPeer::TRANSFER_MODE_UNRELIABLE);
 			const uint8_t payload[] = { 0x48, 0x49 }; // "HI"
 			if (peer->put_packet(payload, sizeof(payload)) == OK) {
-				while (peer->get_available_packet_count() == 0) {
-					peer->poll();
-					OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
-				}
+				poll_until(
+						[&]() { return peer->get_available_packet_count(); },
+						[](int n) { return n > 0; },
+						[&]() { peer->poll(); });
 				if (peer->get_available_packet_count() > 0) {
 					const uint8_t *rx = nullptr;
 					int rx_len = 0;
@@ -487,9 +501,10 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 session handshake against cloudflare-quic
 		return;
 	}
 
-	while (peer->get_connection_status() != MultiplayerPeer::CONNECTION_CONNECTED) {
-		OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
-	}
+	poll_until(
+			[&]() { return peer->get_connection_status(); },
+			[](MultiplayerPeer::ConnectionStatus s) { return s == MultiplayerPeer::CONNECTION_CONNECTED; },
+			[&]() { peer->poll(); });
 
 	int ss_cf = (int)peer->get_session_state();
 	MESSAGE("cloudflare session state: ", ss_cf);

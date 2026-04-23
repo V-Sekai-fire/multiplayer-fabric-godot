@@ -34,15 +34,9 @@
 
 #include "core/os/os.h"
 #include "tests/test_macros.h"
+#include "modules/http3/tests/test_poll_until.h"
 
 namespace TestQUICBackend {
-
-// Poll sleep used by every wait loop below.
-// Termination of "while (STATUS_CONNECTING)" loops is proved in
-// lean/http3/PollingTermination.lean: the OS-level connect timeout in
-// StreamPeerSocket::poll() guarantees the state machine leaves
-// STATUS_CONNECTING in bounded time.
-static constexpr uint32_t POLL_SLEEP_USEC = 50 * 1000; // 50 ms
 
 // Following the meshoptimizer pattern (modules/meshoptimizer/register_types.cpp):
 // QUICClient declares function pointers for the transport backend; a module
@@ -318,11 +312,13 @@ TEST_CASE("[QUICBackend] 🏆 handshake against cloudflare-quic.com:443") {
 	REQUIRE(client->_has_backend_context());
 
 	// Drive the QUIC handshake state machine.
-	// Exits when the state is no longer CONNECTING (terminal state reached).
-	// Termination guaranteed by OS connect timeout — see lean/http3/PollingTermination.lean.
-	while (client->get_status() == QUICClient::STATUS_CONNECTING) {
-		OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
-	}
+	// picoquic's network thread advances the state; we call poll() each step
+	// so the timeout fires even if the thread hasn't ticked yet.
+	// Termination proved in lean/http3/PollingTermination.lean.
+	poll_until(
+			[&]() { return client->get_status(); },
+			[](QUICClient::Status s) { return s != QUICClient::STATUS_CONNECTING; },
+			[&]() { /* background thread drives picoquic */ });
 
 	MESSAGE("final QUICClient status: ", (int)client->get_status());
 	MESSAGE("picoquic cnx state: ", QUICClient::backend_cnx_state_func(client->_get_backend_ctx()));
@@ -337,17 +333,19 @@ TEST_CASE("[QUICBackend] 🏆 handshake against cloudflare-quic.com:443") {
 		PackedByteArray ctrl3;
 		PackedByteArray ctrl7;
 		PackedByteArray ctrl11;
-		// Exit when stream 0 closes with data — protocol guarantees this after a valid GET.
-		while (!(client->is_stream_peer_closed(0) && accum.size() > 0)) {
-			PackedByteArray chunk = client->stream_read(0);
-			if (chunk.size() > 0) {
-				accum.append_array(chunk);
-			}
-			ctrl3.append_array(client->stream_read(3));
-			ctrl7.append_array(client->stream_read(7));
-			ctrl11.append_array(client->stream_read(11));
-			OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
-		}
+		// Drive read state machine: exit when stream 0 closes with data.
+		poll_until(
+				[&]() { return client->is_stream_peer_closed(0) && accum.size() > 0; },
+				[](bool done) { return done; },
+				[&]() {
+					PackedByteArray chunk = client->stream_read(0);
+					if (chunk.size() > 0) {
+						accum.append_array(chunk);
+					}
+					ctrl3.append_array(client->stream_read(3));
+					ctrl7.append_array(client->stream_read(7));
+					ctrl11.append_array(client->stream_read(11));
+				});
 		MESSAGE("response bytes on stream 0: ", (int)accum.size());
 		MESSAGE("bytes on stream 3 (server ctrl): ", (int)ctrl3.size());
 		MESSAGE("bytes on stream 7 (server encoder): ", (int)ctrl7.size());
