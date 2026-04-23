@@ -46,10 +46,12 @@ jobs:
             godot-cpp: true
             clangd-tidy: true
 
-          - name: Editor with doubles and GCC sanitizers (target=editor, dev_build=yes, scu_build=yes, precision=double, use_asan=yes, use_ubsan=yes, linker=mold)
+          - name: Editor with doubles and GCC sanitizers (target=editor, dev_build=yes, scu_build=yes, precision=double, use_asan=yes, use_ubsan=yes, linker=gold)
             cache-name: linux-editor-double-sanitizers
             target: editor
             # Debug symbols disabled as they're huge on this build and we hit the 14 GB limit for runners.
+            # gold instead of mold: GCC 11 libstdc++.a uses 32-bit PC-relative relocations that
+            # overflow with mold when the ASAN+double binary exceeds ~2 GB.
             scons-flags: >-
               dev_build=yes
               scu_build=yes
@@ -57,7 +59,7 @@ jobs:
               precision=double
               use_asan=yes
               use_ubsan=yes
-              linker=mold
+              linker=gold
             bin: ./bin/godot.linuxbsd.editor.dev.double.x86_64.san
             proj-test: true
 
@@ -177,7 +179,7 @@ jobs:
           fi
 
       - name: Install mold linker
-        if: matrix.proj-test
+        if: "false"
         uses: rui314/setup-mold@v1
 
       - name: Compilation
