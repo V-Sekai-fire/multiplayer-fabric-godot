@@ -2,7 +2,7 @@ extends XROrigin3D
 
 class_name OVRMain3D
 
-# Add this script to your XROrigin3D node and it will initialize OpenVR for you automatically.
+# Add this script to your XROrigin3D node and it will initialise OpenVR for you automatically.
 
 # Our plugin will now use the first actions.json found in the following locations
 # 1) in the actions folder alongside the executable
@@ -21,7 +21,7 @@ func get_xr_interface() -> XRInterfaceOpenVR:
 	return xr_interface
 
 func _ready():
-	# Find the interface and initialize
+	# Find the interface and initialise
 	xr_interface = XRServer.find_interface("OpenVR")
 	if xr_interface:
 		if xr_interface.initialize():
@@ -34,7 +34,7 @@ func _ready():
 				vp = get_node(viewport)
 				if vp:
 					# We copy this, while the ARVRServer will resize the size of the viewport automatically
-					# it can't feed it back into the node.
+					# it can't feed it back into the node. 
 					vp.size = xr_interface.get_render_targetsize()
 
 			# No viewport? get our main viewport
@@ -50,3 +50,4 @@ func _ready():
 			if physics_factor > 0:
 				# Set our physics to a multiple of our refresh rate to get in sync with our rendering
 				Engine.physics_ticks_per_second = refresh_rate * physics_factor
+
