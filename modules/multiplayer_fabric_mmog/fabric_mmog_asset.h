@@ -221,6 +221,24 @@ public:
 			PackedByteArray &r_key, PackedByteArray &r_iv,
 			String &r_error);
 
+	// ── Upload pipeline ─────────────────────────────────────────────────
+	// Compress p_uncompressed with zstd and PUT the resulting .cacnk blob
+	// to {store_url}/{hex[0..4]}/{hex}.cacnk using the desync wire protocol.
+	// p_chunk_id must be the SHA-512/256 (FIPS 180-4) digest of p_uncompressed.
+	// Returns OK on a 204 response from the chunk server.
+	static Error put_chunk(const String &p_store_url,
+			const uint8_t p_chunk_id[CHUNK_ID_BYTES],
+			const Vector<uint8_t> &p_uncompressed,
+			String &r_error);
+
+	// Chunk p_file_data using the desync rolling hash (buzhash), PUT every
+	// unique chunk to the chunk store, and return a casync .caibx index blob.
+	// The caller POSTs the returned index to uro's /storage endpoint to
+	// register the asset. Returns an empty array on error and sets r_error.
+	static Vector<uint8_t> upload_asset(const String &p_store_url,
+			const Vector<uint8_t> &p_file_data,
+			String &r_error);
+
 	FabricMMOGAsset() {}
 	~FabricMMOGAsset() {}
 
