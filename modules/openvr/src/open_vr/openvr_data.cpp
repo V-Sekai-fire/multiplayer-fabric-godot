@@ -1,3 +1,33 @@
+/**************************************************************************/
+/*  openvr_data.cpp                                                       */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
+
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Helper calls and singleton container for accessing openvr
 
@@ -129,14 +159,14 @@ bool openvr_data::is_initialised() {
 	return hmd != nullptr;
 }
 
-bool openvr_data::initialise() {
+bool openvr_data::initialize() {
 	if (hmd != nullptr) {
-		// already initialised, no need to do again
+		// already initialized, no need to do again
 		return true;
 	}
 
 	// init openvr
-	UtilityFunctions::print("OpenVR: initialising OpenVR context\n");
+	UtilityFunctions::print("OpenVR: initializing OpenVR context\n");
 
 	bool success = true;
 	vr::EVRInitError error = vr::VRInitError_None;
@@ -526,7 +556,7 @@ void openvr_data::process() {
 	// update our play area data ?
 	update_play_area();
 
-	// Loop through all the action sets and add the ones requring update to the array
+	// Loop through all the action sets and add the ones requiring update to the array
 	std::vector<vr::VRActiveActionSet_t> active_action_sets;
 	for (int i = 0; i < action_sets.size(); i++) {
 		if (action_sets[i].is_active) {
@@ -683,7 +713,7 @@ void openvr_data::get_recommended_rendertarget_size(uint32_t *p_width, uint32_t 
 
 // todo - change this to String or keep char *?
 char *openvr_data::get_device_name(vr::TrackedDeviceIndex_t p_tracked_device_index, uint32_t pMaxLen) {
-	static char returnstring[1025] = "Not initialised";
+	static char returnstring[1025] = "Not initialized";
 
 	if (hmd != nullptr) {
 		// don't go bigger then this...
@@ -1020,7 +1050,7 @@ void openvr_data::attach_device(uint32_t p_device_index) {
 					hand = 1;
 					device_hands_are_available = true;
 				} else if (!device_hands_are_available) {
-					// this definately needs to improve, if we haven't got hand information, our first controller becomes left and our second becomes right
+					// this definitely needs to improve, if we haven't got hand information, our first controller becomes left and our second becomes right
 					if (left_hand_device == vr::k_unTrackedDeviceIndexInvalid) {
 						hand = 1;
 					} else if (right_hand_device == vr::k_unTrackedDeviceIndexInvalid) {

@@ -103,7 +103,8 @@ Ref<StreamPeerUDS> create_client(const String &p_path) {
 	// the state machine exits STATUS_CONNECTING once the OS completes the
 	// handshake (→ STATUS_CONNECTED) or the built-in timeout fires (→ STATUS_ERROR).
 	for (int i = 0; i < POLL_LIMIT &&
-			client->get_status() == StreamPeerUDS::STATUS_CONNECTING; i++) {
+			client->get_status() == StreamPeerUDS::STATUS_CONNECTING;
+			i++) {
 		client->poll();
 		OS::get_singleton()->delay_usec(SLEEP_DURATION);
 	}

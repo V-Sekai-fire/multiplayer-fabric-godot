@@ -14,9 +14,9 @@ func start_xr():
 		if _xr_interface_openvr.initialize():
 			get_viewport().use_xr = true
 
-			print("Initialised")
+			print("Initialized")
 		else:
-			print("Failed to initialise")
+			print("Failed to initialize")
 	else:
 		print("Interface was not instantiated")
 

@@ -32,9 +32,10 @@
 
 #include "../fabric_mmog_transport_peer.h"
 
+#include "tests/test_macros.h"
+
 #include "modules/http3/quic_client.h"
 #include "modules/http3/web_transport_peer.h"
-#include "tests/test_macros.h"
 
 namespace TestFabricMMOGTransportPeer {
 
