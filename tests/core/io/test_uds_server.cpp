@@ -40,15 +40,16 @@ TEST_FORCE_LINK(test_uds_server)
 #include "core/io/uds_server.h"
 #include "core/os/os.h"
 
-#include <functional>
-
 namespace TestUDSServer {
 
 const String SOCKET_PATH = "/tmp/godot_test_uds_socket";
 const uint32_t SLEEP_DURATION = 1000;
 const uint64_t MAX_WAIT_USEC = 2000000;
 
-void wait_for_condition(std::function<bool()> f_test) {
+// Template instead of std::function: avoids heap/SBO boxing that triggers
+// stack-smashing detection in template_debug builds with -fstack-protector-all.
+template <typename F>
+void wait_for_condition(F f_test) {
 	const uint64_t time = OS::get_singleton()->get_ticks_usec();
 	while (!f_test() && (OS::get_singleton()->get_ticks_usec() - time) < MAX_WAIT_USEC) {
 		OS::get_singleton()->delay_usec(SLEEP_DURATION);
@@ -135,8 +136,11 @@ TEST_CASE("[UDSServer] Instantiation") {
 TEST_CASE("[UDSServer] Accept a connection and receive/send data") {
 	Ref<UDSServer> server = create_server(SOCKET_PATH);
 	Ref<StreamPeerUDS> client = create_client(SOCKET_PATH);
+	if (!client.is_valid()) {
+		return;
+	}
 	Ref<StreamPeerUDS> client_from_server = accept_connection(server);
-	if (!client.is_valid() || !client_from_server.is_valid()) {
+	if (!client_from_server.is_valid()) {
 		return;
 	}
 
@@ -223,8 +227,11 @@ TEST_CASE("[UDSServer] Handle multiple clients at the same time") {
 TEST_CASE("[UDSServer] When stopped shouldn't accept new connections") {
 	Ref<UDSServer> server = create_server(SOCKET_PATH);
 	Ref<StreamPeerUDS> client = create_client(SOCKET_PATH);
+	if (!client.is_valid()) {
+		return;
+	}
 	Ref<StreamPeerUDS> client_from_server = accept_connection(server);
-	if (!client.is_valid() || !client_from_server.is_valid()) {
+	if (!client_from_server.is_valid()) {
 		return;
 	}
 
@@ -261,8 +268,11 @@ TEST_CASE("[UDSServer] When stopped shouldn't accept new connections") {
 TEST_CASE("[UDSServer] Should disconnect client") {
 	Ref<UDSServer> server = create_server(SOCKET_PATH);
 	Ref<StreamPeerUDS> client = create_client(SOCKET_PATH);
+	if (!client.is_valid()) {
+		return;
+	}
 	Ref<StreamPeerUDS> client_from_server = accept_connection(server);
-	if (!client.is_valid() || !client_from_server.is_valid()) {
+	if (!client_from_server.is_valid()) {
 		return;
 	}
 
@@ -313,8 +323,11 @@ TEST_CASE("[UDSServer] Test with different socket paths") {
 
 	Ref<UDSServer> server = create_server(alt_socket_path);
 	Ref<StreamPeerUDS> client = create_client(alt_socket_path);
+	if (!client.is_valid()) {
+		return;
+	}
 	Ref<StreamPeerUDS> client_from_server = accept_connection(server);
-	if (!client.is_valid() || !client_from_server.is_valid()) {
+	if (!client_from_server.is_valid()) {
 		return;
 	}
 
