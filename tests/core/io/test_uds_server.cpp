@@ -45,6 +45,10 @@ namespace TestUDSServer {
 const String SOCKET_PATH = "/tmp/godot_test_uds_socket";
 const uint32_t SLEEP_DURATION = 1000;
 const uint64_t MAX_WAIT_USEC = 2000000;
+// Iteration bound for state-machine polling loops: same wall-clock budget as
+// wait_for_condition but expressed as a count so no raw time arithmetic is
+// needed inside individual loops.
+static constexpr int POLL_LIMIT = (int)(MAX_WAIT_USEC / SLEEP_DURATION);
 
 // Template instead of std::function: avoids heap/SBO boxing that triggers
 // stack-smashing detection in template_debug builds with -fstack-protector-all.
@@ -78,10 +82,12 @@ Ref<UDSServer> create_server(const String &p_path) {
 
 // Returns an invalid Ref and records CHECK failure if the connection cannot be
 // established. Callers must check .is_valid() before using the returned value.
-// Resolves STATUS_CONNECTING → STATUS_CONNECTED inline (100ms budget) so
-// callers never need to call accept_connection() on a still-connecting socket,
-// which would spin wait_for_condition for 2s and trigger stack smashing
-// detection on Linux (-fstack-protector-all in template_debug builds).
+//
+// Drives the StreamPeerSocket state machine (STATUS_CONNECTING → STATUS_CONNECTED
+// or STATUS_ERROR) via poll(), bounded by POLL_LIMIT iterations — no raw time
+// arithmetic. create_client() guarantees STATUS_CONNECTED on success, so callers
+// can check accept_connection()'s server queue immediately without any further
+// polling loop.
 Ref<StreamPeerUDS> create_client(const String &p_path) {
 	Ref<StreamPeerUDS> client;
 	client.instantiate();
@@ -92,18 +98,19 @@ Ref<StreamPeerUDS> create_client(const String &p_path) {
 		return {};
 	}
 
-	// Resolve non-blocking connect: poll until STATUS_CONNECTED or 100ms elapses.
-	const uint64_t deadline = OS::get_singleton()->get_ticks_usec() + 100000;
-	while (client->get_status() == StreamPeerUDS::STATUS_CONNECTING &&
-			OS::get_singleton()->get_ticks_usec() < deadline) {
+	// Drive the non-blocking connect state machine.
+	// poll() calls connect() again on the non-blocking socket each iteration;
+	// the state machine exits STATUS_CONNECTING once the OS completes the
+	// handshake (→ STATUS_CONNECTED) or the built-in timeout fires (→ STATUS_ERROR).
+	for (int i = 0; i < POLL_LIMIT &&
+			client->get_status() == StreamPeerUDS::STATUS_CONNECTING; i++) {
 		client->poll();
 		OS::get_singleton()->delay_usec(SLEEP_DURATION);
 	}
 
-	StreamPeerUDS::Status status = client->get_status();
-	CHECK_MESSAGE(status == StreamPeerUDS::STATUS_CONNECTED,
-			"UDS client did not reach STATUS_CONNECTED within 100ms — environment may not support UDS");
-	if (status != StreamPeerUDS::STATUS_CONNECTED) {
+	CHECK_MESSAGE(client->get_status() == StreamPeerUDS::STATUS_CONNECTED,
+			"UDS client did not reach STATUS_CONNECTED — UDS may not be available in this environment");
+	if (client->get_status() != StreamPeerUDS::STATUS_CONNECTED) {
 		return {};
 	}
 
@@ -111,12 +118,11 @@ Ref<StreamPeerUDS> create_client(const String &p_path) {
 	return client;
 }
 
-// Same null-guard pattern as create_client — see comment above.
+// Accept the next pending connection from the server's queue.
+// create_client() guarantees STATUS_CONNECTED before returning, which means
+// the OS has already completed the UDS handshake and enqueued the connection
+// on the server's accept queue — check the queue directly, no polling loop.
 Ref<StreamPeerUDS> accept_connection(Ref<UDSServer> &p_server) {
-	wait_for_condition([&]() {
-		return p_server->is_connection_available();
-	});
-
 	CHECK(p_server->is_connection_available());
 	if (!p_server->is_connection_available()) {
 		return {};
@@ -127,7 +133,6 @@ Ref<StreamPeerUDS> accept_connection(Ref<UDSServer> &p_server) {
 		return {};
 	}
 	CHECK_EQ(client_from_server->get_status(), StreamPeerUDS::STATUS_CONNECTED);
-
 	return client_from_server;
 }
 
@@ -150,10 +155,7 @@ TEST_CASE("[UDSServer] Accept a connection and receive/send data") {
 		return;
 	}
 
-	wait_for_condition([&]() {
-		return client->poll() != Error::OK || client->get_status() == StreamPeerUDS::STATUS_CONNECTED;
-	});
-
+	// client is already STATUS_CONNECTED (guaranteed by create_client).
 	CHECK_EQ(client->get_status(), StreamPeerUDS::STATUS_CONNECTED);
 
 	// Sending data from client to server.
@@ -194,23 +196,7 @@ TEST_CASE("[UDSServer] Handle multiple clients at the same time") {
 		clients_from_server.push_back(c);
 	}
 
-	wait_for_condition([&]() {
-		bool should_exit = true;
-		for (Ref<StreamPeerUDS> &c : clients) {
-			if (c->poll() != Error::OK) {
-				return true;
-			}
-			StreamPeerUDS::Status status = c->get_status();
-			if (status != StreamPeerUDS::STATUS_CONNECTED && status != StreamPeerUDS::STATUS_CONNECTING) {
-				return true;
-			}
-			if (status != StreamPeerUDS::STATUS_CONNECTED) {
-				should_exit = false;
-			}
-		}
-		return should_exit;
-	});
-
+	// All clients are already STATUS_CONNECTED (guaranteed by create_client).
 	for (Ref<StreamPeerUDS> &c : clients) {
 		CHECK_EQ(c->get_status(), StreamPeerUDS::STATUS_CONNECTED);
 	}
@@ -241,10 +227,7 @@ TEST_CASE("[UDSServer] When stopped shouldn't accept new connections") {
 		return;
 	}
 
-	wait_for_condition([&]() {
-		return client->poll() != Error::OK || client->get_status() == StreamPeerUDS::STATUS_CONNECTED;
-	});
-
+	// client is already STATUS_CONNECTED (guaranteed by create_client).
 	CHECK_EQ(client->get_status(), StreamPeerUDS::STATUS_CONNECTED);
 
 	// Sending data from client to server.
@@ -282,10 +265,7 @@ TEST_CASE("[UDSServer] Should disconnect client") {
 		return;
 	}
 
-	wait_for_condition([&]() {
-		return client->poll() != Error::OK || client->get_status() == StreamPeerUDS::STATUS_CONNECTED;
-	});
-
+	// client is already STATUS_CONNECTED (guaranteed by create_client).
 	CHECK_EQ(client->get_status(), StreamPeerUDS::STATUS_CONNECTED);
 
 	// Sending data from client to server.
@@ -337,10 +317,7 @@ TEST_CASE("[UDSServer] Test with different socket paths") {
 		return;
 	}
 
-	wait_for_condition([&]() {
-		return client->poll() != Error::OK || client->get_status() == StreamPeerUDS::STATUS_CONNECTED;
-	});
-
+	// client is already STATUS_CONNECTED (guaranteed by create_client).
 	CHECK_EQ(client->get_status(), StreamPeerUDS::STATUS_CONNECTED);
 
 	// Test data exchange
