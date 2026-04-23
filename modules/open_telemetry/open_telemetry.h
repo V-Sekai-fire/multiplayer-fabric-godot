@@ -71,6 +71,7 @@ private:
 	Dictionary attributes;
 
 public:
+	OpenTelemetryTracer() = default; // Required for GDREGISTER_CLASS / ClassDB instantiation.
 	OpenTelemetryTracer(String p_name, String p_version = "", String p_schema_url = "", Dictionary p_attributes = Dictionary());
 
 	String get_name() const { return name; }

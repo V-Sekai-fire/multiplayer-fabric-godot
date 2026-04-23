@@ -138,6 +138,7 @@ void initialize_open_telemetry_module(ModuleInitializationLevel p_level) {
 	}
 
 	// Register main API classes
+	GDREGISTER_CLASS(OpenTelemetryTracer);
 	GDREGISTER_CLASS(OpenTelemetryTracerProvider);
 	GDREGISTER_CLASS(OpenTelemetry);
 

@@ -50,8 +50,8 @@ void OTelSpan::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_parent_span_id", "parent_span_id"), &OTelSpan::set_parent_span_id);
 
 	// Span metadata
-	ClassDB::bind_method(D_METHOD("get_name"), &OTelSpan::get_name);
-	ClassDB::bind_method(D_METHOD("set_name", "name"), &OTelSpan::set_name);
+	// get_name/set_name are inherited from Resource and use virtual dispatch —
+	// do not re-register them here or ClassDB will error "already has a method".
 	ClassDB::bind_method(D_METHOD("get_kind"), &OTelSpan::get_kind);
 	ClassDB::bind_method(D_METHOD("set_kind", "kind"), &OTelSpan::set_kind);
 
@@ -92,7 +92,7 @@ void OTelSpan::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "trace_id"), "set_trace_id", "get_trace_id");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "span_id"), "set_span_id", "get_span_id");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "parent_span_id"), "set_parent_span_id", "get_parent_span_id");
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "name"), "set_name", "get_name");
+	// "name" property is already registered by Resource — no ADD_PROPERTY here.
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "kind", PROPERTY_HINT_ENUM, "Unspecified,Internal,Server,Client,Producer,Consumer"), "set_kind", "get_kind");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "start_time_unix_nano"), "set_start_time_unix_nano", "get_start_time_unix_nano");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "end_time_unix_nano"), "set_end_time_unix_nano", "get_end_time_unix_nano");
