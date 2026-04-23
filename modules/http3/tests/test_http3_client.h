@@ -34,10 +34,9 @@
 
 #include "core/os/os.h"
 #include "tests/test_macros.h"
+#include "modules/http3/tests/test_poll_until.h"
 
 namespace TestHTTP3Client {
-
-static constexpr uint32_t POLL_SLEEP_USEC = 50 * 1000; // 50 ms
 
 TEST_CASE("[HTTP3Client] Fresh instance is DISCONNECTED") {
 	Ref<HTTP3Client> client;
@@ -98,22 +97,24 @@ TEST_CASE("[HTTP3Client] 🏆 GET cloudflare-quic.com returns 200 via HTTP3Clien
 
 	// Drive handshake state machine: exit when no longer CONNECTING.
 	// Termination proved in lean/http3/PollingTermination.lean.
-	while (client->get_status() == HTTP3Client::STATUS_CONNECTING) {
-		client->poll();
-		OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
-	}
+	poll_until(
+			[&]() { return client->get_status(); },
+			[](HTTP3Client::Status s) { return s != HTTP3Client::STATUS_CONNECTING; },
+			[&]() { client->poll(); });
 	REQUIRE(client->get_status() == HTTP3Client::STATUS_CONNECTED);
 
 	// Issue request (spec-shaped signature).
 	Vector<String> hdrs;
 	REQUIRE(client->request(HTTP3Client::METHOD_GET, "/", hdrs, nullptr, 0) == OK);
 
-	// Drive response state machine: exit when headers parsed or error.
-	while (client->get_status() != HTTP3Client::STATUS_BODY &&
-			client->get_status() != HTTP3Client::STATUS_CONNECTION_ERROR) {
-		client->poll();
-		OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
-	}
+	// Drive response state machine: exit when headers parsed or connection error.
+	poll_until(
+			[&]() { return client->get_status(); },
+			[](HTTP3Client::Status s) {
+				return s == HTTP3Client::STATUS_BODY ||
+						s == HTTP3Client::STATUS_CONNECTION_ERROR;
+			},
+			[&]() { client->poll(); });
 
 	MESSAGE("🏆 HTTP3Client response code: ", client->get_response_code());
 	CHECK(client->get_response_code() == 200);
