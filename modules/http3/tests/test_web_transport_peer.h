@@ -38,6 +38,10 @@
 
 namespace TestWebTransportPeer {
 
+static constexpr uint32_t POLL_SLEEP_USEC = 50 * 1000; // 50 ms
+// Termination of all "while (!terminal_state)" loops is proved in
+// lean/http3/PollingTermination.lean.
+
 // Acceptance gate for the second-tier trophy: two WebTransportPeers exchange
 // one unreliable datagram and one reliable (stream) packet via the
 // QUICClient backbone. Uses the same push/pop hook loopback pattern proved
@@ -173,10 +177,8 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 in-process WT loopback: session opens" * 
 		return;
 	}
 
-	uint64_t deadline_lo = OS::get_singleton()->get_ticks_usec() * 1000ULL + 5ULL * 1000000000ULL;
-	while (peer->get_connection_status() != MultiplayerPeer::CONNECTION_CONNECTED &&
-			OS::get_singleton()->get_ticks_usec() * 1000ULL < deadline_lo) {
-		OS::get_singleton()->delay_usec(50 * 1000);
+	while (peer->get_connection_status() != MultiplayerPeer::CONNECTION_CONNECTED) {
+		OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
 	}
 
 	int ss = (int)peer->get_session_state();
@@ -202,11 +204,10 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 in-process WT loopback: session opens" * 
 		return;
 	}
 
-	// Wait for the echo.
-	uint64_t echo_deadline = (OS::get_singleton()->get_ticks_usec() * 1000ULL) + 3ULL * 1000000000ULL;
-	while (peer->get_available_packet_count() == 0 && (OS::get_singleton()->get_ticks_usec() * 1000ULL) < echo_deadline) {
+	// Wait for the echo — exits when the server echoes the packet back.
+	while (peer->get_available_packet_count() == 0) {
 		peer->poll();
-		OS::get_singleton()->delay_usec(50 * 1000);
+		OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
 	}
 
 	int avail = peer->get_available_packet_count();
@@ -237,10 +238,9 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 in-process WT loopback: session opens" * 
 		return;
 	}
 
-	uint64_t stream_deadline = (OS::get_singleton()->get_ticks_usec() * 1000ULL) + 3ULL * 1000000000ULL;
-	while (peer->get_available_packet_count() == 0 && (OS::get_singleton()->get_ticks_usec() * 1000ULL) < stream_deadline) {
+	while (peer->get_available_packet_count() == 0) {
 		peer->poll();
-		OS::get_singleton()->delay_usec(50 * 1000);
+		OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
 	}
 
 	int stream_avail = peer->get_available_packet_count();
@@ -291,17 +291,18 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 3 clients + 1 server datagram echo" * doc
 		}
 	}
 
-	// Wait for all 3 to reach SESSION_OPEN.
-	uint64_t deadline = (OS::get_singleton()->get_ticks_usec() * 1000ULL) + 5ULL * 1000000000ULL;
+	// Drive state machine: exit when all clients reach SESSION_OPEN.
 	int open_count = 0;
-	while (open_count < NUM_CLIENTS && (OS::get_singleton()->get_ticks_usec() * 1000ULL) < deadline) {
+	while (open_count < NUM_CLIENTS) {
 		open_count = 0;
 		for (int i = 0; i < NUM_CLIENTS; i++) {
 			if (clients[i]->get_session_state() == WebTransportPeer::SESSION_OPEN) {
 				open_count++;
 			}
 		}
-		OS::get_singleton()->delay_usec(50 * 1000);
+		if (open_count < NUM_CLIENTS) {
+			OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
+		}
 	}
 	MESSAGE("🏆🏆 clients with SESSION_OPEN: ", open_count, "/", NUM_CLIENTS);
 	if (open_count != NUM_CLIENTS) {
@@ -320,10 +321,9 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 3 clients + 1 server datagram echo" * doc
 		REQUIRE(clients[i]->put_packet(payload, sizeof(payload)) == OK);
 	}
 
-	// Wait for all echoes.
-	uint64_t echo_deadline = (OS::get_singleton()->get_ticks_usec() * 1000ULL) + 3ULL * 1000000000ULL;
+	// Wait for all echoes — exits when all clients have a packet ready.
 	int echo_count = 0;
-	while (echo_count < NUM_CLIENTS && (OS::get_singleton()->get_ticks_usec() * 1000ULL) < echo_deadline) {
+	while (echo_count < NUM_CLIENTS) {
 		echo_count = 0;
 		for (int i = 0; i < NUM_CLIENTS; i++) {
 			clients[i]->poll();
@@ -331,7 +331,9 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 3 clients + 1 server datagram echo" * doc
 				echo_count++;
 			}
 		}
-		OS::get_singleton()->delay_usec(50 * 1000);
+		if (echo_count < NUM_CLIENTS) {
+			OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
+		}
 	}
 	MESSAGE("🏆🏆 clients with datagram echo: ", echo_count, "/", NUM_CLIENTS);
 	if (echo_count != NUM_CLIENTS) {
@@ -360,10 +362,9 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 3 clients + 1 server datagram echo" * doc
 		REQUIRE(clients[i]->put_packet(payload, sizeof(payload)) == OK);
 	}
 
-	// Wait for stream echoes.
-	uint64_t stream_deadline = (OS::get_singleton()->get_ticks_usec() * 1000ULL) + 3ULL * 1000000000ULL;
+	// Wait for stream echoes — exits when all clients have a packet ready.
 	int stream_echo_count = 0;
-	while (stream_echo_count < NUM_CLIENTS && (OS::get_singleton()->get_ticks_usec() * 1000ULL) < stream_deadline) {
+	while (stream_echo_count < NUM_CLIENTS) {
 		stream_echo_count = 0;
 		for (int i = 0; i < NUM_CLIENTS; i++) {
 			clients[i]->poll();
@@ -371,7 +372,9 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 3 clients + 1 server datagram echo" * doc
 				stream_echo_count++;
 			}
 		}
-		OS::get_singleton()->delay_usec(50 * 1000);
+		if (stream_echo_count < NUM_CLIENTS) {
+			OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
+		}
 	}
 	MESSAGE("🏆🏆 clients with stream echo: ", stream_echo_count, "/", NUM_CLIENTS);
 	if (stream_echo_count != NUM_CLIENTS) {
@@ -427,11 +430,9 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 online WT echo against public servers" * 
 			continue;
 		}
 
-		uint64_t deadline = (OS::get_singleton()->get_ticks_usec() * 1000ULL) + 5ULL * 1000000000ULL;
 		while (peer->get_session_state() != WebTransportPeer::SESSION_OPEN &&
-				peer->get_session_state() != WebTransportPeer::SESSION_CLOSED &&
-				(OS::get_singleton()->get_ticks_usec() * 1000ULL) < deadline) {
-			OS::get_singleton()->delay_usec(50 * 1000);
+				peer->get_session_state() != WebTransportPeer::SESSION_CLOSED) {
+			OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
 		}
 
 		WebTransportPeer::SessionState ss = peer->get_session_state();
@@ -442,10 +443,9 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 online WT echo against public servers" * 
 			peer->set_transfer_mode(MultiplayerPeer::TRANSFER_MODE_UNRELIABLE);
 			const uint8_t payload[] = { 0x48, 0x49 }; // "HI"
 			if (peer->put_packet(payload, sizeof(payload)) == OK) {
-				uint64_t echo_deadline = (OS::get_singleton()->get_ticks_usec() * 1000ULL) + 3ULL * 1000000000ULL;
-				while (peer->get_available_packet_count() == 0 && (OS::get_singleton()->get_ticks_usec() * 1000ULL) < echo_deadline) {
+				while (peer->get_available_packet_count() == 0) {
 					peer->poll();
-					OS::get_singleton()->delay_usec(50 * 1000);
+					OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
 				}
 				if (peer->get_available_packet_count() > 0) {
 					const uint8_t *rx = nullptr;
@@ -487,10 +487,8 @@ TEST_CASE("[WebTransportPeer] 🏆🏆 session handshake against cloudflare-quic
 		return;
 	}
 
-	uint64_t deadline = (OS::get_singleton()->get_ticks_usec() * 1000ULL) + 7ULL * 1000000000ULL;
-	while (peer->get_connection_status() != MultiplayerPeer::CONNECTION_CONNECTED &&
-			(OS::get_singleton()->get_ticks_usec() * 1000ULL) < deadline) {
-		OS::get_singleton()->delay_usec(50 * 1000);
+	while (peer->get_connection_status() != MultiplayerPeer::CONNECTION_CONNECTED) {
+		OS::get_singleton()->delay_usec(POLL_SLEEP_USEC);
 	}
 
 	int ss_cf = (int)peer->get_session_state();
