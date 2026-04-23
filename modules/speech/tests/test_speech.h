@@ -99,6 +99,9 @@ TEST_CASE("[SceneTree][Speech] Decoder Retrieval") {
 }
 
 TEST_CASE("[SceneTree][Speech] Player Audio Management") {
+	if (AudioServer::get_singleton() == nullptr) {
+		return; // AudioServer unavailable in headless mode — AudioStreamPlayer3D ctor would null-deref.
+	}
 	Speech *speech_node = memnew(Speech);
 	AudioStreamPlayer3D *player_node1 = memnew(AudioStreamPlayer3D);
 	AudioStreamPlayer3D *player_node2 = memnew(AudioStreamPlayer3D);
@@ -129,6 +132,9 @@ TEST_CASE("[SceneTree][Speech] Player Audio Management") {
 }
 
 TEST_CASE("[SceneTree][Speech] on_received_audio_packet (Jitter Buffer Basic)") {
+	if (AudioServer::get_singleton() == nullptr) {
+		return; // AudioServer unavailable in headless mode — AudioStreamPlayer3D ctor would null-deref.
+	}
 	Speech *speech_node = memnew(Speech);
 	AudioStreamPlayer3D *dummy_player_node = memnew(AudioStreamPlayer3D);
 	speech_node->add_player_audio(123, dummy_player_node);
