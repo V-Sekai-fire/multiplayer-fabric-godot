@@ -33,7 +33,6 @@
 #include "../quic_client.h"
 #include "../web_transport_peer.h"
 
-#include "core/os/os.h"
 #include "tests/test_macros.h"
 
 #include "modules/http3/tests/test_poll_until.h"
