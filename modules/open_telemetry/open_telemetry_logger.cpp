@@ -57,8 +57,12 @@ void OpenTelemetryLogger::logv(const char *p_format, va_list p_list, bool p_err)
 
 	logging_in_progress = true;
 
-	// Format the message using Godot's vformat
-	String message = vformat(p_format, p_list);
+	// Format the message using vsnprintf (vformat is a variadic template, not
+	// va_list-compatible; on Android ARM va_list is std::__va_list which has no
+	// conversion to Variant).
+	char buf[4096];
+	vsnprintf(buf, sizeof(buf), p_format, p_list);
+	String message = String::utf8(buf);
 
 	// Map to log level
 	String level = p_err ? "ERROR" : "INFO";

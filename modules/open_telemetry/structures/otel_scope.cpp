@@ -34,8 +34,7 @@
 
 void OTelScope::_bind_methods() {
 	// Scope identification
-	ClassDB::bind_method(D_METHOD("get_name"), &OTelScope::get_name);
-	ClassDB::bind_method(D_METHOD("set_name", "name"), &OTelScope::set_name);
+	// get_name/set_name inherited from Resource — do not re-register.
 	ClassDB::bind_method(D_METHOD("get_version"), &OTelScope::get_version);
 	ClassDB::bind_method(D_METHOD("set_version", "version"), &OTelScope::set_version);
 
@@ -47,7 +46,7 @@ void OTelScope::_bind_methods() {
 	// Serialization
 	ClassDB::bind_method(D_METHOD("to_otlp_dict"), &OTelScope::to_otlp_dict);
 
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "name"), "set_name", "get_name");
+	// "name" property already registered by Resource — no ADD_PROPERTY here.
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "version"), "set_version", "get_version");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "attributes"), "set_attributes", "get_attributes");
 }
