@@ -465,10 +465,16 @@ void Speech::_notification(int p_what) {
 				}
 				Ref<PlaybackStats> playback_stats = elem["playback_stats"];
 				float jitter_buf_size = (float)jitter_buffer.size();
+				float jitter_ema = float(elem.has("jitter_ema") ? (float)elem["jitter_ema"] : JITTER_BUFFER_SPEEDUP);
+				// EMA: new_ema = (k * sample + (16-k) * ema) / 16  — matches ema_converges proof
+				jitter_ema = ((float)EMA_K * jitter_buf_size + (float)(16 - EMA_K) * jitter_ema) / 16.0f;
 				int skip_count = 0;
 				if (jitter_buf_size > JITTER_BUFFER_SPEEDUP) {
 					skip_count = (int)(jitter_buf_size - JITTER_BUFFER_SPEEDUP);
 				}
+				Dictionary dict_ema = player_audio[key];
+				dict_ema["jitter_ema"] = jitter_ema;
+				player_audio[key] = dict_ema;
 				attempt_to_feed_stream(
 						skip_count,
 						speech_decoder,
@@ -549,7 +555,8 @@ void Speech::add_player_audio(int p_player_id, Node *p_audio_stream_player) {
 			dict["speech_decoder"] = speech_decoder;
 			dict["playback_stats"] = pstats;
 			dict["playback_start_time"] = 0;
-			dict["playback_prev_time"] = -1.0; // Ensure this is double
+			dict["playback_prev_time"] = -1.0;
+			dict["jitter_ema"] = JITTER_BUFFER_SPEEDUP;
 
 			player_audio[p_player_id] = dict;
 		} else {

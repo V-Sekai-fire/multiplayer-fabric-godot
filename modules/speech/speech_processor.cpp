@@ -75,7 +75,7 @@ void SpeechProcessor::_bind_methods() {
 uint32_t SpeechProcessor::_resample_audio_buffer(
 		const float *p_src, const uint32_t p_src_frame_count,
 		const uint32_t p_src_samplerate, const uint32_t p_target_samplerate,
-		float *p_dst) {
+		float *p_dst, const uint32_t p_dst_frame_count) {
 	if (p_src_samplerate != p_target_samplerate) {
 		SRC_DATA src_data;
 
@@ -83,7 +83,7 @@ uint32_t SpeechProcessor::_resample_audio_buffer(
 		src_data.data_out = p_dst;
 
 		src_data.input_frames = p_src_frame_count;
-		src_data.output_frames = p_src_frame_count * RESAMPLED_BUFFER_FACTOR;
+		src_data.output_frames = p_dst_frame_count;
 
 		src_data.src_ratio = (double)p_target_samplerate / (double)p_src_samplerate;
 		src_data.end_of_input = 0;
@@ -116,15 +116,16 @@ void SpeechProcessor::_mix_audio(const Vector2 *p_capture_buffer) {
 	if (audio_server) {
 		_get_capture_block(audio_server, RECORD_MIX_FRAMES, p_capture_buffer, mono_capture_real_array.ptrw());
 
+		uint32_t available_output_slots = (uint32_t)capture_real_array.size() - capture_real_array_offset;
 		uint32_t resampled_frame_count =
 				capture_real_array_offset +
 				_resample_audio_buffer(
-						mono_capture_real_array.ptr(), // Pointer to source buffer
-						RECORD_MIX_FRAMES, // Size of source buffer * sizeof(float)
-						mix_rate, // Source sample rate
-						SPEECH_SETTING_VOICE_SAMPLE_RATE, // Target sample rate
-						capture_real_array.ptrw() +
-								static_cast<size_t>(capture_real_array_offset));
+						mono_capture_real_array.ptr(),
+						RECORD_MIX_FRAMES,
+						mix_rate,
+						SPEECH_SETTING_VOICE_SAMPLE_RATE,
+						capture_real_array.ptrw() + static_cast<size_t>(capture_real_array_offset),
+						available_output_slots);
 		capture_real_array_offset = 0;
 		const float *capture_real_array_read_ptr = capture_real_array.ptr();
 		while (capture_real_array_offset < resampled_frame_count - SPEECH_SETTING_BUFFER_FRAME_COUNT) {
@@ -179,6 +180,12 @@ void SpeechProcessor::start() {
 	}
 	if (AudioDriver::get_singleton()) {
 		mix_rate = AudioDriver::get_singleton()->get_input_mix_rate();
+		// Guard: RESAMPLED_BUFFER_FACTOR = sizeof(int) = 4.  Standard rates (≥44100 Hz)
+		// give ratio ≤ 1.09.  Rates below 12000 Hz would overflow the output buffer.
+		const uint32_t MIN_SAFE_MIX_RATE = SPEECH_SETTING_VOICE_SAMPLE_RATE / RESAMPLED_BUFFER_FACTOR;
+		if (mix_rate > 0 && mix_rate < MIN_SAFE_MIX_RATE) {
+			WARN_PRINT(vformat("SpeechProcessor: input mix rate %d Hz is below minimum safe rate %d Hz; resampler may overflow.", mix_rate, MIN_SAFE_MIX_RATE));
+		}
 	}
 	audio_input_stream_player->play();
 	audio_effect_capture->clear_buffer();
@@ -378,7 +385,8 @@ void SpeechProcessor::test_process_mono_audio_frames(const PackedFloat32Array &p
 			p_mono_frames.size(),
 			p_input_sample_rate,
 			SPEECH_SETTING_VOICE_SAMPLE_RATE,
-			resampled_audio_frames.ptrw());
+			resampled_audio_frames.ptrw(),
+			resampled_buffer_max_frames);
 
 	if (resampled_frame_count == 0 && p_mono_frames.size() > 0) {
 		ERR_PRINT_ONCE("SpeechProcessor::test_process_mono_audio_frames - Resampling produced 0 frames from non-empty input.");

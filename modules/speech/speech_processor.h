@@ -209,7 +209,8 @@ public:
 			const uint32_t p_src_frame_count,
 			const uint32_t p_src_samplerate,
 			const uint32_t p_target_samplerate,
-			float *p_dst);
+			float *p_dst,
+			const uint32_t p_dst_frame_count);
 
 	void start();
 	void stop();

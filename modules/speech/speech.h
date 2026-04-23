@@ -93,6 +93,9 @@ private:
 	float JITTER_BUFFER_SPEEDUP = 12.0f;
 	float JITTER_BUFFER_SLOWDOWN = 6.0f;
 
+	// EMA adaptive jitter: alpha = EMA_K/16.  k=4 → 0.25 (matches ema_converges proof).
+	static constexpr int EMA_K = 4;
+
 	bool DEBUG = false;
 	PackedVector2Array uncompressed_audio;
 
