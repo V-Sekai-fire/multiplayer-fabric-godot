@@ -77,10 +77,11 @@ Ref<UDSServer> create_server(const String &p_path) {
 }
 
 // Returns an invalid Ref and records CHECK failure if the connection cannot be
-// established. Callers must check .is_valid() before using the returned value —
-// REQUIRE is intentionally avoided here because with disable_exceptions=yes
-// (Godot's default) REQUIRE is a no-op, execution continues, and subsequent
-// null dereferences crash the process.
+// established. Callers must check .is_valid() before using the returned value.
+// Resolves STATUS_CONNECTING → STATUS_CONNECTED inline (100ms budget) so
+// callers never need to call accept_connection() on a still-connecting socket,
+// which would spin wait_for_condition for 2s and trigger stack smashing
+// detection on Linux (-fstack-protector-all in template_debug builds).
 Ref<StreamPeerUDS> create_client(const String &p_path) {
 	Ref<StreamPeerUDS> client;
 	client.instantiate();
@@ -91,17 +92,22 @@ Ref<StreamPeerUDS> create_client(const String &p_path) {
 		return {};
 	}
 
-	// UDS connections may be immediately connected or in connecting state.
+	// Resolve non-blocking connect: poll until STATUS_CONNECTED or 100ms elapses.
+	const uint64_t deadline = OS::get_singleton()->get_ticks_usec() + 100000;
+	while (client->get_status() == StreamPeerUDS::STATUS_CONNECTING &&
+			OS::get_singleton()->get_ticks_usec() < deadline) {
+		client->poll();
+		OS::get_singleton()->delay_usec(SLEEP_DURATION);
+	}
+
 	StreamPeerUDS::Status status = client->get_status();
-	CHECK((status == StreamPeerUDS::STATUS_CONNECTED || status == StreamPeerUDS::STATUS_CONNECTING));
-	if (status != StreamPeerUDS::STATUS_CONNECTED && status != StreamPeerUDS::STATUS_CONNECTING) {
+	CHECK_MESSAGE(status == StreamPeerUDS::STATUS_CONNECTED,
+			"UDS client did not reach STATUS_CONNECTED within 100ms — environment may not support UDS");
+	if (status != StreamPeerUDS::STATUS_CONNECTED) {
 		return {};
 	}
 
-	if (status == StreamPeerUDS::STATUS_CONNECTED) {
-		CHECK_EQ(client->get_connected_path(), p_path);
-	}
-
+	CHECK_EQ(client->get_connected_path(), p_path);
 	return client;
 }
 
