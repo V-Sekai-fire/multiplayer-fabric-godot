@@ -34,7 +34,7 @@
 #include "core/templates/local_vector.h"
 
 #include "modules/multiplayer_fabric/fabric_zone.h"
-#include "modules/multiplayer_fabric_mmog/fabric_mmog_asset.h"
+#include "modules/multiplayer_fabric_asset/fabric_mmog_asset.h"
 
 // FabricMMOGZone — MMOG-layer zone server.
 //

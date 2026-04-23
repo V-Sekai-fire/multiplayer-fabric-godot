@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  register_types.cpp                                                    */
+/*  register_types.h                                                      */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,26 +28,9 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "register_types.h"
+#pragma once
 
-#include "fabric_mmog_peer.h"
-#include "fabric_mmog_transport_peer.h"
-#include "fabric_mmog_zone.h"
+#include "modules/register_module_types.h"
 
-#include "core/object/class_db.h"
-
-void initialize_multiplayer_fabric_mmog_module(ModuleInitializationLevel p_level) {
-	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
-		return;
-	}
-
-	GDREGISTER_CLASS(FabricMMOGZone);
-	GDREGISTER_CLASS(FabricMMOGPeer);
-	GDREGISTER_CLASS(FabricMMOGTransportPeer);
-}
-
-void uninitialize_multiplayer_fabric_mmog_module(ModuleInitializationLevel p_level) {
-	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
-		return;
-	}
-}
+void initialize_multiplayer_fabric_asset_module(ModuleInitializationLevel p_level);
+void uninitialize_multiplayer_fabric_asset_module(ModuleInitializationLevel p_level);

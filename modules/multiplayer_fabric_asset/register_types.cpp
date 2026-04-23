@@ -30,23 +30,18 @@
 
 #include "register_types.h"
 
-#include "fabric_mmog_peer.h"
-#include "fabric_mmog_transport_peer.h"
-#include "fabric_mmog_zone.h"
+#include "fabric_mmog_asset.h"
 
 #include "core/object/class_db.h"
 
-void initialize_multiplayer_fabric_mmog_module(ModuleInitializationLevel p_level) {
+void initialize_multiplayer_fabric_asset_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
-
-	GDREGISTER_CLASS(FabricMMOGZone);
-	GDREGISTER_CLASS(FabricMMOGPeer);
-	GDREGISTER_CLASS(FabricMMOGTransportPeer);
+	GDREGISTER_CLASS(FabricMMOGAsset);
 }
 
-void uninitialize_multiplayer_fabric_mmog_module(ModuleInitializationLevel p_level) {
+void uninitialize_multiplayer_fabric_asset_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
