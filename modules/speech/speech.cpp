@@ -255,9 +255,9 @@ void Speech::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_stream_standard_pitch", "stream_standard_pitch"),
 			&Speech::set_stream_standard_pitch);
 	ClassDB::bind_method(D_METHOD("get_stream_speedup_pitch"),
-			&Speech::get_stream_standard_pitch);
+			&Speech::get_stream_speedup_pitch);
 	ClassDB::bind_method(D_METHOD("set_stream_speedup_pitch", "stream_speedup_pitch"),
-			&Speech::set_stream_standard_pitch);
+			&Speech::set_stream_speedup_pitch);
 	ClassDB::bind_method(D_METHOD("get_max_jitter_buffer_size"),
 			&Speech::get_max_jitter_buffer_size);
 	ClassDB::bind_method(D_METHOD("set_max_jitter_buffer_size", "max_jitter_buffer_size"),
@@ -315,11 +315,11 @@ void Speech::_bind_methods() {
 			"get_stream_standard_pitch");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "MAX_JITTER_BUFFER_SIZE"), "set_max_jitter_buffer_size",
 			"get_max_jitter_buffer_size");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "STREAM_SPEEDUP_PITCH"), "set_stream_speedup_pitch",
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "STREAM_SPEEDUP_PITCH"), "set_stream_speedup_pitch",
 			"get_stream_speedup_pitch");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "JITTER_BUFFER_SLOWDOWN"), "set_jitter_buffer_slowdown",
 			"get_jitter_buffer_slowdown");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "JITTER_BUFFER_SPEEDUP"), "set_jitter_buffer_speedup",
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "JITTER_BUFFER_SPEEDUP"), "set_jitter_buffer_speedup",
 			"get_jitter_buffer_speedup");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "DEBUG"), "set_debug",
 			"get_debug");
@@ -464,14 +464,19 @@ void Speech::_notification(int p_what) {
 					continue;
 				}
 				Ref<PlaybackStats> playback_stats = elem["playback_stats"];
+				int64_t jitter_buf_size = jitter_buffer.size();
+				int skip_count = 0;
+				if (jitter_buf_size > JITTER_BUFFER_SPEEDUP) {
+					skip_count = (int)(jitter_buf_size - JITTER_BUFFER_SPEEDUP);
+				}
 				attempt_to_feed_stream(
-						0,
+						skip_count,
 						speech_decoder,
 						audio_stream_player,
 						jitter_buffer,
 						playback_stats,
 						elem,
-						delta); // Pass delta time
+						delta);
 				Dictionary dict = player_audio[key];
 				dict["packets_received_this_frame"] = 0;
 				player_audio[key] = dict;
@@ -522,9 +527,7 @@ void Speech::add_player_audio(int p_player_id, Node *p_audio_stream_player) {
 		if (!player_audio.has(p_player_id)) {
 			Ref<AudioStreamGenerator> new_generator;
 			new_generator.instantiate();
-			if (AudioServer::get_singleton()) {
-				new_generator->set_mix_rate(AudioServer::get_singleton()->get_input_mix_rate());
-			}
+			new_generator->set_mix_rate(SpeechProcessor::SPEECH_SETTING_VOICE_SAMPLE_RATE);
 			new_generator->set_buffer_length(BUFFER_DELAY_THRESHOLD);
 			playback_ring_buffer_length = calc_playback_ring_buffer_length(new_generator);
 			p_audio_stream_player->call("set_stream", new_generator);
@@ -644,7 +647,7 @@ void Speech::on_received_audio_packet(int p_peer_id, int p_sequence_id, PackedBy
 	} else {
 		int64_t sequence_id = jitter_buffer.size() - 1 + sequence_id_offset;
 		vc_debug_print(vformat("Updating existing sequence_id: %s", itos(sequence_id)));
-		if (sequence_id >= 0) {
+		if (sequence_id >= 0 && sequence_id < (int64_t)jitter_buffer.size()) {
 			// Update the existing buffer.
 			Dictionary dict;
 			dict["packet"] = p_packet;
@@ -727,7 +730,9 @@ void Speech::attempt_to_feed_stream(int p_skip_count, Ref<SpeechDecoder> p_decod
 		return;
 	}
 
-	p_audio_stream_player->call("play", p_audio_stream_player->call("get_playback_position"));
+	if (!bool(p_audio_stream_player->call("is_playing"))) {
+		p_audio_stream_player->call("play");
+	}
 
 	Ref<AudioStreamGeneratorPlayback> playback = p_audio_stream_player->call("get_stream_playback");
 	if (playback.is_null()) {
