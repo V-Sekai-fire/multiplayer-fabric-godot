@@ -46,6 +46,10 @@ module_env.Prepend(CPPPATH=["include"])
 
 env_thirdparty = module_env.Clone()
 env_thirdparty.disable_warnings()
+# Opus uses deliberate signed-integer arithmetic patterns that trip UBSan.
+# Suppress at the compiler level so sanitizer builds don't abort on this code.
+if not env.msvc:
+    env_thirdparty.Append(CFLAGS=["-fno-sanitize=undefined"])
 thirdparty_dir = "thirdparty/opus/"
 thirdparty_sources = [
     # Sync with opus_sources.mk

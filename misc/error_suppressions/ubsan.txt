@@ -79,3 +79,10 @@ shift-base:thirdparty/misc/FastNoiseLite.h
 shift-base:thirdparty/tinyexr/tinyexr.h
 shift-exponent:thirdparty/misc/mikktspace.c
 signed-integer-overflow:thirdparty/misc/FastNoiseLite.h
+implicit-integer-sign-change:modules/speech/thirdparty/opus/celt/mathops.h
+implicit-integer-sign-change:modules/speech/thirdparty/opus/celt/celt_encoder.c
+implicit-integer-sign-change:modules/speech/thirdparty/opus/celt/entdec.c
+implicit-integer-sign-change:modules/speech/thirdparty/opus/celt/cwrs.c
+implicit-integer-sign-change:modules/speech/thirdparty/opus/silk/decode_core.c
+shift-base:modules/speech/thirdparty/opus/celt/mathops.h
+signed-integer-overflow:modules/speech/thirdparty/opus/celt/mathops.h
