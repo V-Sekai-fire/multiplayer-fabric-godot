@@ -40,8 +40,8 @@ void OTelMetric::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_description", "description"), &OTelMetric::set_description);
 	ClassDB::bind_method(D_METHOD("get_unit"), &OTelMetric::get_unit);
 	ClassDB::bind_method(D_METHOD("set_unit", "unit"), &OTelMetric::set_unit);
-	ClassDB::bind_method(D_METHOD("get_type"), &OTelMetric::get_type);
-	ClassDB::bind_method(D_METHOD("set_type", "type"), &OTelMetric::set_type);
+	ClassDB::bind_method(D_METHOD("get_metric_type"), &OTelMetric::get_type);
+	ClassDB::bind_method(D_METHOD("set_metric_type", "type"), &OTelMetric::set_type);
 	ClassDB::bind_method(D_METHOD("get_temporality"), &OTelMetric::get_temporality);
 	ClassDB::bind_method(D_METHOD("set_temporality", "temporality"), &OTelMetric::set_temporality);
 
@@ -56,7 +56,7 @@ void OTelMetric::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "name"), "set_name", "get_name");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "description"), "set_description", "get_description");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "unit"), "set_unit", "get_unit");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "type"), "set_type", "get_type");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "type"), "set_metric_type", "get_metric_type");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "temporality"), "set_temporality", "get_temporality");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "data_points"), "set_data_points", "get_data_points");
 
