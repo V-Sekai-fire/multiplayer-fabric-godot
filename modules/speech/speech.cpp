@@ -113,19 +113,19 @@ void Speech::speech_processed(SpeechProcessor::SpeechInput *p_mic_input) {
 	}
 }
 
-int Speech::get_jitter_buffer_speedup() const {
+float Speech::get_jitter_buffer_speedup() const {
 	return JITTER_BUFFER_SPEEDUP;
 }
 
-void Speech::set_jitter_buffer_speedup(int p_jitter_buffer_speedup) {
+void Speech::set_jitter_buffer_speedup(float p_jitter_buffer_speedup) {
 	JITTER_BUFFER_SPEEDUP = p_jitter_buffer_speedup;
 }
 
-int Speech::get_jitter_buffer_slowdown() const {
+float Speech::get_jitter_buffer_slowdown() const {
 	return JITTER_BUFFER_SLOWDOWN;
 }
 
-void Speech::set_jitter_buffer_slowdown(int p_jitter_buffer_slowdown) {
+void Speech::set_jitter_buffer_slowdown(float p_jitter_buffer_slowdown) {
 	JITTER_BUFFER_SLOWDOWN = p_jitter_buffer_slowdown;
 }
 
@@ -317,9 +317,9 @@ void Speech::_bind_methods() {
 			"get_max_jitter_buffer_size");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "STREAM_SPEEDUP_PITCH"), "set_stream_speedup_pitch",
 			"get_stream_speedup_pitch");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "JITTER_BUFFER_SLOWDOWN"), "set_jitter_buffer_slowdown",
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "JITTER_BUFFER_SLOWDOWN"), "set_jitter_buffer_slowdown",
 			"get_jitter_buffer_slowdown");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "JITTER_BUFFER_SPEEDUP"), "set_jitter_buffer_speedup",
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "JITTER_BUFFER_SPEEDUP"), "set_jitter_buffer_speedup",
 			"get_jitter_buffer_speedup");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "DEBUG"), "set_debug",
 			"get_debug");
@@ -464,7 +464,7 @@ void Speech::_notification(int p_what) {
 					continue;
 				}
 				Ref<PlaybackStats> playback_stats = elem["playback_stats"];
-				int64_t jitter_buf_size = jitter_buffer.size();
+				float jitter_buf_size = (float)jitter_buffer.size();
 				int skip_count = 0;
 				if (jitter_buf_size > JITTER_BUFFER_SPEEDUP) {
 					skip_count = (int)(jitter_buf_size - JITTER_BUFFER_SPEEDUP);

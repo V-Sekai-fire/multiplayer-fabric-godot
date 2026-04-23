@@ -90,8 +90,8 @@ private:
 	float STREAM_STANDARD_PITCH = 1.0;
 	float STREAM_SPEEDUP_PITCH = 1.5;
 	int MAX_JITTER_BUFFER_SIZE = 16;
-	int JITTER_BUFFER_SPEEDUP = 12;
-	int JITTER_BUFFER_SLOWDOWN = 6;
+	float JITTER_BUFFER_SPEEDUP = 12.0f;
+	float JITTER_BUFFER_SLOWDOWN = 6.0f;
 
 	bool DEBUG = false;
 	PackedVector2Array uncompressed_audio;
@@ -126,10 +126,10 @@ public:
 	Ref<SpeechDecoder> get_speech_decoder();
 	Dictionary get_stats();
 
-	int get_jitter_buffer_speedup() const;
-	void set_jitter_buffer_speedup(int p_jitter_buffer_speedup);
-	int get_jitter_buffer_slowdown() const;
-	void set_jitter_buffer_slowdown(int p_jitter_buffer_slowdown);
+	float get_jitter_buffer_speedup() const;
+	void set_jitter_buffer_speedup(float p_jitter_buffer_speedup);
+	float get_jitter_buffer_slowdown() const;
+	void set_jitter_buffer_slowdown(float p_jitter_buffer_slowdown);
 	float get_stream_speedup_pitch() const;
 	void set_stream_speedup_pitch(float p_stream_speedup_pitch);
 	int get_max_jitter_buffer_size() const;

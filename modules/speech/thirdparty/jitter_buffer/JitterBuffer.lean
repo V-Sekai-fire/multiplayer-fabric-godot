@@ -76,21 +76,21 @@ theorem late_packet_in_window (buffer_size : ℕ) (offset : Int) :
 
 -- ── Speedup/slowdown skip-count invariant ────────────────────────────────
 --
--- The existing code defines JITTER_BUFFER_SPEEDUP and JITTER_BUFFER_SLOWDOWN
--- but always calls attempt_to_feed_stream with skip_count = 0.
+-- JITTER_BUFFER_SPEEDUP and JITTER_BUFFER_SLOWDOWN are float thresholds
+-- (packet counts can be fractional for fine-grained tuning).
 --
 -- Correct logic:
---   if buffer_size > SPEEDUP_THRESHOLD  →  skip_count = buffer_size - SPEEDUP_THRESHOLD
---   if buffer_size < SLOWDOWN_THRESHOLD →  skip_count = 0, and PLC inserts a repeat
+--   if buffer_size > SPEEDUP_THRESHOLD  →  skip_count = ⌊buffer_size - SPEEDUP_THRESHOLD⌋
+--   if buffer_size < SLOWDOWN_THRESHOLD →  skip_count = 0, PLC inserts a repeat
 --   otherwise                           →  skip_count = 0 (normal path)
 --
 -- The skip_count is non-negative and at most the excess.
 
-theorem skip_count_nonneg (buf_size speedup : ℕ) :
-    (buf_size : Int) - speedup ≥ 0 ↔ buf_size ≥ speedup := by omega
+theorem skip_count_nonneg (buf_size speedup : ℝ) (h : buf_size > speedup) :
+    buf_size - speedup > 0 := by linarith
 
-theorem skip_count_bounded (buf_size speedup : ℕ) (h : buf_size ≥ speedup) :
-    buf_size - speedup ≤ buf_size := by omega
+theorem skip_count_bounded (buf_size speedup : ℝ) (h : buf_size > speedup) (hsp : speedup > 0) :
+    buf_size - speedup < buf_size := by linarith
 
 -- ── Adaptive target invariant ─────────────────────────────────────────────
 --
