@@ -8,7 +8,14 @@ env_mf = env_modules.Clone()
 
 # Thirdparty: r128.h (header-only, implementation compiled in r128_impl.cpp)
 
-env_mf.Prepend(CPPPATH=["#thirdparty/misc/", "#thirdparty/webtransportd/", "#modules/sqlite/thirdparty", "#modules/sqlite"])
+env_mf.Prepend(
+    CPPPATH=[
+        "#thirdparty/misc/",
+        "#thirdparty/webtransportd/",
+        "#modules/sqlite/thirdparty",
+        "#modules/sqlite",
+    ]
+)
 
 # Godot source files
 
