@@ -30,6 +30,7 @@
 
 #include "fabric_mmog_zone.h"
 
+#include "core/io/json.h"
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/string/print_string.h"
@@ -48,6 +49,8 @@ void FabricMMOGZone::_bind_methods() {
 			&FabricMMOGZone::register_script);
 	ClassDB::bind_method(D_METHOD("send_script_registry", "peer_id"),
 			&FabricMMOGZone::send_script_registry);
+	ClassDB::bind_method(D_METHOD("set_plan_callable", "callable"),
+			&FabricMMOGZone::set_plan_callable);
 	ClassDB::bind_method(D_METHOD("set_entity_domain", "entity_id", "domain_json"),
 			&FabricMMOGZone::set_entity_domain);
 	ClassDB::bind_method(D_METHOD("get_entity_current_action", "entity_id"),
@@ -142,17 +145,38 @@ void FabricMMOGZone::send_script_registry(int p_peer_id) {
 
 // ── RECTGTN entity planning ──────────────────────────────────────────────────
 
+void FabricMMOGZone::set_plan_callable(const Callable &p_fn) {
+	_plan_callable = p_fn;
+}
+
 void FabricMMOGZone::_replan_entity(int p_entity_id) {
+	if (!_plan_callable.is_valid()) {
+		return;
+	}
 	HashMap<int, String>::Iterator dom_it = _entity_domains.find(p_entity_id);
 	if (dom_it == _entity_domains.end()) {
 		return;
 	}
 
-	// Convert Godot String → std::string for the header-only loader.
-	std::string domain_str = dom_it->value.utf8().get_data();
-	TwLoader::TwLoaded loaded = TwLoader::load_json(domain_str);
+	// Invoke sandbox: api_plan_domain(domain_json) → plan_json string.
+	const Variant domain_arg = dom_it->value;
+	Variant result = _plan_callable.call(domain_arg);
+	if (result.get_type() != Variant::STRING) {
+		return;
+	}
+	String plan_json = result;
+	if (plan_json == "null" || plan_json.is_empty()) {
+		return;
+	}
 
-	// Clear any prior plan and reset the step counter.
+	// Parse plan JSON: [["action_name", ...args], ...]
+	Variant parsed = JSON::parse_string(plan_json);
+	if (parsed.get_type() != Variant::ARRAY) {
+		return;
+	}
+	Array arr = parsed;
+
+	// Clear any prior plan and reset step counter.
 	{
 		HashMap<int, LocalVector<String>>::Iterator old_plan = _entity_plans.find(p_entity_id);
 		if (old_plan != _entity_plans.end()) {
@@ -168,16 +192,16 @@ void FabricMMOGZone::_replan_entity(int p_entity_id) {
 		}
 	}
 
-	std::optional<std::vector<TwCall>> plan =
-			tw_plan(loaded.state, loaded.tasks, loaded.domain);
-	if (!plan.has_value() || plan->empty()) {
-		return;
-	}
-
 	LocalVector<String> steps;
-	steps.resize((int)plan->size());
-	for (int i = 0; i < (int)plan->size(); ++i) {
-		steps[i] = String::utf8((*plan)[i].name.c_str());
+	steps.resize(arr.size());
+	for (int i = 0; i < arr.size(); ++i) {
+		if (arr[i].get_type() != Variant::ARRAY) {
+			continue;
+		}
+		Array step = arr[i];
+		if (step.size() > 0) {
+			steps[i] = step[0];
+		}
 	}
 	_entity_plans.insert(p_entity_id, steps);
 }

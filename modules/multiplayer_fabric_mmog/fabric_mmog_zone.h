@@ -32,12 +32,10 @@
 
 #include "core/templates/hash_map.h"
 #include "core/templates/local_vector.h"
+#include "core/variant/callable.h"
 
 #include "modules/multiplayer_fabric/fabric_zone.h"
 #include "modules/multiplayer_fabric_asset/fabric_mmog_asset.h"
-
-#include "tw_loader.hpp"
-#include "tw_planner.hpp"
 
 // FabricMMOGZone — MMOG-layer zone server.
 //
@@ -117,9 +115,11 @@ public:
 	void send_script_registry(int p_peer_id);
 
 	// ── RECTGTN entity planning ──────────────────────────────────────────
-	// Assign a JSON-LD domain string to an entity and compute its initial plan.
-	// p_domain_json is the full domain (tasks + actions + state); the initial
-	// task list and state are embedded in the document (TwLoader::load_json).
+	// Wire the planner: (domain_json: String) → plan_json: String.
+	// Typically sandbox.vmcallable("api_plan_domain", []) with taskweft_planner ELF.
+	void set_plan_callable(const Callable &p_callable);
+
+	// Assign a JSON-LD domain string to an entity and invoke the planner Callable.
 	void set_entity_domain(int p_entity_id, const String &p_domain_json);
 
 	// Return the action name at the entity's current plan step, or "" if the
@@ -140,6 +140,9 @@ private:
 	int _asset_instance_counter = 0;
 
 	// ── RECTGTN per-entity planning state ───────────────────────────────
+	// Callable: (domain_json: String) → plan_json: String.
+	// Set via set_plan_callable(); typically wraps the taskweft_planner sandbox ELF.
+	Callable _plan_callable;
 	// entity_id → JSON-LD domain string (set by set_entity_domain).
 	HashMap<int, String> _entity_domains;
 	// entity_id → plan as ordered list of action names (computed by _replan_entity).
