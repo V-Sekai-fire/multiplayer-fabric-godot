@@ -14,7 +14,7 @@ func _on_Action_pressed():
 	color_idx = color_idx + 1
 	if (color_idx == 3):
 		color_idx = 0
-	
+
 	material.albedo_color = colors[color_idx]
 
 func _physics_process(delta):

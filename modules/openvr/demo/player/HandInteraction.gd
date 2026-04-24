@@ -42,14 +42,12 @@ func _process(delta):
 			# attempt to move our kinematic body to where our hand is
 			var rel_vec = parent.global_transform.origin - $KinematicBody.global_transform.origin
 			var collider = $KinematicBody.move_and_collide(rel_vec)
-			
+
 			if collider:
 				if !was_colliding:
 					was_colliding = true
 					$Haptic.trigger_pulse()
 			else:
 				was_colliding = false
-			
-			# if we are obstructed we should check if our hand is now somewhere it would no longer collide with something and move our kinematic body there.
-			
 
+			# if we are obstructed we should check if our hand is now somewhere it would no longer collide with something and move our kinematic body there.
