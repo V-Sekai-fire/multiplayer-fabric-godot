@@ -1,5 +1,5 @@
 def can_build(env, platform):
-    return True
+    return env.get("module_multiplayer_fabric_asset_enabled", False)
 
 
 def configure(env):
