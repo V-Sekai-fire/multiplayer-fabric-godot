@@ -128,6 +128,8 @@ static const char *cpp_compatible_variant_type(int type) {
 			return "PackedArray<Vector3>";
 		case Variant::PACKED_COLOR_ARRAY:
 			return "PackedArray<Color>";
+		case Variant::PACKED_VECTOR4_ARRAY:
+			return "PackedArray<Vector4>";
 		default:
 			throw std::runtime_error("Unknown variant type.");
 	}
