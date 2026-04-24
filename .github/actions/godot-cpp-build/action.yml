@@ -33,6 +33,19 @@ runs:
       shell: sh
       run: ${{ inputs.bin }} --headless --dump-gdextension-interface --dump-extension-api
 
+    - name: Install ar response-file wrapper
+      shell: sh
+      run: |
+        sudo tee /usr/local/bin/ar > /dev/null << 'EOF'
+        #!/bin/sh
+        op="$1"; target="$2"; shift 2
+        tmp=$(mktemp /tmp/ar-rsp.XXXXXX)
+        printf '%s\n' "$@" > "$tmp"
+        /usr/bin/ar "$op" "$target" "@$tmp"
+        rc=$?; rm -f "$tmp"; exit $rc
+        EOF
+        sudo chmod +x /usr/local/bin/ar
+
     - name: SCons Build
       shell: sh
       env:
