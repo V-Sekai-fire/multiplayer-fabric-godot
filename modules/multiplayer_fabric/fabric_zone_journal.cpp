@@ -41,7 +41,7 @@
 // Total: 96 bytes
 static constexpr int ENTITY_BYTES = 96;
 
-void FabricZoneJournal::_pack_entity(const FabricZone::FabricEntity &p_e, uint8_t *p_out) {
+void FabricZoneJournal::_pack_entity(const FabricEntity &p_e, uint8_t *p_out) {
 	float tmp[9] = {
 		(float)p_e.cx, (float)p_e.cy, (float)p_e.cz,
 		(float)p_e.vx, (float)p_e.vy, (float)p_e.vz,
@@ -53,7 +53,7 @@ void FabricZoneJournal::_pack_entity(const FabricZone::FabricEntity &p_e, uint8_
 	memcpy(p_out + 40, p_e.payload, 56);
 }
 
-void FabricZoneJournal::_unpack_entity(const uint8_t *p_in, FabricZone::FabricEntity &r_e) {
+void FabricZoneJournal::_unpack_entity(const uint8_t *p_in, FabricEntity &r_e) {
 	float tmp[9];
 	memcpy(tmp, p_in, 36);
 	r_e.cx = tmp[0];
@@ -155,7 +155,7 @@ static int64_t _now_us() {
 
 // ── Mutation writers ──────────────────────────────────────────────────────
 
-void FabricZoneJournal::journal_spawn(int p_slot_idx, const FabricZone::FabricEntity &p_entity) {
+void FabricZoneJournal::journal_spawn(int p_slot_idx, const FabricEntity &p_entity) {
 	if (!_db) {
 		return;
 	}
@@ -188,7 +188,7 @@ void FabricZoneJournal::journal_despawn(int p_slot_idx, int p_global_id) {
 	sqlite3_finalize(stmt);
 }
 
-void FabricZoneJournal::journal_payload_update(int p_slot_idx, const FabricZone::FabricEntity &p_entity) {
+void FabricZoneJournal::journal_payload_update(int p_slot_idx, const FabricEntity &p_entity) {
 	if (!_db) {
 		return;
 	}
@@ -206,7 +206,7 @@ void FabricZoneJournal::journal_payload_update(int p_slot_idx, const FabricZone:
 	sqlite3_finalize(stmt);
 }
 
-void FabricZoneJournal::journal_snapshot(int p_capacity, const FabricZone::EntitySlot *p_slots) {
+void FabricZoneJournal::journal_snapshot(int p_capacity, const EntitySlot *p_slots) {
 	if (!_db) {
 		return;
 	}
@@ -269,7 +269,7 @@ void FabricZoneJournal::journal_snapshot(int p_capacity, const FabricZone::Entit
 
 // ── Replay ────────────────────────────────────────────────────────────────
 
-bool FabricZoneJournal::replay(int p_capacity, FabricZone::EntitySlot *p_slots, int &r_entity_count) {
+bool FabricZoneJournal::replay(int p_capacity, EntitySlot *p_slots, int &r_entity_count) {
 	if (!_db) {
 		return false;
 	}
@@ -298,7 +298,7 @@ bool FabricZoneJournal::replay(int p_capacity, FabricZone::EntitySlot *p_slots, 
 					if ((int)slot_idx >= p_capacity) {
 						continue;
 					}
-					p_slots[slot_idx] = FabricZone::EntitySlot();
+					p_slots[slot_idx] = EntitySlot();
 					p_slots[slot_idx].active = true;
 					_unpack_entity(rec + 4, p_slots[slot_idx].entity);
 					r_entity_count++;
@@ -333,7 +333,7 @@ bool FabricZoneJournal::replay(int p_capacity, FabricZone::EntitySlot *p_slots, 
 					// entities are re-initialised before replay and must not be
 					// overwritten by a mismatched journal entry.
 					if (!p_slots[slot_idx].active) {
-						p_slots[slot_idx] = FabricZone::EntitySlot();
+						p_slots[slot_idx] = EntitySlot();
 						p_slots[slot_idx].active = true;
 						_unpack_entity(blob, p_slots[slot_idx].entity);
 						r_entity_count++;
