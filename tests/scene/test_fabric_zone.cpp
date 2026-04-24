@@ -43,29 +43,50 @@ TEST_FORCE_LINK(test_fabric_zone)
 
 #include "modules/multiplayer_fabric/fabric_snapshot.h"
 #include "modules/multiplayer_fabric/fabric_zone.h"
+#include "modules/multiplayer_fabric/relativistic_zone.h"
 
 namespace TestFabricZone {
 
+// Build a uniform NodeView with `count` equal-width zones over [0, 2^30).
+static RelZone::NodeView<FabricZone::MAX_ZONES> make_uniform_view(int count) {
+	RelZone::NodeView<FabricZone::MAX_ZONES> view;
+	int depth = 0;
+	for (uint32_t x = (uint32_t)(count - 1); x > 0; x >>= 1) {
+		depth++;
+	}
+	uint32_t cell_w = 1u << (30 - depth);
+	for (int i = 0; i < count; i++) {
+		RelZone::ZoneRange r;
+		r.zone_id = (uint32_t)i;
+		r.lo = (uint32_t)i * cell_w;
+		r.hi = r.lo + cell_w - 1;
+		view.ranges.push_back(r);
+	}
+	return view;
+}
+
 // Mirror of the Lean theorems `aoiBand_covers_self` and `aoiBand_width_bound`
 // in thirdparty/predictive_bvh/PredictiveBVH/Protocol/Fabric.lean. Any change
-// to _hilbert_aoi_band must keep these two invariants green.
+// to aoi_band_cells must keep these two invariants green.
 
 TEST_CASE("[FabricZone] Hilbert AOI band covers the zone's own Hilbert range") {
 	// Single zone: band == full 30-bit Hilbert space.
 	uint32_t lo = 0, hi = 0;
-	FabricZone::_hilbert_aoi_band(lo, hi, 0, 1);
+	auto v1 = make_uniform_view(1);
+	RelZone::aoi_band_cells(v1, 0, FabricZone::AOI_CELLS, lo, hi);
 	CHECK(lo == 0u);
 	CHECK(hi == (1u << 30));
 
-	// 4-zone fabric: each zone's band must cover its own slice.
+	// multi-zone fabric: each zone's band must cover its own slice.
 	for (int count : { 2, 3, 4, 8, 16, 100 }) {
 		int depth = 0;
 		for (uint32_t x = (uint32_t)(count - 1); x > 0; x >>= 1) {
 			depth++;
 		}
 		const uint32_t cell_w = 1u << (30 - depth);
+		auto view = make_uniform_view(count);
 		for (int id = 0; id < count; ++id) {
-			FabricZone::_hilbert_aoi_band(lo, hi, id, count);
+			RelZone::aoi_band_cells(view, (uint32_t)id, FabricZone::AOI_CELLS, lo, hi);
 			const uint32_t zone_lo = (uint32_t)id * cell_w;
 			const uint32_t zone_hi = zone_lo + cell_w;
 			CHECK_MESSAGE(lo <= zone_lo, "band lo must cover zone lo");
@@ -83,8 +104,9 @@ TEST_CASE("[FabricZone] Hilbert AOI band width is bounded by (1 + 2*AOI_CELLS)*c
 		}
 		const uint32_t cell_w = 1u << (30 - depth);
 		const uint64_t bound = (uint64_t)(1 + 2 * FabricZone::AOI_CELLS) * (uint64_t)cell_w;
+		auto view = make_uniform_view(count);
 		for (int id = 0; id < count; ++id) {
-			FabricZone::_hilbert_aoi_band(lo, hi, id, count);
+			RelZone::aoi_band_cells(view, (uint32_t)id, FabricZone::AOI_CELLS, lo, hi);
 			CHECK(hi >= lo);
 			CHECK_MESSAGE((uint64_t)(hi - lo) <= bound, "band width exceeds (1+2*AOI_CELLS)*cell_w");
 		}
@@ -94,8 +116,9 @@ TEST_CASE("[FabricZone] Hilbert AOI band width is bounded by (1 + 2*AOI_CELLS)*c
 TEST_CASE("[FabricZone] Hilbert AOI band is clamped to [0, 2^30)") {
 	uint32_t lo = 0, hi = 0;
 	for (int count : { 1, 2, 3, 4, 8, 16, 100 }) {
+		auto view = make_uniform_view(count);
 		for (int id = 0; id < count; ++id) {
-			FabricZone::_hilbert_aoi_band(lo, hi, id, count);
+			RelZone::aoi_band_cells(view, (uint32_t)id, FabricZone::AOI_CELLS, lo, hi);
 			CHECK(hi <= (1u << 30));
 		}
 	}
@@ -287,8 +310,8 @@ struct ZoneState {
 	FabricZone::EntitySlot *slots = nullptr;
 	int capacity = 1800;
 	int zone_id = 0;
-	int zone_count = 2;
 	int entity_count = 0;
+	RelZone::NodeView<FabricZone::MAX_ZONES> node_view = make_uniform_view(2);
 	int free_hint = 0;
 	uint32_t tick = 0;
 	uint64_t xing_started = 0;
@@ -384,11 +407,11 @@ TEST_CASE("[FabricZone][Migration] staging timeout rolls back entity to OWNED") 
 TEST_CASE("[FabricZone][Migration] 144 entities all land within timeout window") {
 	ZoneState za, zb;
 	za.zone_id = 0;
-	za.zone_count = 2;
+	za.node_view = make_uniform_view(2);
 	za.alloc();
 
 	zb.zone_id = 1;
-	zb.zone_count = 2;
+	zb.node_view = make_uniform_view(2);
 	zb.alloc();
 
 	// Populate Zone A with 1400 entities; last 144 are crossing-ready.
@@ -413,7 +436,7 @@ TEST_CASE("[FabricZone][Migration] 144 entities all land within timeout window")
 	for (int t = 0; t < 32 && total_received < 144; t++) {
 		// Zone A: collect intents.
 		FabricZone::_collect_migration_intents_s(za.slots, za.capacity,
-				za.zone_id, za.zone_count, za.srtt,
+				za.zone_id, za.node_view, za.srtt,
 				za.tick, 60, 50, za.xing_started, za.migrations, za.outbox);
 
 		// Deliver outbox → inbox.
@@ -483,7 +506,7 @@ TEST_CASE("[FabricZone][Migration] Zone B at capacity rejects intent gracefully"
 TEST_CASE("[FabricZone][Migration] outbound budget queues excess entities across ticks") {
 	ZoneState za;
 	za.zone_id = 0;
-	za.zone_count = 2;
+	za.node_view = make_uniform_view(2);
 	za.alloc();
 
 	// 120 entities, all crossing-ready.
@@ -499,21 +522,21 @@ TEST_CASE("[FabricZone][Migration] outbound budget queues excess entities across
 
 	// Tick 1: should send exactly 50 (budget).
 	int sent_t1 = FabricZone::_collect_migration_intents_s(za.slots, za.capacity,
-			za.zone_id, za.zone_count, za.srtt,
+			za.zone_id, za.node_view, za.srtt,
 			0, 60, 50, za.xing_started, za.migrations, za.outbox);
 	CHECK_MESSAGE(sent_t1 == 50, vformat("Tick 1: expected 50 intents, got %d", sent_t1));
 	total_sent += sent_t1;
 
 	// Tick 2: another 50.
 	int sent_t2 = FabricZone::_collect_migration_intents_s(za.slots, za.capacity,
-			za.zone_id, za.zone_count, za.srtt,
+			za.zone_id, za.node_view, za.srtt,
 			1, 60, 50, za.xing_started, za.migrations, za.outbox);
 	CHECK_MESSAGE(sent_t2 == 50, vformat("Tick 2: expected 50 intents, got %d", sent_t2));
 	total_sent += sent_t2;
 
 	// Tick 3: remaining 20.
 	int sent_t3 = FabricZone::_collect_migration_intents_s(za.slots, za.capacity,
-			za.zone_id, za.zone_count, za.srtt,
+			za.zone_id, za.node_view, za.srtt,
 			2, 60, 50, za.xing_started, za.migrations, za.outbox);
 	CHECK_MESSAGE(sent_t3 == 20, vformat("Tick 3: expected 20 intents, got %d", sent_t3));
 	total_sent += sent_t3;
