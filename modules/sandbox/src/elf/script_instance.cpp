@@ -44,30 +44,8 @@ static constexpr bool VERBOSE_LOGGING = false;
 
 #ifdef PLATFORM_HAS_EDITOR
 static void handle_language_warnings(Array &warnings, const Ref<ELFScript> &script) {
-	if (!SandboxProjectSettings::get_docker_enabled()) {
-		return;
-	}
-	const String language = script->get_elf_programming_language();
-	if (language == "C++") {
-		// Check if the project is a CMake or SCons project and avoid
-		// using the Docker container in that case. It's a big download.
-		// This detection is cached and returns fast the second time.
-		if (CPPScript::DetectCMakeOrSConsProject()) {
-			return;
-		}
-		// Compare C++ version against Docker version
-		const int docker_version = CPPScript::DockerContainerVersion();
-		if (docker_version < 0) {
-			warnings.push_back("C++ Docker container not found");
-		} else {
-			const int script_version = script->get_elf_api_version();
-			if (script_version < docker_version) {
-				String w = "C++ API version is newer (" + String::num_int64(script_version) + " vs " + String::num_int64(docker_version) + "), please rebuild the program";
-				warnings.push_back(std::move(w));
-			}
-		}
-	}
-	// Rust and Zig support commented out - not available in this build
+	(void)warnings;
+	(void)script;
 }
 #endif
 
