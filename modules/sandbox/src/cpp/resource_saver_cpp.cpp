@@ -441,9 +441,7 @@ Error ResourceFormatSaverCPP::save(const Ref<Resource> &p_resource, const String
 			// Generate the C++ run-time API in the project root
 			auto_generate_cpp_api("res://generated_api.hpp");
 
-			// Docker compilation support has been removed
-			// Compilation should now be handled by CMake or SCons projects
-			print_line("C++ script saved - compilation now handled by CMake/SCons projects only");
+			print_line("C++ script saved - compilation handled by CMake/SCons projects");
 			return Error::OK;
 		} else {
 			return Error::ERR_FILE_CANT_OPEN;

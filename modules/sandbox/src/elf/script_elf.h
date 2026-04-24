@@ -76,7 +76,6 @@ public:
 	String get_elf_programming_language() const;
 	int get_elf_api_version() const noexcept { return elf_api_version; }
 	int get_source_version() const noexcept { return source_version; }
-	String get_dockerized_program_path() const;
 	const String &get_path() const noexcept { return path; }
 	const std::string &get_std_path() const noexcept { return std_path; }
 
