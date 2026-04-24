@@ -18,7 +18,9 @@ else:
     env_sandbox.Append(CXXFLAGS=["/EHsc"])
 
 # Add compiler definitions for libriscv
-env_sandbox.Append(CPPDEFINES=["RISCV_SYSCALLS_MAX=600", "RISCV_BRK_MEMORY_SIZE=0x100000"])
+# RISCV_VIRTUAL_PAGING required for insert_non_owned_memory (SHM support) — was unconditional
+# in libriscv ≤33e283e1; moved behind this guard in 6770061e+.
+env_sandbox.Append(CPPDEFINES=["RISCV_SYSCALLS_MAX=600", "RISCV_BRK_MEMORY_SIZE=0x100000", "RISCV_VIRTUAL_PAGING"])
 
 # Add include paths
 env_sandbox.Prepend(CPPPATH=["#modules/sandbox/thirdparty/libriscv/lib"])
