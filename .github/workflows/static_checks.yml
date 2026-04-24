@@ -42,7 +42,7 @@ jobs:
       - name: Write changed file list to response file
         run: |
           echo '${{ steps.changed-files.outputs.everything_all_changed_files }}' \
-            | tr '" "' '\n' | sed 's/^"//;s/"$//' | grep -v '^$' \
+            | tr '" "' '\n' | sed 's/^"//;s/"$//' | { grep -v '^$' || true; } \
             > /tmp/changed_files.txt
           echo "Changed files: $(wc -l < /tmp/changed_files.txt)"
 
