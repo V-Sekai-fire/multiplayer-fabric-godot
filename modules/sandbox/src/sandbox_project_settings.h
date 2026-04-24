@@ -40,9 +40,6 @@ public:
 
 	static bool use_global_sandbox_names();
 
-	static bool get_docker_enabled();
-
-	static String get_docker_path();
 	static String get_zig_path();
 	static String get_cmake_path();
 	static String get_scons_path();
