@@ -317,4 +317,3 @@ void ELFScript::update_public_api_functions() {
 		instance->update_methods();
 	}
 }
-
