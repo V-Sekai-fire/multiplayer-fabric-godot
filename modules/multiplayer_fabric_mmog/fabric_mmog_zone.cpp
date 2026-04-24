@@ -177,7 +177,7 @@ void FabricMMOGZone::_replan_entity(int p_entity_id) {
 	LocalVector<String> steps;
 	steps.resize((int)plan->size());
 	for (int i = 0; i < (int)plan->size(); ++i) {
-		steps[i] = (*plan)[i].name.c_str();
+		steps[i] = String::utf8((*plan)[i].name.c_str());
 	}
 	_entity_plans.insert(p_entity_id, steps);
 }
