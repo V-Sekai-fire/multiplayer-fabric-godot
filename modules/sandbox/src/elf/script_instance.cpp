@@ -31,10 +31,8 @@
 #include "script_instance.h"
 
 #include "../cpp/script_cpp.h"
-// #include "../rust/script_rust.h" // Rust support removed
 #include "../sandbox_project_settings.h"
 #include "../scoped_tree_base.h"
-// #include "../zig/script_zig.h" // Zig support not available
 #include "core/object/callable_mp.h"
 #include "core/object/object.h"
 #include "core/templates/local_vector.h"
