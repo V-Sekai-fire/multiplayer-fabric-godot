@@ -34,7 +34,7 @@
 
 #ifdef MODULE_KEYCHAIN_ENABLED
 
-#include "../fabric_mmog_asset.h"
+#include "modules/multiplayer_fabric_asset/fabric_mmog_asset.h"
 
 #include "core/os/os.h"
 #include "tests/test_macros.h"
