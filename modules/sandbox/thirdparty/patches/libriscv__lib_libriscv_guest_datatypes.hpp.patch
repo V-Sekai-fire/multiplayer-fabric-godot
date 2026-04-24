@@ -9,7 +9,7 @@
  
  	/// @brief Get the address of the reference.
  	/// @return The address of the reference.
-@@ -384,9 +384,9 @@
+@@ -422,9 +422,9 @@
  		this->ptr_end = this->ptr_begin + old_vec.size() * sizeof(T);
  		// Adjust SSO if the vector contains std::string
  		if constexpr (std::is_same_v<T, GuestStdString<W>>) {

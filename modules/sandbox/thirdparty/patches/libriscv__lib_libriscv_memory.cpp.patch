@@ -1,6 +1,6 @@
 --- a/modules/sandbox/thirdparty/libriscv/lib/libriscv/memory.cpp
 +++ b/modules/sandbox/thirdparty/libriscv/lib/libriscv/memory.cpp
-@@ -579,22 +579,22 @@
+@@ -617,22 +617,22 @@
  		const char* strtab = elf_offset<char>(str_hdr->sh_offset);
  
  		const auto result =

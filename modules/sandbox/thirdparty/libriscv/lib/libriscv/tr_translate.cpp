@@ -5,6 +5,7 @@
 # endif
 #endif
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <chrono>
 #include <fstream>
@@ -156,7 +157,7 @@ inline uint32_t opcode(const TransInstr<W>& ti) {
 
 template <int W>
 inline DecoderData<W>& decoder_entry_at(DecoderData<W>* cache, address_type<W> addr) {
-	return cache[addr / DecoderCache<W>::DIVISOR];
+	return cache[addr / DecoderData<W>::DIVISOR];
 }
 
 template <int W>
@@ -278,7 +279,11 @@ int CPU<W>::load_translation(const MachineOptions<W>& options,
 					throw MachineException(INVALID_PROGRAM, "Invalid counter offsets in emulator");
 				}
 				const int32_t arena_offset = uintptr_t(&machine().memory.memory_arena_ptr_ref()) - uintptr_t(&m);
+#ifdef RISCV_VIRTUAL_PAGING
 				const int32_t rdcache_offset = uintptr_t(&machine().memory.rdcache()) - uintptr_t(&m);
+#else
+				const int32_t rdcache_offset = 0;
+#endif
 
 				translation.init_func(create_bintr_callback_table(exec),
 					arena_offset, ins_counter_offset, rdcache_offset);
@@ -645,6 +650,7 @@ if constexpr (SCAN_FOR_GP) {
 				options.translate_use_register_caching,
 				options.translate_use_syscall_clobbering_optimization,
 				options.translate_automatic_nbit_address_space,
+				options.translate_use_virtual_paging_fallback,
 				options.translate_unsafe_remove_checks,
 				std::move(jump_locations),
 				std::move(single_return_locations),
@@ -1038,20 +1044,20 @@ void CPU<W>::activate_dylib(const MachineOptions<W>& options, DecodedExecuteSegm
 	exec.set_binary_translated(dylib, is_libtcc);
 
 	// Helper to rebuild decoder blocks
-	std::unique_ptr<DecoderCache<W>[]> patched_decoder_cache = nullptr;
+	std::unique_ptr<DecoderData<W>[]> patched_decoder_cache = nullptr;
 	DecoderData<W>* patched_decoder = nullptr;
 	DecoderData<W>* decoder_begin   = nullptr;
 	std::vector<DecoderData<W>*> livepatch_bintr;
 	if (live_patch) {
 #ifdef __cpp_lib_smart_ptr_for_overwrite // C++20 feature
-		patched_decoder_cache = std::make_unique_for_overwrite<DecoderCache<W>[]>(exec.decoder_cache_size());
+		patched_decoder_cache = std::make_unique_for_overwrite<DecoderData<W>[]>(exec.decoder_cache_size());
 #else
-		patched_decoder_cache = std::make_unique<DecoderCache<W>[]>(exec.decoder_cache_size());
+		patched_decoder_cache = std::make_unique<DecoderData<W>[]>(exec.decoder_cache_size());
 #endif
 		// Copy the decoder cache to the patched decoder cache
-		std::memcpy(patched_decoder_cache.get(), exec.decoder_cache_base(), exec.decoder_cache_size() * sizeof(DecoderCache<W>));
-		// A horrible calculation to find the patched decoder
-		patched_decoder = patched_decoder_cache[0].get_base() - exec.pagedata_base() / DecoderCache<W>::DIVISOR;
+		std::memcpy(patched_decoder_cache.get(), exec.decoder_cache_base(), exec.decoder_cache_size() * sizeof(DecoderData<W>));
+		// Base-address-relative pointer into the patched decoder cache
+		patched_decoder = patched_decoder_cache.get() - exec.exec_begin() / DecoderData<W>::DIVISOR;
 		decoder_begin = &decoder_entry_at(patched_decoder, exec.exec_begin());
 		// Pre-allocate the livepatch_bintr vector
 		livepatch_bintr.reserve(*no_mappings);
@@ -1252,9 +1258,7 @@ CallbackTable<W> create_bintr_callback_table(DecodedExecuteSegment<W>&)
 	return CallbackTable<W>{
 		.mem_read8 = [] (CPU<W>& cpu, address_type<W> addr) -> uint8_t {
 			try {
-				const auto& pagedata = cpu.machine().memory.cached_readable_page(addr, sizeof(uint8_t));
-				const auto offset = addr & memory_align_mask<uint8_t>();
-				return pagedata.template aligned_read<uint8_t>(offset);
+				return cpu.machine().memory.template read<uint8_t>(addr);
 			} catch (...) {
 				cpu.set_current_exception(std::current_exception());
 				cpu.machine().stop();
@@ -1263,9 +1267,7 @@ CallbackTable<W> create_bintr_callback_table(DecodedExecuteSegment<W>&)
 		},
 		.mem_read16 = [] (CPU<W>& cpu, address_type<W> addr) -> uint16_t {
 			try {
-				const auto& pagedata = cpu.machine().memory.cached_readable_page(addr, sizeof(uint16_t));
-				const auto offset = addr & memory_align_mask<uint16_t>();
-				return pagedata.template aligned_read<uint16_t>(offset);
+				return cpu.machine().memory.template read<uint16_t>(addr);
 			} catch (...) {
 				cpu.set_current_exception(std::current_exception());
 				cpu.machine().stop();
@@ -1274,9 +1276,7 @@ CallbackTable<W> create_bintr_callback_table(DecodedExecuteSegment<W>&)
 		},
 		.mem_read32 = [] (CPU<W>& cpu, address_type<W> addr) -> uint32_t {
 			try {
-				const auto& pagedata = cpu.machine().memory.cached_readable_page(addr, sizeof(uint32_t));
-				const auto offset = addr & memory_align_mask<uint32_t>();
-				return pagedata.template aligned_read<uint32_t>(offset);
+				return cpu.machine().memory.template read<uint32_t>(addr);
 			} catch (...) {
 				cpu.set_current_exception(std::current_exception());
 				cpu.machine().stop();
@@ -1285,9 +1285,7 @@ CallbackTable<W> create_bintr_callback_table(DecodedExecuteSegment<W>&)
 		},
 		.mem_read64 = [] (CPU<W>& cpu, address_type<W> addr) -> uint64_t {
 			try {
-				const auto& pagedata = cpu.machine().memory.cached_readable_page(addr, sizeof(uint64_t));
-				const auto offset = addr & memory_align_mask<uint64_t>();
-				return pagedata.template aligned_read<uint64_t>(offset);
+				return cpu.machine().memory.template read<uint64_t>(addr);
 			} catch (...) {
 				cpu.set_current_exception(std::current_exception());
 				cpu.machine().stop();
@@ -1296,7 +1294,7 @@ CallbackTable<W> create_bintr_callback_table(DecodedExecuteSegment<W>&)
 		},
 		.mem_write8 = [] (CPU<W>& cpu, address_type<W> addr, uint8_t value) -> void {
 			try {
-				cpu.machine().memory.template write_paging<uint8_t>(addr, value);
+				cpu.machine().memory.template write<uint8_t>(addr, value);
 			} catch (...) {
 				cpu.set_current_exception(std::current_exception());
 				cpu.machine().stop();
@@ -1304,7 +1302,7 @@ CallbackTable<W> create_bintr_callback_table(DecodedExecuteSegment<W>&)
 		},
 		.mem_write16 = [] (CPU<W>& cpu, address_type<W> addr, uint16_t value) -> void {
 			try {
-				cpu.machine().memory.template write_paging<uint16_t>(addr, value);
+				cpu.machine().memory.template write<uint16_t>(addr, value);
 			} catch (...) {
 				cpu.set_current_exception(std::current_exception());
 				cpu.machine().stop();
@@ -1312,7 +1310,7 @@ CallbackTable<W> create_bintr_callback_table(DecodedExecuteSegment<W>&)
 		},
 		.mem_write32 = [] (CPU<W>& cpu, address_type<W> addr, uint32_t value) -> void {
 			try {
-				cpu.machine().memory.template write_paging<uint32_t>(addr, value);
+				cpu.machine().memory.template write<uint32_t>(addr, value);
 			} catch (...) {
 				cpu.set_current_exception(std::current_exception());
 				cpu.machine().stop();
@@ -1320,7 +1318,7 @@ CallbackTable<W> create_bintr_callback_table(DecodedExecuteSegment<W>&)
 		},
 		.mem_write64 = [] (CPU<W>& cpu, address_type<W> addr, uint64_t value) -> void {
 			try {
-				cpu.machine().memory.template write_paging<uint64_t>(addr, value);
+				cpu.machine().memory.template write<uint64_t>(addr, value);
 			} catch (...) {
 				cpu.set_current_exception(std::current_exception());
 				cpu.machine().stop();
@@ -1406,7 +1404,7 @@ CallbackTable<W> create_bintr_callback_table(DecodedExecuteSegment<W>&)
 		.trigger_exception = [] (CPU<W>& cpu, address_type<W> pc, int e) {
 			cpu.registers().pc = pc; // XXX: Set PC to the failing instruction (?)
 #ifdef RISCV_LIBTCC
-			if (libtcc_enabled && cpu.current_execute_segment().is_libtcc())
+			if (cpu.current_execute_segment().is_libtcc())
 			{
 				// If we're using libtcc, we can't throw C++ exceptions because
 				// there's no unwinding support. But we can mark an exception
@@ -1415,9 +1413,9 @@ CallbackTable<W> create_bintr_callback_table(DecodedExecuteSegment<W>&)
 					cpu.trigger_exception(e);
 				} catch (...) {
 					cpu.set_current_exception(std::current_exception());
-					// Trigger a slow-path in dispatch (which will check for exceptions)
-					cpu.machine().stop();
 				}
+				// Trigger a slow-path in dispatch (which will check for exceptions)
+				cpu.machine().stop();
 				return;
 			}
 #endif
@@ -1432,6 +1430,66 @@ CallbackTable<W> create_bintr_callback_table(DecodedExecuteSegment<W>&)
 		},
 		.sqrtf64 = [] (double d) -> double {
 			return std::sqrt(d);
+		},
+		// RISC-V spec §11.6 (fused, single rounding) + §11.3 (NaN
+		// outputs must be canonicalized to the canonical qNaN).
+		.fmaf32 = [] (float a, float b, float c) -> float {
+			float r = std::fma(a, b, c);
+			if (std::isnan(r)) {
+				uint32_t canon = 0x7FC00000u;
+				float out;
+				__builtin_memcpy(&out, &canon, 4);
+				return out;
+			}
+			return r;
+		},
+		.fmaf64 = [] (double a, double b, double c) -> double {
+			double r = std::fma(a, b, c);
+			if (std::isnan(r)) {
+				uint64_t canon = 0x7FF8000000000000ull;
+				double out;
+				__builtin_memcpy(&out, &canon, 8);
+				return out;
+			}
+			return r;
+		},
+		// FMIN/FMAX with RISC-V -0.0 < +0.0 convention. std::fmin/fmax
+		// leave the ±0 case implementation-defined.
+		.fmin32_rv = [] (float a, float b) -> float {
+			if (a == 0.0f && b == 0.0f) {
+				uint32_t ab, bb;
+				__builtin_memcpy(&ab, &a, 4); __builtin_memcpy(&bb, &b, 4);
+				uint32_t out = ((ab | bb) & 0x80000000u) ? 0x80000000u : 0x00000000u;
+				float r; __builtin_memcpy(&r, &out, 4); return r;
+			}
+			return std::fmin(a, b);
+		},
+		.fmax32_rv = [] (float a, float b) -> float {
+			if (a == 0.0f && b == 0.0f) {
+				uint32_t ab, bb;
+				__builtin_memcpy(&ab, &a, 4); __builtin_memcpy(&bb, &b, 4);
+				uint32_t out = (~(ab & bb) & 0x80000000u) ? 0x00000000u : 0x80000000u;
+				float r; __builtin_memcpy(&r, &out, 4); return r;
+			}
+			return std::fmax(a, b);
+		},
+		.fmin64_rv = [] (double a, double b) -> double {
+			if (a == 0.0 && b == 0.0) {
+				uint64_t ab, bb;
+				__builtin_memcpy(&ab, &a, 8); __builtin_memcpy(&bb, &b, 8);
+				uint64_t out = ((ab | bb) & 0x8000000000000000ull) ? 0x8000000000000000ull : 0x0ull;
+				double r; __builtin_memcpy(&r, &out, 8); return r;
+			}
+			return std::fmin(a, b);
+		},
+		.fmax64_rv = [] (double a, double b) -> double {
+			if (a == 0.0 && b == 0.0) {
+				uint64_t ab, bb;
+				__builtin_memcpy(&ab, &a, 8); __builtin_memcpy(&bb, &b, 8);
+				uint64_t out = (~(ab & bb) & 0x8000000000000000ull) ? 0x0ull : 0x8000000000000000ull;
+				double r; __builtin_memcpy(&r, &out, 8); return r;
+			}
+			return std::fmax(a, b);
 		},
 		.clz = [] (uint32_t x) -> int {
 #ifdef RISCV_HAS_BITOPS
@@ -1499,9 +1557,11 @@ bool CPU<W>::initialize_translated_segment(DecodedExecuteSegment<W>& exec, void*
 		throw MachineException(INVALID_PROGRAM, "Invalid counter offsets in emulator");
 	}
 	const int32_t arena_offset = uintptr_t(&machine.memory.memory_arena_ptr_ref()) - uintptr_t(&machine);
-
-	auto& rdcache = machine.memory.rdcache();
-	const int32_t rdcache_offset = uintptr_t(&rdcache) - uintptr_t(&machine);
+#ifdef RISCV_VIRTUAL_PAGING
+	const int32_t rdcache_offset = uintptr_t(&machine.memory.rdcache()) - uintptr_t(&machine);
+#else
+	const int32_t rdcache_offset = 0;
+#endif
 
 	func(create_bintr_callback_table<W>(exec), arena_offset, ins_counter_offset, rdcache_offset);
 

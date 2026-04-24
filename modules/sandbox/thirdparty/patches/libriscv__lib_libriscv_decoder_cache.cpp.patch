@@ -28,7 +28,7 @@
  				if (it->second.segment.use_count() == 1)
  					it->second.segment = nullptr;
  			}
-@@ -401,8 +402,8 @@
+@@ -394,8 +395,8 @@
  		   Cannot step outside of this area when pregen is enabled,
  		   so it's fine to leave the boundries alone. */
  		TIME_POINT(t2);
@@ -38,8 +38,8 @@
 +		const address_type<W> end_addr = addr + len;
  		for (; dst < addr + len;)
  		{
- 			auto& entry = exec_decoder[dst / DecoderCache<W>::DIVISOR];
-@@ -482,16 +483,16 @@
+ 			auto& entry = exec_decoder[dst / DecoderData<W>::DIVISOR];
+@@ -475,16 +476,16 @@
  
  		// Debugging: EBREAK locations
  		for (auto& loc : options.ebreak_locations) {
@@ -47,14 +47,14 @@
 +			address_type<W> ebreak_addr = 0;
  			if (std::holds_alternative<address_type<W>>(loc))
 -				addr = std::get<address_type<W>>(loc);
-+				ebreak_addr = std::get<address_type<W>>(loc);
- 			else
+-			else
 -				addr = machine().address_of(std::get<std::string>(loc));
--
++				ebreak_addr = std::get<address_type<W>>(loc);
++			else
++				ebreak_addr = machine().address_of(std::get<std::string>(loc));
+ 
 -			if (addr != 0x0 && addr >= exec.exec_begin() && addr < exec.exec_end()) {
 -				CPU<W>::install_ebreak_for(exec, addr);
-+				ebreak_addr = machine().address_of(std::get<std::string>(loc));
-+
 +			if (ebreak_addr != 0x0 && ebreak_addr >= exec.exec_begin() && ebreak_addr < exec.exec_end()) {
 +				CPU<W>::install_ebreak_for(exec, ebreak_addr);
  				if (options.verbose_loader) {
@@ -63,33 +63,7 @@
  				}
  			}
  		}
-@@ -539,13 +540,13 @@
- 	// no matter where you are in the segment, a whole instruction unchecked.
- 	template <int W> RISCV_INTERNAL
- 	DecodedExecuteSegment<W>& Memory<W>::create_execute_segment(
--		const MachineOptions<W>& options, const void *vdata, address_t vaddr, size_t exlen, bool is_initial, bool is_likely_jit)
-+		const MachineOptions<W>& options, const void *vdata, address_type<W> vaddr, size_t exlen, bool is_initial, bool is_likely_jit)
- 	{
- 		if (UNLIKELY(exlen % (compressed_enabled ? 2 : 4)))
- 			throw MachineException(INVALID_PROGRAM, "Misaligned execute segment length");
- 
--		constexpr address_t PMASK = Page::size()-1;
--		const address_t pbase = vaddr & ~PMASK;
-+		constexpr address_type<W> PMASK = Page::size()-1;
-+		const address_type<W> pbase = vaddr & ~PMASK;
- 		const size_t prelen  = vaddr - pbase;
- 		// Make 4 bytes of extra room to avoid having to validate 4-byte reads
- 		// when reading at 2 bytes before the end of the execute segment.
-@@ -562,7 +563,7 @@
- 		if (UNLIKELY(pbase + plen < pbase))
- 			throw MachineException(INVALID_PROGRAM, "Segment virtual base was bogus");
- #else
--		[[maybe_unused]] address_t pbase2;
-+		[[maybe_unused]] address_type<W> pbase2;
- 		if (UNLIKELY(__builtin_add_overflow(pbase, plen, &pbase2)))
- 			throw MachineException(INVALID_PROGRAM, "Segment virtual base was bogus");
- #endif
-@@ -641,7 +642,7 @@
+@@ -621,7 +622,7 @@
  	}
  
  	template <int W>
@@ -98,7 +72,7 @@
  	{
  		return const_cast<Memory<W>*>(this)->exec_segment_for(vaddr);
  	}
-@@ -686,7 +687,7 @@
+@@ -673,7 +674,7 @@
  	template <int W>
  	std::vector<address_type<W>> Memory<W>::gather_jump_hints() const
  	{

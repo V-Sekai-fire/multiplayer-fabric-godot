@@ -30,6 +30,7 @@ struct Arguments {
 	bool no_translate = false;
 	bool translate_regcache = riscv::libtcc_enabled; // Default: Register caching w/libtcc
 	bool translate_future = true;
+	bool full_virtual = true; // Use virtual paging in binary translator
 	bool mingw = false;
 	bool from_start = false;
 	bool sandbox = false;
@@ -77,6 +78,7 @@ static const struct option long_options[] = {
 	{"execute-only", no_argument, 0, 'X'},
 	{"ignore-text", no_argument, 0, 'I'},
 	{"call", required_argument, 0, 'c'},
+	{"no-virtual", no_argument, 0, 1002},
 	{0, 0, 0, 0}
 };
 
@@ -100,6 +102,7 @@ static void print_help(const char* name)
 		"  -N, --no-translate-future Disable binary translation of non-initial segments\n"
 		"  -R, --translate-regcache Enable register caching in binary translator\n"
 		"      --no-translate-regcache Disable register caching in binary translator\n"
+		"      --no-virtual   Constrain binary translator to arena (disable virtual paging)\n"
 		"  -J, --jump-hints file  Load jump location hints from file, unless empty then record instead\n"
 		"  -B  --background   Run binary translation in background w/live-patching\n"
 		"      --no-background Disable background binary translation\n"
@@ -142,7 +145,11 @@ static void print_help(const char* name)
 		"-  Extra debugging features are enabled\n"
 #endif
 #ifdef RISCV_FLAT_RW_ARENA
+#ifndef RISCV_VIRTUAL_PAGING
+		"-  Flat sequential memory arena is enabled (virtual paging disabled)\n"
+#else
 		"-  Flat sequential memory arena is enabled\n"
+#endif
 #endif
 #ifdef RISCV_ENCOMPASSING_ARENA_BITS
 #define _STR(x) #x
@@ -187,6 +194,7 @@ static int parse_arguments(int argc, const char** argv, Arguments& args)
 			case 'I': args.ignore_text = true; break;
 			case 1000: args.translate_regcache = false; break;
 			case 1001: args.background = false; break;
+			case 1002: args.full_virtual = false; break;
 			case 'm': // --memory
 				if (optarg) {
 					char* endptr;
@@ -293,7 +301,8 @@ static void run_program(
 		.translate_ignore_instruction_limit = !cli_args.accurate, // Press Ctrl+C to stop
 		.translate_use_register_caching = cli_args.translate_regcache,
 		.translate_automatic_nbit_address_space = false,
-		.translate_unsafe_remove_checks = cli_args.proxy_mode, // Proxy mode disabled sandboxing
+		.translate_use_virtual_paging_fallback = cli_args.full_virtual,
+		.translate_unsafe_remove_checks = cli_args.proxy_mode, // Proxy mode disables sandboxing
 		.record_slowpaths_to_jump_hints = !cli_args.jump_hints_file.empty(),
 #ifdef _WIN32
 		.translation_prefix = "translations/rvbintr-",

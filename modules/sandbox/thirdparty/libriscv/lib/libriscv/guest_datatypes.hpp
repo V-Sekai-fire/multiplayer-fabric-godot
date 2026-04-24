@@ -84,7 +84,7 @@ struct GuestStdString {
 		return machine.memory.memview(ptr, size);
 	}
 
-	void set_string(machine_t& machine, gaddr_t self, const void* str, std::size_t len)
+	void set_string(machine_t& machine, gaddr_t self, const void* str, std::size_t len, bool use_memarray = true)
 	{
 		this->free(machine);
 
@@ -100,9 +100,17 @@ struct GuestStdString {
 			this->ptr = machine.arena().malloc(len+1);
 			this->size = len;
 			this->capacity = len;
-			char *dst = machine.memory.template memarray<char>(this->ptr, len + 1);
-			std::memcpy(dst, str, len);
-			dst[len] = '\0';
+			if (use_memarray)
+			{
+				char* dst = machine.memory.template memarray<char>(this->ptr, len + 1);
+				std::memcpy(dst, str, len);
+				dst[len] = '\0';
+			}
+			else
+			{
+				machine.memory.memcpy(this->ptr, str, len);
+				machine.memory.template write<uint8_t>(this->ptr + len, 0);
+			}
 		}
 	}
 	void set_string(machine_t& machine, gaddr_t self, std::string_view str)
@@ -335,6 +343,24 @@ struct GuestStdVector {
 		}
 	}
 
+	void assign(machine_t& machine, const std::vector<std::string>& vec)
+	{
+		static_assert(std::is_same_v<T, GuestStdString<W>>, "GuestStdVector<T> must be a vector of GuestStdString<W>");
+		this->free(machine);
+		if (vec.empty())
+			return;
+
+		// Specialization for std::vector<std::string>
+		auto [array, self] = this->alloc(machine, vec.size());
+		(void)self;
+		for (std::size_t i = 0; i < vec.size(); i++) {
+			T* str = new (&array[i]) T(machine, vec[i]);
+			str->move(this->ptr_begin + i * sizeof(T));
+		}
+		// Set new end only after all elements are constructed
+		this->ptr_end = this->ptr_begin + vec.size() * sizeof(T);
+	}
+
 	void assign(machine_t& machine, const std::vector<T>& vec)
 	{
 		auto [array, self] = alloc(machine, vec.size());
@@ -349,6 +375,18 @@ struct GuestStdVector {
 		(void)self;
 		std::copy(values, values + count, array);
 		this->ptr_end = this->ptr_begin + count * sizeof(T);
+	}
+
+	/// @brief Replace the contents of the vector with the given array,
+	/// by assuming ownership of the array memory (which must have been
+	/// allocated with guest_alloc and *must* be properly initialized
+	/// with the given values).
+	void assume_ownership(machine_t& machine, gaddr_t array, std::size_t count)
+	{
+		this->free(machine);
+		this->ptr_begin = array;
+		this->ptr_end = array + count * sizeof(T);
+		this->ptr_capacity = this->ptr_end;
 	}
 
 	void resize(machine_t& machine, std::size_t new_size)

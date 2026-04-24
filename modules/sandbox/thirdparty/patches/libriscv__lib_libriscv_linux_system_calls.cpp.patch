@@ -9,7 +9,7 @@
  #include "../machine.hpp"
  
  #include "../internal_common.hpp"
-@@ -1080,10 +1085,6 @@
+@@ -1092,10 +1097,6 @@
  	machine.set_result(new_end);
  }
  

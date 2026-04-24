@@ -1,6 +1,6 @@
 --- a/modules/sandbox/thirdparty/libriscv/lib/libriscv/linux/syscalls_mman.cpp
 +++ b/modules/sandbox/thirdparty/libriscv/lib/libriscv/linux/syscalls_mman.cpp
-@@ -75,7 +75,8 @@
+@@ -81,7 +81,8 @@
  				if (_lseek(real_fd, voff, SEEK_SET) == -1L)
  					MMAP_HAS_FAILED();
  				for (size_t i = 0; i < cnt; i++) {

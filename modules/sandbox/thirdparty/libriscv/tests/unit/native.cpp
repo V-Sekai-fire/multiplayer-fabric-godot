@@ -350,3 +350,66 @@ TEST_CASE("VM calls with std::string and std::vector", "[Native]")
 		machine.arena().deallocation_counter();
 	REQUIRE(allocs_after3 == allocs_before);
 }
+
+TEST_CASE("Vector of strings system call", "[Native]")
+{
+	if (is_zig()) // We don't support libc++ std::string yet
+		return;
+
+	const auto binary = build_and_load(R"M(
+	#include <string>
+	#include <vector>
+	#include <cassert>
+	#define STRINGIFY_HELPER(x) #x
+	#define STRINGIFY(x) STRINGIFY_HELPER(x)
+
+	#define GENERATE_SYSCALL_WRAPPER(name, number) \
+		__asm__(".global " #name "\n" #name ":\n  li a7, " STRINGIFY(number) "\n  ecall\n  ret\n");
+	GENERATE_SYSCALL_WRAPPER(sys_vector, 1);
+	extern "C" int sys_vector(const std::vector<std::string>&);
+
+	int main() {
+		std::vector<std::string> vec;
+		int ret = sys_vector(vec);
+		assert(ret == 0);
+		assert(vec.size() == 5);
+		assert(vec[0] == "Syscall");
+		assert(vec[1] == "vector");
+		assert(vec[2] == "of");
+		assert(vec[3] == "strings");
+		assert(vec[4] == "works!");
+
+		std::string combined;
+		for (const auto& s : vec) {
+			combined += s + " ";
+		}
+		printf("Combined string: %s\n", combined.c_str());
+		fflush(stdout);
+		return 666;
+	})M", "-O2 -static -x c " + cwd + "/include/native_libc.h -x c++ ", true);
+
+	riscv::Machine<RISCV64> machine { binary };
+	setup_native_system_calls(machine);
+	machine.setup_linux_syscalls();
+	machine.setup_linux(
+		{"vmcall"},
+		{"LC_TYPE=C", "LC_ALL=C", "USER=root"});
+	machine.install_syscall_handler(1,
+	[] (riscv::Machine<RISCV64>& machine) {
+		// Syscall to test std::vector<std::string>
+		auto [vec] = machine.sysargs<CppVector<CppString>*>();
+		vec->assign(machine,
+			std::vector<std::string>{ "Syscall", "vector", "of", "strings", "works!" });
+		machine.set_result(0);
+	});
+
+	machine.set_printer([] (const auto&, const char* data, size_t size) {
+		std::string text{data, data + size};
+		printf("%s", text.c_str());
+		fflush(stdout);
+		REQUIRE(text == "Combined string: Syscall vector of strings works! \n");
+	});
+
+	machine.simulate(MAX_INSTRUCTIONS);
+	REQUIRE(machine.return_value<int>() == 666);
+}

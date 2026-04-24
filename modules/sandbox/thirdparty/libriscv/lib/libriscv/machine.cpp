@@ -83,6 +83,7 @@ namespace riscv
 #ifdef RISCV_BINARY_TRANSLATION
 		clobbering_syscalls.insert(sysnum);
 #endif
+		(void)sysnum;
 	}
 
 	template <int W>
@@ -90,6 +91,7 @@ namespace riscv
 #ifdef RISCV_BINARY_TRANSLATION
 		return clobbering_syscalls.count(sysnum) > 0;
 #else
+		(void)sysnum;
 		return false; // No clobbering syscalls in non-binary translation mode
 #endif
 	}

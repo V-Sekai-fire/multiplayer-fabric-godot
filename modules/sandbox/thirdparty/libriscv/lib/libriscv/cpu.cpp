@@ -26,7 +26,7 @@ namespace riscv
 	// current CPU execute segment is never null.
 	template <int W>
 	std::shared_ptr<DecodedExecuteSegment<W>>& CPU<W>::empty_execute_segment() noexcept {
-		static std::shared_ptr<DecodedExecuteSegment<W>> empty_shared = std::make_shared<DecodedExecuteSegment<W>>(0, 0, 0, 0);
+		static std::shared_ptr<DecodedExecuteSegment<W>> empty_shared = std::make_shared<DecodedExecuteSegment<W>>(0, 0);
 		return empty_shared;
 	}
 
@@ -55,14 +55,20 @@ namespace riscv
 		// We can't jump if there's been no ELF loader
 		if (!current_execute_segment().empty()) {
 			const auto initial_pc = machine().memory.start_address();
-			// Check if the initial PC is executable, unless
-			// the execute segment is marked as execute-only.
-			if (!current_execute_segment().is_execute_only())
+			// Check if the initial PC is executable
+			if (!current_execute_segment().is_within(initial_pc))
 			{
+#ifdef RISCV_VIRTUAL_PAGING
 				const auto& page =
 					machine().memory.get_exec_pageno(initial_pc / riscv::Page::size());
 				if (UNLIKELY(!page.attr.exec))
 					trigger_exception(EXECUTION_SPACE_PROTECTION_FAULT, initial_pc);
+#else
+				// Without paging, check if PC is in any known execute segment
+				auto& seg = machine().memory.exec_segment_for(initial_pc);
+				if (UNLIKELY(seg->empty()))
+					trigger_exception(EXECUTION_SPACE_PROTECTION_FAULT, initial_pc);
+#endif
 			}
 			// This function will (at most) validate the execute segment
 			this->jump(initial_pc);
@@ -87,10 +93,6 @@ namespace riscv
 	template<int W> RISCV_NOINLINE
 	typename CPU<W>::NextExecuteReturn CPU<W>::next_execute_segment(address_t pc)
 	{
-		static constexpr int MAX_RESTARTS = 4;
-		int restarts = 0;
-restart_next_execute_segment:
-
 		// Find previously decoded execute segment
 		this->m_exec = machine().memory.exec_segment_for(pc).get();
 		if (LIKELY(!this->m_exec->empty() && !this->m_exec->is_stale())) {
@@ -100,6 +102,11 @@ restart_next_execute_segment:
 		// We absolutely need to write PC here because even read-fault handlers
 		// like get_pageno() slowpaths could be reading PC.
 		this->registers().pc = pc;
+
+#ifdef RISCV_VIRTUAL_PAGING
+		static constexpr int MAX_RESTARTS = 4;
+		int restarts = 0;
+restart_next_execute_segment:
 
 		// Immediately look at the page in order to
 		// verify execute and see if it has a trap handler
@@ -135,6 +142,7 @@ restart_next_execute_segment:
 				goto restart_next_execute_segment;
 			}
 		}
+#endif // RISCV_VIRTUAL_PAGING
 
 		// Evict stale execute segments
 		if (this->m_exec->is_stale()) {
@@ -149,6 +157,10 @@ restart_next_execute_segment:
 			return {this->m_exec, this->registers().pc};
 		}
 
+#ifndef RISCV_VIRTUAL_PAGING
+		// Without paging, execute segments must be pre-registered.
+		trigger_exception(EXECUTION_SPACE_PROTECTION_FAULT, pc);
+#else
 		// Find the earliest execute page in new segment
 		const uint8_t* base_page_data = current_page.data();
 
@@ -198,11 +210,21 @@ restart_next_execute_segment:
 			// We can use the sequential execute segment directly
 			return {&this->init_execute_area(base_page_data, base_pageno * Page::size(), n_pages * Page::size(), is_likely_jit), pc};
 		}
+#endif // RISCV_VIRTUAL_PAGING
 	} // CPU::next_execute_segment
 
 	template <int W> RISCV_NOINLINE RISCV_INTERNAL
 	typename CPU<W>::format_t CPU<W>::read_next_instruction_slowpath() const
 	{
+#ifndef RISCV_VIRTUAL_PAGING
+		// Without paging, try to find the instruction in any execute segment
+		auto& seg = machine().memory.exec_segment_for(this->pc());
+		if (!seg->empty() && seg->is_within(this->pc())) {
+			auto* exd = seg->exec_data(this->pc());
+			return format_t { *(uint32_t*) exd };
+		}
+		trigger_exception(EXECUTION_SPACE_PROTECTION_FAULT, this->pc());
+#else
 		// Fallback: Read directly from page memory
 		const auto pageno = this->pc() / address_t(Page::size());
 		const auto& page = machine().memory.get_exec_pageno(pageno);
@@ -229,6 +251,7 @@ restart_next_execute_segment:
 		}
 
 		return instruction;
+#endif
 	}
 
 	template <int W>
@@ -352,9 +375,9 @@ restart_precise_sim:
 		}
 
 		auto* exec_decoder = exec.decoder_cache();
-		auto* decoder_begin = &exec_decoder[exec.exec_begin() / DecoderCache<W>::DIVISOR];
+		auto* decoder_begin = &exec_decoder[exec.exec_begin() / DecoderData<W>::DIVISOR];
 
-		auto& cache_entry = exec_decoder[addr / DecoderCache<W>::DIVISOR];
+		auto& cache_entry = exec_decoder[addr / DecoderData<W>::DIVISOR];
 
 		// The last instruction will be the current entry
 		// Later instructions will work as normal
@@ -378,7 +401,7 @@ restart_precise_sim:
 		auto patched_addr = block_begin_addr;
 		for (auto* dd = current; dd < last; dd++) {
 			// Get the patched decoder entry
-			auto& p = exec_decoder[patched_addr / DecoderCache<W>::DIVISOR];
+			auto& p = exec_decoder[patched_addr / DecoderData<W>::DIVISOR];
 			p.idxend = last - dd;
 		#ifdef RISCV_EXT_C
 			p.icount = 0; // TODO: Implement C-ext icount for breakpoints
@@ -439,14 +462,14 @@ restart_precise_sim:
 
 		auto* exec_decoder = exec.decoder_cache();
 		// The beginning of the function:
-		auto* cache_entry = &exec_decoder[block_pc / DecoderCache<W>::DIVISOR];
+		auto* cache_entry = &exec_decoder[block_pc / DecoderData<W>::DIVISOR];
 
 		const address_t current_end = exec.exec_end();
 		while (block_pc < current_end)
 		{
 			// Move to the end of the block
 			block_pc += cache_entry->block_bytes();
-			cache_entry += cache_entry->block_bytes() / DecoderCache<W>::DIVISOR;
+			cache_entry += cache_entry->block_bytes() / DecoderData<W>::DIVISOR;
 			// Check if we're still within the execute segment
 			if (UNLIKELY(block_pc >= current_end)) {
 				// TODO: Return false instead?
@@ -455,30 +478,46 @@ restart_precise_sim:
 			}
 			// Check if we're at the end of the function
 			auto bytecode = cache_entry->get_bytecode();
-			if (bytecode == RV32I_BC_JALR || bytecode == RV32I_BC_STOP) {
+			if (bytecode == RV32I_BC_JALR) {
 				const FasterItype instr { cache_entry->instr };
 
-				if (bytecode == RV32I_BC_JALR) {
-					// Check if it's a direct jump to REG_RA
-					if (instr.rs2 == REG_RA && instr.rs1 == 0 && instr.imm == 0) {
-						if (cache_entry->block_bytes() != 0)
-							throw MachineException(INVALID_PROGRAM,
-								"Function block ended but was not last instruction in block", block_pc);
-						// We found the (potential) end of the function
-						// Now rewrite it to a STOP instruction
-						cache_entry->set_atomic_bytecode_and_handler(RV32I_BC_LIVEPATCH, 1);
-						return true;
-					} else {
-						// Unconditional jump could be a tail call, in which
-						// case we can't confidently optimize this function
-						return false;
-					}
-				} else if (bytecode == RV32I_BC_STOP) {
-					// It's already a fast-path function
+				// Check if it's a direct jump to REG_RA
+				if (instr.rs2 == REG_RA && instr.rs1 == 0 && instr.imm == 0) {
+					if (cache_entry->block_bytes() != 0)
+						throw MachineException(INVALID_PROGRAM,
+							"Function block ended but was not last instruction in block", block_pc);
+					// We found the (potential) end of the function
+					// Now rewrite it to a speculative live-patch STOP instruction
+					cache_entry->set_atomic_bytecode_and_handler(RV32I_BC_LIVEPATCH, 1);
+					return true;
+				} else {
+					// Unconditional jump could be a tail call, in which
+					// case we can't confidently optimize this function
+					return false;
+				}
+			} else if (bytecode == RV32I_BC_STOP) {
+				// It's already a fast-path function
+				return true;
+			} else if (bytecode == RV32I_BC_LIVEPATCH) {
+				// It's already (potentially) a fast-path function
+				if (cache_entry->m_handler == 1 || cache_entry->m_handler == 2) {
 					return true;
 				}
-
-				// Which instructions end the function?
+#ifdef RISCV_EXT_COMPRESSED
+			} else if (bytecode == RV32C_BC_JR) {
+				const auto reg = cache_entry->instr;
+				if (reg == REG_RA) {
+					if (cache_entry->block_bytes() != 0)
+						throw MachineException(INVALID_PROGRAM,
+							"Function block ended but was not last instruction in block", block_pc);
+					// We found the (potential) end of the function
+					// Now rewrite it to a speculative live-patch STOP instruction
+					cache_entry->set_atomic_bytecode_and_handler(RV32I_BC_LIVEPATCH, 2);
+					return true;
+				} else {
+					return false;
+				}
+#endif
 			}
 
 			cache_entry++;
