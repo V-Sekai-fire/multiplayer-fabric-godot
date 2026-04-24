@@ -5,7 +5,13 @@ Import("env")
 Import("env_modules")
 
 env_mmog = env_modules.Clone()
-env_mmog.Prepend(CPPPATH=["#modules/sqlite/thirdparty", "#modules/sqlite", "#modules/multiplayer_fabric"])
+env_mmog.Prepend(
+    CPPPATH=[
+        "#modules/sqlite/thirdparty",
+        "#modules/sqlite",
+        "#modules/multiplayer_fabric",
+    ]
+)
 
 module_obj = []
 env_mmog.add_source_files(module_obj, "*.cpp")
