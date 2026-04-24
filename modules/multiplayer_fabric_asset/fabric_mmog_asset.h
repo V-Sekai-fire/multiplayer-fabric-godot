@@ -239,6 +239,18 @@ public:
 			const Vector<uint8_t> &p_file_data,
 			String &r_error);
 
+	// ── GDScript-callable wrappers ───────────────────────────────────────
+	// Chunk p_file_data and PUT all chunks; returns the .caibx index blob.
+	// Returns an empty PackedByteArray on error (error is logged via ERR_PRINT).
+	PackedByteArray upload_asset_gd(const String &p_store_url,
+			const PackedByteArray &p_file_data);
+
+	// HTTP POST p_body to p_url with p_content_type.
+	// Returns true on a 2xx response, false otherwise.
+	bool http_post_gd(const String &p_url,
+			const PackedByteArray &p_body,
+			const String &p_content_type);
+
 	FabricMMOGAsset() {}
 	~FabricMMOGAsset() {}
 

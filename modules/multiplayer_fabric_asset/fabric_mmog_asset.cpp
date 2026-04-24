@@ -51,9 +51,10 @@
 void FabricMMOGAsset::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("fetch_asset", "store_url", "index_url", "output_dir", "cache_dir"),
 			&FabricMMOGAsset::fetch_asset);
-	// put_chunk / upload_asset are C++-only — their out-parameter signatures
-	// don't fit ClassDB binding directly. Expose GDScript wrappers via a
-	// Dictionary return once the upload flow is finalized.
+	ClassDB::bind_method(D_METHOD("upload_asset_gd", "store_url", "file_data"),
+			&FabricMMOGAsset::upload_asset_gd);
+	ClassDB::bind_method(D_METHOD("http_post_gd", "url", "body", "content_type"),
+			&FabricMMOGAsset::http_post_gd);
 
 	BIND_CONSTANT(CHUNK_ID_BYTES);
 	BIND_CONSTANT(CHUNK_MIN_BYTES);
@@ -1603,4 +1604,49 @@ Vector<uint8_t> FabricMMOGAsset::upload_asset(const String &p_store_url,
 	push_u64(0x4b4f050e5549ecd1ULL); // CaFormatTableTailMarker
 
 	return index;
+}
+
+// ── GDScript-callable wrappers ────────────────────────────────────────────
+
+PackedByteArray FabricMMOGAsset::upload_asset_gd(const String &p_store_url,
+		const PackedByteArray &p_file_data) {
+	Vector<uint8_t> data;
+	data.resize(p_file_data.size());
+	if (!p_file_data.is_empty()) {
+		memcpy(data.ptrw(), p_file_data.ptr(), p_file_data.size());
+	}
+
+	String error;
+	const Vector<uint8_t> result = upload_asset(p_store_url, data, error);
+	if (!error.is_empty()) {
+		ERR_PRINT(vformat("FabricMMOGAsset::upload_asset_gd: %s", error));
+		return PackedByteArray();
+	}
+
+	PackedByteArray out;
+	out.resize(result.size());
+	if (!result.is_empty()) {
+		memcpy(out.ptrw(), result.ptr(), result.size());
+	}
+	return out;
+}
+
+bool FabricMMOGAsset::http_post_gd(const String &p_url,
+		const PackedByteArray &p_body,
+		const String &p_content_type) {
+	Vector<uint8_t> body;
+	body.resize(p_body.size());
+	if (!p_body.is_empty()) {
+		memcpy(body.ptrw(), p_body.ptr(), p_body.size());
+	}
+
+	Vector<uint8_t> response;
+	String error;
+	const Error err = http_request_blocking("POST", p_url, body, p_content_type,
+			response, error);
+	if (err != OK) {
+		ERR_PRINT(vformat("FabricMMOGAsset::http_post_gd POST %s: %s", p_url, error));
+		return false;
+	}
+	return true;
 }
