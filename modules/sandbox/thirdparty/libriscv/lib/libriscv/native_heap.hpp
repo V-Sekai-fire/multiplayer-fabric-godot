@@ -28,7 +28,7 @@ struct ArenaChunk
 	bool   free = false;
 	PointerType data = 0;
 
-	ArenaChunk* find_used(PointerType ptr);
+	ArenaChunk* find_used(PointerType ptr) const;
 	ArenaChunk* find_free(size_t req_size);
 	void merge_next(Arena&);
 	void split_next(Arena&, size_t chunk_size);
