@@ -1,5 +1,5 @@
 def can_build(env, platform):
-    return True
+    return env.get("module_sqlite_enabled", False) and env.get("module_http3_enabled", False)
 
 
 def configure(env):
