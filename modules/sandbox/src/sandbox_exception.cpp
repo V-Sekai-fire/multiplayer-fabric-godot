@@ -102,12 +102,9 @@ void Sandbox::handle_exception(gaddr_t address) {
 
 	String elfpath = "";
 #if defined(__linux__) || defined(__APPLE__)
-	// Docker container debugging functionality has been removed
-	// Source line information is no longer available through Docker
 	Ref<ELFScript> script = this->get_program();
 	if (!script.is_null()) {
 		elfpath = get_program()->get_path();
-		print_line("Exception in Sandbox - source line debugging unavailable (Docker support removed)");
 	}
 #endif
 

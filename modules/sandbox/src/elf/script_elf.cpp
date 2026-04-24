@@ -31,7 +31,6 @@
 #include "script_elf.h"
 
 #include "../cpp/script_cpp.h"
-// Docker support removed
 #include "../register_types.h"
 #include "../sandbox.h"
 #include "../sandbox_project_settings.h"
@@ -319,7 +318,3 @@ void ELFScript::update_public_api_functions() {
 	}
 }
 
-String ELFScript::get_dockerized_program_path() const {
-	// Docker support removed - return empty string
-	return String();
-}
