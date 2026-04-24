@@ -183,6 +183,11 @@ public:
 			bool &r_allowed, String &r_error);
 
 	// ── Fetch stubs ─────────────────────────────────────────────────────
+	// Platform-correct default chunk cache root: follows XDG on Linux,
+	// Library/Caches on macOS, CSIDL_LOCAL_APPDATA on Windows.
+	// Matches casync's own default: <cache_root>/casync/chunks.
+	static String default_cache_dir();
+
 	// Fetch-and-reassemble an asset by its index chunk ID. Returns the
 	// local path on success, or an empty string on failure.
 	String fetch_asset(const String &p_store_url,

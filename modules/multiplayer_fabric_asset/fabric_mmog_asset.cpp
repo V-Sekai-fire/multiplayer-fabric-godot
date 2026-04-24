@@ -39,7 +39,6 @@
 #include "core/io/file_access.h"
 #include "core/io/http_client.h"
 #include "core/io/json.h"
-#include "core/io/stream_peer_tls.h"
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/variant/variant.h"
@@ -49,6 +48,8 @@
 #include <cstring>
 
 void FabricMMOGAsset::_bind_methods() {
+	ClassDB::bind_static_method("FabricMMOGAsset", D_METHOD("default_cache_dir"),
+			&FabricMMOGAsset::default_cache_dir);
 	ClassDB::bind_method(D_METHOD("fetch_asset", "store_url", "index_url", "output_dir", "cache_dir"),
 			&FabricMMOGAsset::fetch_asset);
 	ClassDB::bind_method(D_METHOD("upload_asset_gd", "store_url", "file_data"),
@@ -794,6 +795,17 @@ Error FabricMMOGAsset::http_request_blocking(const String &p_method,
 	return ERR_CANT_RESOLVE;
 }
 
+String FabricMMOGAsset::default_cache_dir() {
+	// OS::get_cache_path() returns the platform-correct cache root:
+	//   Linux   → $XDG_CACHE_HOME or ~/.cache
+	//   macOS   → ~/Library/Caches
+	//   Windows → %LOCALAPPDATA%
+	//   Android → <app>/cache
+	// We append "casync/chunks" to match casync's own default layout,
+	// making the cache interoperable with desync and aria-storage.
+	return OS::get_singleton()->get_cache_path().path_join("casync/chunks");
+}
+
 String FabricMMOGAsset::fetch_asset(const String &p_store_url,
 		const String &p_index_url,
 		const String &p_output_dir,
@@ -816,6 +828,9 @@ String FabricMMOGAsset::fetch_asset(const String &p_store_url,
 
 	// 3. Fetch every unique chunk (dedup by hex ID), honoring any cached
 	//    copies under p_cache_dir and writing new ones back.
+	//    Cache layout mirrors the casync store format: {prefix}/{hex}.cacnk
+	//    where prefix = hex.substr(0, 4).  This makes the cache directory
+	//    interoperable with desync, casync, and aria-storage.
 	if (!p_cache_dir.is_empty() && !DirAccess::dir_exists_absolute(p_cache_dir)) {
 		DirAccess::make_dir_recursive_absolute(p_cache_dir);
 	}
@@ -827,9 +842,10 @@ String FabricMMOGAsset::fetch_asset(const String &p_store_url,
 			continue;
 		}
 
+		const String prefix = hex.substr(0, 4);
 		const String cache_path = p_cache_dir.is_empty()
 				? String()
-				: p_cache_dir.path_join(hex + ".cacnk");
+				: p_cache_dir.path_join(prefix).path_join(hex + ".cacnk");
 
 		Vector<uint8_t> compressed;
 		if (!cache_path.is_empty() && FileAccess::exists(cache_path)) {
@@ -848,6 +864,10 @@ String FabricMMOGAsset::fetch_asset(const String &p_store_url,
 				return String();
 			}
 			if (!cache_path.is_empty()) {
+				const String prefix_dir = p_cache_dir.path_join(prefix);
+				if (!DirAccess::dir_exists_absolute(prefix_dir)) {
+					DirAccess::make_dir_recursive_absolute(prefix_dir);
+				}
 				Ref<FileAccess> out = FileAccess::open(cache_path, FileAccess::WRITE);
 				if (out.is_valid()) {
 					out->store_buffer(compressed.ptr(), compressed.size());
