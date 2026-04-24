@@ -5,7 +5,7 @@ Patches against upstream commits for vendored libraries in `modules/sandbox/thir
 ## libriscv
 
 Upstream: `https://github.com/libriscv/libriscv` (`fwsGonzo/libriscv`, branch `master`)
-Base commit: `33e283e1cf40b815dc541df0dc8c8d0cb52c0d50` (recorded in `libriscv/.gitrepo`)
+Base commit: `6770061e9bbd14a4579a8fc728f63a13d582f36f` (recorded in `libriscv/.gitrepo`)
 
 ### Applying
 
@@ -21,7 +21,6 @@ for p in ../patches/libriscv__*.patch; do patch -p4 < "$p"; done
 | Patch | Upstream path |
 |-------|---------------|
 | `libriscv__lib_libriscv_debug.cpp.patch` | `lib/libriscv/debug.cpp` |
-| `libriscv__lib_libriscv_decoded_exec_segment.hpp.patch` | `lib/libriscv/decoded_exec_segment.hpp` |
 | `libriscv__lib_libriscv_decoder_cache.cpp.patch` | `lib/libriscv/decoder_cache.cpp` |
 | `libriscv__lib_libriscv_guest_datatypes.hpp.patch` | `lib/libriscv/guest_datatypes.hpp` |
 | `libriscv__lib_libriscv_linux_syscalls_mman.cpp.patch` | `lib/libriscv/linux/syscalls_mman.cpp` |
@@ -40,3 +39,9 @@ for p in ../patches/libriscv__*.patch; do patch -p4 < "$p"; done
 | `libriscv__lib_libriscv_win32_dlfcn.h.patch` | `lib/libriscv/win32/dlfcn.h` |
 | `libriscv__lib_libriscv_win32_epoll.cpp.patch` | `lib/libriscv/win32/epoll.cpp` |
 | `libriscv__lib_libriscv_win32_system_calls.cpp.patch` | `lib/libriscv/win32/system_calls.cpp` |
+
+### Notes
+
+`decoded_exec_segment.hpp` was patched against `33e283e1` (zero-length allocation guard)
+but upstream `6770061e` superseded it with sandbox hardening (`exlen + 8` allocation +
+`if (exlen > 0)` guard). No local patch needed.

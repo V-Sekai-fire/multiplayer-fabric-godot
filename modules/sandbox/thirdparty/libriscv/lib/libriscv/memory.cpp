@@ -24,11 +24,14 @@ namespace riscv
 		  m_original_machine {true},
 		  m_binary {bin}
 	{
+#ifdef RISCV_VIRTUAL_PAGING
 		if (options.page_fault_handler != nullptr)
 		{
 			this->m_page_fault_handler = std::move(options.page_fault_handler);
 		}
-		else if (options.memory_max != 0)
+		else
+#endif
+		if (options.memory_max != 0)
 		{
 			const address_t pages_max = options.memory_max / Page::size();
 			assert(pages_max >= 1);
@@ -46,29 +49,32 @@ namespace riscv
 					// TODO: Allocate unpresent pages for the whole address space,
 					// and only allocate real memory according to pages_max. Then handle
 					// page faults for the rest of the address space using userfaultfd.
-					this->m_arena.data = (PageData *)mmap(NULL, UNBOUNDED_ARENA_SIZE, PROT_READ | PROT_WRITE,
+					auto* base_ptr = (uint8_t *)mmap(NULL, UNBOUNDED_ARENA_SIZE, PROT_READ | PROT_WRITE,
 						MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE, -1, 0);
-					if (UNLIKELY(this->m_arena.data == MAP_FAILED)) {
+					if (UNLIKELY(base_ptr == MAP_FAILED)) {
 						// We probably reached a limit on the number of mappings
 						this->m_arena.data = nullptr;
 						throw MachineException(OUT_OF_MEMORY, "Out of memory", UNBOUNDED_ARENA_SIZE);
 					}
+					// Adjust pointer forward by OVERALLOCATE to provide over-allocation on both sides
+					// while keeping arena at same logical address (relative to zero)
+					this->m_arena.data = (PageData *)(base_ptr + Memory::OVERALLOCATE);
 					this->m_arena.pages = (1ULL << encompassing_Nbit_arena) / Page::size();
-					/*this->m_arena.data = (PageData *)mmap(m_arena.data, (pages_max + 1) * Page::size(), PROT_READ | PROT_WRITE,
-						MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE, -1, 0);
-					if (UNLIKELY(this->m_arena.data == MAP_FAILED)) {
-						throw MachineException(OUT_OF_MEMORY, "Out of memory", this->m_arena.pages * Page::size());
-					}*/
 				} else {
 					// Over-allocate by 1 page in order to avoid bounds-checking with size
+					// The extra page also provides over-allocation on both sides
 					const size_t len = (pages_max + 1) * Page::size();
-					this->m_arena.data = (PageData *)mmap(NULL, len, PROT_READ | PROT_WRITE,
+					auto* base_ptr = (uint8_t *)mmap(NULL, len, PROT_READ | PROT_WRITE,
 						MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE, -1, 0);
 					this->m_arena.pages = pages_max;
 					// mmap() returns MAP_FAILED (-1) when mapping fails
-					if (UNLIKELY(this->m_arena.data == MAP_FAILED)) {
+					if (UNLIKELY(base_ptr == MAP_FAILED)) {
 						this->m_arena.data = nullptr;
 						this->m_arena.pages = 0;
+					} else {
+						// Adjust pointer forward by OVERALLOCATE to provide over-allocation on both sides
+						// while keeping arena at same logical address (relative to zero)
+						this->m_arena.data = (PageData *)(base_ptr + Memory::OVERALLOCATE);
 					}
 				}
 #else
@@ -76,16 +82,23 @@ namespace riscv
 				{
 					// Allocate a complete N-bit arena, covering the entire N-bit address space
 					// Add 1 extra page to avoid having to bounds-check memory accesses
-					this->m_arena.data = new PageData[UNBOUNDED_ARENA_SIZE / Page::size()];
+					auto* base_ptr = (uint8_t *)new PageData[UNBOUNDED_ARENA_SIZE / Page::size()];
+					// Adjust pointer forward by OVERALLOCATE to provide over-allocation on both sides
+					// while keeping arena at same logical address (relative to zero)
+					this->m_arena.data = (PageData *)(base_ptr + Memory::OVERALLOCATE);
 					this->m_arena.pages = (1ULL << encompassing_Nbit_arena) / Page::size();
 				} else {
 					// TODO: XXX: Investigate if this is a time sink
-					this->m_arena.data = new PageData[pages_max + 1];
+					auto* base_ptr = (uint8_t *)new PageData[pages_max + 1];
+					// Adjust pointer forward by OVERALLOCATE to provide over-allocation on both sides
+					// while keeping arena at same logical address (relative to zero)
+					this->m_arena.data = (PageData *)(base_ptr + Memory::OVERALLOCATE);
 					this->m_arena.pages = pages_max;
 				}
 #endif
 			}
 
+#ifdef RISCV_VIRTUAL_PAGING
 			if (this->m_arena.pages > 0)
 			{
 				// There is now a sequential arena, but we should make room for
@@ -126,12 +139,20 @@ namespace riscv
 					throw MachineException(OUT_OF_MEMORY, "Out of memory", pages_max);
 				};
 			}
+#else
+			if (UNLIKELY(this->m_arena.pages == 0)) {
+				throw MachineException(OUT_OF_MEMORY,
+					"Virtual paging is disabled but arena allocation failed", 0);
+			}
+#endif // RISCV_VIRTUAL_PAGING
 		} else {
 			throw MachineException(OUT_OF_MEMORY, "Max memory was zero", 0);
 		}
 		if (!m_binary.empty()) {
+#ifdef RISCV_VIRTUAL_PAGING
 			// Add a zero-page at the start of address space
 			this->initial_paging();
+#endif
 			// load ELF binary into virtual memory
 			this->binary_loader(options);
 		}
@@ -151,23 +172,29 @@ namespace riscv
 	template <int W>
 	Memory<W>::~Memory()
 	{
+#ifdef RISCV_VIRTUAL_PAGING
 		try {
 			this->clear_all_pages();
 		} catch (...) {}
+#endif
 		// Potentially deallocate execute segments that are no longer referenced
 		this->evict_execute_segments();
 		// only the original machine owns arena
 		if (this->m_arena.data != nullptr && !is_forked()) {
 #if defined(__linux__) || defined(__FreeBSD__)
+			// Adjust back to the original base pointer (subtract OVERALLOCATE)
+			auto* base_ptr = (uint8_t *)this->m_arena.data - Memory::OVERALLOCATE;
 			if constexpr (riscv::encompassing_Nbit_arena != 0)
 			{
 				// munmap() the entire address space
-				munmap(this->m_arena.data, UNBOUNDED_ARENA_SIZE);
+				munmap(base_ptr, UNBOUNDED_ARENA_SIZE);
 			} else {
-				munmap(this->m_arena.data, (this->m_arena.pages + 1) * Page::size());
+				munmap(base_ptr, (this->m_arena.pages + 1) * Page::size());
 			}
 #else
-			delete[] this->m_arena.data;
+			// Adjust back to the original base pointer (subtract OVERALLOCATE)
+			auto* base_ptr = (PageData *)((uint8_t *)this->m_arena.data - Memory::OVERALLOCATE);
+			delete[] base_ptr;
 #endif
 		}
 	}
@@ -179,6 +206,7 @@ namespace riscv
 		// serialization, machine options and machine forks
 	}
 
+#ifdef RISCV_VIRTUAL_PAGING
 	template <int W>
 	void Memory<W>::clear_all_pages()
 	{
@@ -194,6 +222,7 @@ namespace riscv
 			install_shared_page(0, Page::guard_page());
 		}
 	}
+#endif // RISCV_VIRTUAL_PAGING
 
 	template <int W> RISCV_INTERNAL
 	void Memory<W>::binary_load_ph(const MachineOptions<W>& options,
@@ -233,10 +262,6 @@ namespace riscv
 				attr.read, attr.write, attr.exec);
 		}
 
-		if (attr.read && !attr.write && uses_flat_memory_arena()) {
-			this->m_arena.initial_rodata_end =
-				std::max(m_arena.initial_rodata_end, static_cast<address_t>(vaddr + len));
-		}
 		// Nothing more to do here, if execute-only
 		if (attr.exec && !attr.read)
 			return;
@@ -254,8 +279,21 @@ namespace riscv
 			}
 		}
 
-		// Load into virtual memory
-		this->memcpy(vaddr, src, len);
+		if constexpr (!virtual_paging_enabled) {
+			// Write directly to the arena (rodata boundary set after copy)
+			if (UNLIKELY(vaddr + len > memory_arena_size()))
+				throw MachineException(INVALID_PROGRAM, "ELF segment exceeds arena size");
+			std::memcpy(&((char*)m_arena.data)[vaddr], src, len);
+		} else {
+			// Load into virtual memory
+			this->memcpy(vaddr, src, len);
+		}
+
+		// Track rodata boundary (set after memcpy so arena writes succeed)
+		if (attr.read && !attr.write && uses_flat_memory_arena()) {
+			this->m_arena.initial_rodata_end =
+				std::max(m_arena.initial_rodata_end, static_cast<address_t>(vaddr + len));
+		}
 
 		if (options.protect_segments) {
 			this->set_page_attr(vaddr, len, attr);
@@ -451,10 +489,24 @@ namespace riscv
 		// Default fallback: Install our own exit function as a separate execute segment
 		if (this->m_exit_address == 0x0)
 		{
-			// Insert host code page, with exit function, enabling VM calls.
 			auto host_page = this->mmap_allocate(Page::size());
-			this->install_shared_page(page_number(host_page), Page::host_page());
 			this->m_exit_address = host_page;
+#ifdef RISCV_VIRTUAL_PAGING
+			// Insert host code page, with exit function, enabling VM calls.
+			this->install_shared_page(page_number(host_page), Page::host_page());
+#else
+			// Write exit code directly into the arena
+			static constexpr uint8_t exit_code[] = {
+				0x73, 0x00, 0xf0, 0x7f, // STOP: 0x7ff00073
+				0x6f, 0xf0, 0xdf, 0xff, // JMP -4: 0xffdff06f
+			};
+			if (host_page + sizeof(exit_code) <= memory_arena_size()) {
+				std::memcpy(&((uint8_t*)m_arena.data)[host_page], exit_code, sizeof(exit_code));
+			}
+			// Create a small execute segment for the exit function
+			this->create_execute_segment(options,
+				exit_code, host_page, sizeof(exit_code), false);
+#endif
 		}
 
 		if (this->uses_flat_memory_arena() && this->memory_arena_size() >= m_arena.initial_rodata_end) {
@@ -489,11 +541,11 @@ namespace riscv
 	void Memory<W>::machine_loader(
 		const Machine<W>& master, const MachineOptions<W>& options)
 	{
-		// Some machines don't need custom PF handlers
-		this->m_page_fault_handler = master.memory.m_page_fault_handler;
-
+#ifdef RISCV_VIRTUAL_PAGING
 		if (options.minimal_fork == false)
 		{
+			this->m_page_fault_handler = master.memory.m_page_fault_handler;
+
 			// Hardly any pages are dont_fork, so we estimate that
 			// all master pages will be loaned.
 			m_pages.reserve(master.memory.pages().size());
@@ -516,6 +568,9 @@ namespace riscv
 				);
 			}
 		}
+#else
+		(void)options;
+#endif
 		this->m_start_address = master.memory.m_start_address;
 		this->m_stack_address = master.memory.m_stack_address;
 		this->m_exit_address = master.memory.m_exit_address;
@@ -524,6 +579,7 @@ namespace riscv
 		this->m_mmap_cache   = master.memory.m_mmap_cache;
 
 		// Reference the same execute segments
+		this->m_main_exec_segment = master.memory.m_main_exec_segment;
 		this->m_exec = master.memory.m_exec;
 
 		if (options.use_memory_arena) {
@@ -536,24 +592,6 @@ namespace riscv
 
 		// invalidate all cached pages, because references are invalidated
 		this->invalidate_reset_cache();
-	}
-
-	template <int W>
-	std::string Memory<W>::get_page_info(address_t addr) const
-	{
-		char buffer[1024];
-		int len;
-		if constexpr (W == 4) {
-			len = snprintf(buffer, sizeof(buffer),
-				"[0x%08" PRIX32 "] %s", addr, get_page(addr).to_string().c_str());
-		} else if constexpr (W == 8) {
-			len = snprintf(buffer, sizeof(buffer),
-				"[0x%016" PRIX64 "] %s", addr, get_page(addr).to_string().c_str());
-		} else if constexpr (W == 16) {
-			len = snprintf(buffer, sizeof(buffer),
-				"[0x%016" PRIX64 "] %s", (uint64_t)addr, get_page(addr).to_string().c_str());
-		}
-		return std::string(buffer, len);
 	}
 
 	template <int W>

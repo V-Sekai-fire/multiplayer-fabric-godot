@@ -1,10 +1,12 @@
 --- a/modules/sandbox/thirdparty/libriscv/lib/libriscv/native_heap.hpp
 +++ b/modules/sandbox/thirdparty/libriscv/lib/libriscv/native_heap.hpp
-@@ -29,9 +29,9 @@
+@@ -28,10 +28,10 @@
+ 	bool   free = false;
  	PointerType data = 0;
  
- 	ArenaChunk* find_used(PointerType ptr);
+-	ArenaChunk* find_used(PointerType ptr) const;
 -	ArenaChunk* find_free(size_t size);
++	ArenaChunk* find_used(PointerType ptr);
 +	ArenaChunk* find_free(size_t req_size);
  	void merge_next(Arena&);
 -	void split_next(Arena&, size_t size);
@@ -12,7 +14,7 @@
  	void subsume_next(Arena&, size_t extra);
  };
  
-@@ -169,11 +169,11 @@
+@@ -187,11 +187,11 @@
  	return nullptr;
  }
  // find free chunk that has at least given size
@@ -26,7 +28,7 @@
  			return ch;
  		ch = ch->next;
  	}
-@@ -215,17 +215,17 @@
+@@ -233,17 +233,17 @@
  	}
  }
  
@@ -48,7 +50,7 @@
  		);
  		if (this->next) {
  			this->next->prev = newch;
-@@ -242,7 +242,7 @@
+@@ -260,7 +260,7 @@
  			this->next->prev = nullptr;
  		}
  	}

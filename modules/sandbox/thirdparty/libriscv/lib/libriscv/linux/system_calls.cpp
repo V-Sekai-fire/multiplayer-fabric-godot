@@ -613,9 +613,6 @@ static void syscall_ioctl(Machine<W>& machine)
 	const int vfd = machine.template sysarg<int>(0);
 	const auto req = machine.template sysarg<uint64_t>(1);
 	const auto arg1 = machine.sysarg(2);
-	const auto arg2 = machine.sysarg(3);
-	const auto arg3 = machine.sysarg(4);
-	const auto arg4 = machine.sysarg(5);
 	SYSPRINT("SYSCALL ioctl, fd: %d  req: 0x%lX\n", vfd, req);
 
 	if (machine.has_file_descriptors()) {
@@ -648,8 +645,10 @@ static void syscall_ioctl(Machine<W>& machine)
 			return;
 		}
 
-		int res = ioctl(real_fd, req, arg1, arg2, arg3, arg4);
-		machine.set_result_or_error(res);
+		// Unknown ioctl request — deny rather than forwarding guest
+		// register values to host ioctl() where they may be interpreted
+		// as pointers.
+		machine.set_result(-ENOSYS);
 		return;
 	}
 	machine.set_result(-EBADF);
@@ -674,7 +673,7 @@ void syscall_readlinkat(Machine<W>& machine)
 		return;
 	}
 
-	if (machine.has_file_descriptors()) {
+	if (machine.has_file_descriptors() && machine.fds().permit_filesystem) {
 
 		if (machine.fds().filter_readlink != nullptr) {
 			std::string path = original_path;
@@ -800,7 +799,7 @@ static void syscall_fstatat(Machine<W>& machine)
 
 	std::string path = machine.memory.memstring(g_path);
 
-	if (machine.has_file_descriptors()) {
+	if (machine.has_file_descriptors() && machine.fds().permit_filesystem) {
 
 		int real_fd = machine.fds().translate(vfd);
 
@@ -838,7 +837,7 @@ static void syscall_fstatat(Machine<W>& machine)
 template <int W>
 static void syscall_faccessat(Machine<W>& machine)
 {
-	const auto fd = AT_FDCWD;
+	const auto vfd    = machine.template sysarg<int>(0);
 	const auto g_path = machine.sysarg(1);
 	const auto mode   = machine.template sysarg<int>(2);
 	const auto flags  = machine.template sysarg<int>(3);
@@ -846,10 +845,23 @@ static void syscall_faccessat(Machine<W>& machine)
 	const auto path = machine.memory.memstring(g_path);
 
 	SYSPRINT("SYSCALL faccessat, fd: %d path: %s)\n",
-			fd, path.c_str());
+			vfd, path.c_str());
 
-	const int res =
-		faccessat(fd, path.c_str(), mode, flags);
+	if (!machine.has_file_descriptors() || !machine.fds().permit_filesystem) {
+		machine.set_result(-ENOSYS);
+		return;
+	}
+
+	if (machine.fds().filter_open != nullptr) {
+		std::string mpath = path;
+		if (!machine.fds().filter_open(machine.template get_userdata<void>(), mpath)) {
+			machine.set_result(-EACCES);
+			return;
+		}
+	}
+
+	const int real_fd = (vfd == AT_FDCWD) ? AT_FDCWD : machine.fds().translate(vfd);
+	const int res = faccessat(real_fd, path.c_str(), mode, flags);
 	machine.set_result_or_error(res);
 }
 
@@ -1187,6 +1199,7 @@ void Machine<W>::setup_newlib_syscalls()
 	install_syscall_handler(93, syscall_exit<W>);
 	install_syscall_handler(169, syscall_gettimeofday<W>);
 	install_syscall_handler(214, syscall_brk<W>);
+	install_syscall_handler(403, syscall_clock_gettime64<W>);
 }
 template <int W>
 void Machine<W>::setup_newlib_syscalls(bool filesystem)

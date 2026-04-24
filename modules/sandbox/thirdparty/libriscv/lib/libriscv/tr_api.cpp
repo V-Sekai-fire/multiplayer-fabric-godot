@@ -80,6 +80,36 @@ static inline float fmaxf(float x, float y) {
 static inline double fmax(double x, double y) {
 	return (x >= y) ? x : y;
 }
+static inline float truncf(float x) {
+	union { float f; uint32_t u; } v;
+	v.f = x;
+	int exp = ((v.u >> 23) & 0xFF) - 127;
+	if (exp < 0) {
+		v.u &= 0x80000000u;
+	} else if (exp < 23) {
+		v.u &= ~((1u << (23 - exp)) - 1u);
+	}
+	return v.f;
+}
+static inline float floorf(float x) {
+	float t = truncf(x);
+	return (t > x) ? t - 1.0f : t;
+}
+static inline double trunc(double x) {
+	union { double f; uint64_t u; } v;
+	v.f = x;
+	int exp = (int)((v.u >> 52) & 0x7FF) - 1023;
+	if (exp < 0) {
+		v.u &= 0x8000000000000000ull;
+	} else if (exp < 52) {
+		v.u &= ~((1ull << (52 - exp)) - 1ull);
+	}
+	return v.f;
+}
+static inline double floor(double x) {
+	double t = trunc(x);
+	return (t > x) ? t - 1.0 : t;
+}
 static inline uint32_t do_bswap32(uint32_t x) {
 	return (x << 24 | (x & 0xFF00) << 8 | (x & 0xFF0000) >> 8 | x >> 24);
 }
@@ -104,6 +134,10 @@ static inline uint32_t do_bswap32(uint32_t x) {
 #define fmin(x, y) __builtin_fmin(x, y)
 #define fmaxf(x, y) __builtin_fmaxf(x, y)
 #define fmax(x, y) __builtin_fmax(x, y)
+#define truncf(x) __builtin_truncf(x)
+#define trunc(x)  __builtin_trunc(x)
+#define floorf(x) __builtin_floorf(x)
+#define floor(x)  __builtin_floor(x)
 #endif
 
 #ifdef __HAVE_BUILTIN_SPECULATION_SAFE_VALUE
@@ -193,6 +227,17 @@ static struct CallbackTable {
 	void (*trace) (CPU*, const char*, addr_t, uint32_t);
 	float  (*sqrtf32)(float);
 	double (*sqrtf64)(double);
+	// Fused multiply-add (single rounding) — required by RISC-V spec
+	// §11.6 for FMADD/FMSUB/FNMADD/FNMSUB. TCC compiles emitted `a*b+c`
+	// as two roundings, violating the spec; emitted code routes through
+	// these api entries to std::fma for correct behavior.
+	float  (*fmaf32)(float, float, float);
+	double (*fmaf64)(double, double, double);
+	// FMIN/FMAX with RISC-V's -0.0 < +0.0 convention.
+	float  (*fmin32_rv)(float, float);
+	float  (*fmax32_rv)(float, float);
+	double (*fmin64_rv)(double, double);
+	double (*fmax64_rv)(double, double);
 	int (*clz) (uint32_t);
 	int (*clzl) (uint64_t);
 	int (*ctz) (uint32_t);

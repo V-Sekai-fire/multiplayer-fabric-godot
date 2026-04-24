@@ -1,6 +1,6 @@
 --- a/modules/sandbox/thirdparty/libriscv/lib/libriscv/machine.cpp
 +++ b/modules/sandbox/thirdparty/libriscv/lib/libriscv/machine.cpp
-@@ -297,19 +297,19 @@
+@@ -299,19 +299,19 @@
  			}
  			break;
  		case 0x1: { // CSRRW: Atomically swap CSR and integer register
@@ -24,7 +24,7 @@
  				cpu.registers().fcsr().whole = cpu.reg(instr.Itype.rs1) & 0xFF;
  				return;
  			}
-@@ -317,24 +317,24 @@
+@@ -319,24 +319,24 @@
  		}
  		case 0x2: { // CSRRS: Atomically read and set bit mask
  			// if destination is x0, then we do not write to rd
@@ -54,7 +54,7 @@
  					cpu.reg(instr.Itype.rd) = this->instruction_counter();
  					return;
  				} else {
-@@ -345,25 +345,25 @@
+@@ -347,25 +347,25 @@
  				}
  			case 0xC80: // CSR RDCYCLE (upper)
  			case 0xC82: // RDINSTRET (upper)
@@ -87,7 +87,7 @@
  				return;
  			default:
  				on_unhandled_csr(*this, instr.Itype.imm, instr.Itype.rd, instr.Itype.rs1);
-@@ -371,39 +371,39 @@
+@@ -373,39 +373,39 @@
  			}
  			} break;
  		case 0x3: { // CSRRC: Atomically read and clear CSR
@@ -135,7 +135,7 @@
  				cpu.registers().fcsr().whole = imm & 0xFF;
  				return;
  			default:
-@@ -412,20 +412,20 @@
+@@ -414,20 +414,20 @@
  			}
  		} // CSRWI
  		case 0x7: { // CSRRCI: Atomically read and clear CSR using immediate

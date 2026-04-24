@@ -39,6 +39,8 @@ Options:
   -n, --no-translate Disable binary translation
   -N, --no-translate-future Disable binary translation of non-initial segments
   -R, --translate-regcache Enable register caching in binary translator
+      --no-translate-regcache Disable register caching in binary translator
+      --no-virtual   Constrain binary translator to arena (disable virtual paging)
   -J, --jump-hints file  Load jump location hints from file, unless empty then record instead
   -B  --background   Run binary translation in background thread
   -M, --mingw        Cross-compile for Windows (MinGW)
@@ -90,8 +92,6 @@ $ ./build.sh --help
      --no-64              disable RV64
      --128                enable RV128
      --no-128             disable RV128
-     --assembly-dispatch  enable assembly dispatch (experimental feature)
-     --no-assembly-dispatch disable assembly dispatch
      -b, --bintr          enable binary translation using system compiler
      --no-bintr           disable binary translation
      -t, --jit            jit-compile using tcc

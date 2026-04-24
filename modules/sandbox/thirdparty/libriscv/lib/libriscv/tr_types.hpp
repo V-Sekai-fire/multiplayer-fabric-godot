@@ -34,6 +34,7 @@ namespace riscv
 		bool use_register_caching;
 		bool use_syscall_clobbering_optimization;
 		bool use_automatic_nbit_address_space;
+		bool use_virtual_paging_fallback;
 		bool unsafe_remove_checks;
 		std::unordered_set<address_type<W>> jump_locations;
 		std::unordered_map<address_type<W>, address_type<W>> single_return_locations;
