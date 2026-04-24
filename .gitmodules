@@ -1,0 +1,3 @@
+[submodule "modules/multiplayer_fabric_mmog/thirdparty/taskweft"]
+	path = modules/multiplayer_fabric_mmog/thirdparty/taskweft
+	url = https://github.com/V-Sekai-fire/multiplayer-fabric-taskweft.git

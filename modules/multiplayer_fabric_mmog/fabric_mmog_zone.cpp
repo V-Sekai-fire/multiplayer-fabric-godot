@@ -48,6 +48,12 @@ void FabricMMOGZone::_bind_methods() {
 			&FabricMMOGZone::register_script);
 	ClassDB::bind_method(D_METHOD("send_script_registry", "peer_id"),
 			&FabricMMOGZone::send_script_registry);
+	ClassDB::bind_method(D_METHOD("set_entity_domain", "entity_id", "domain_json"),
+			&FabricMMOGZone::set_entity_domain);
+	ClassDB::bind_method(D_METHOD("get_entity_current_action", "entity_id"),
+			&FabricMMOGZone::get_entity_current_action);
+	ClassDB::bind_method(D_METHOD("advance_entity_plan", "entity_id"),
+			&FabricMMOGZone::advance_entity_plan);
 
 	BIND_CONSTANT(HUMANOID_BONE_COUNT);
 	BIND_CONSTANT(ENTITIES_PER_PLAYER);
@@ -132,6 +138,80 @@ void FabricMMOGZone::send_script_registry(int p_peer_id) {
 				e.uro_uuid, FabricMMOGAsset::REGISTRY_URO_UUID_BYTES);
 	}
 	_send_to_peer_raw(p_peer_id, CH_MIGRATION, buf.ptr(), buf.size());
+}
+
+// ── RECTGTN entity planning ──────────────────────────────────────────────────
+
+void FabricMMOGZone::_replan_entity(int p_entity_id) {
+	HashMap<int, String>::Iterator dom_it = _entity_domains.find(p_entity_id);
+	if (dom_it == _entity_domains.end()) {
+		return;
+	}
+
+	// Convert Godot String → std::string for the header-only loader.
+	std::string domain_str = dom_it->value.utf8().get_data();
+	TwLoader::TwLoaded loaded = TwLoader::load_json(domain_str);
+
+	// Clear any prior plan and reset the step counter.
+	{
+		HashMap<int, LocalVector<String>>::Iterator old_plan = _entity_plans.find(p_entity_id);
+		if (old_plan != _entity_plans.end()) {
+			_entity_plans.remove(old_plan);
+		}
+	}
+	{
+		HashMap<int, int>::Iterator old_step = _entity_plan_step.find(p_entity_id);
+		if (old_step != _entity_plan_step.end()) {
+			old_step->value = 0;
+		} else {
+			_entity_plan_step.insert(p_entity_id, 0);
+		}
+	}
+
+	std::optional<std::vector<TwCall>> plan =
+			tw_plan(loaded.state, loaded.tasks, loaded.domain);
+	if (!plan.has_value() || plan->empty()) {
+		return;
+	}
+
+	LocalVector<String> steps;
+	steps.resize((int)plan->size());
+	for (int i = 0; i < (int)plan->size(); ++i) {
+		steps[i] = (*plan)[i].name.c_str();
+	}
+	_entity_plans.insert(p_entity_id, steps);
+}
+
+void FabricMMOGZone::set_entity_domain(int p_entity_id, const String &p_domain_json) {
+	_entity_domains.insert(p_entity_id, p_domain_json);
+	_replan_entity(p_entity_id);
+}
+
+String FabricMMOGZone::get_entity_current_action(int p_entity_id) const {
+	HashMap<int, LocalVector<String>>::ConstIterator plan_it = _entity_plans.find(p_entity_id);
+	if (plan_it == _entity_plans.end()) {
+		return String();
+	}
+	HashMap<int, int>::ConstIterator step_it = _entity_plan_step.find(p_entity_id);
+	int step = step_it != _entity_plan_step.end() ? step_it->value : 0;
+	if (step < 0 || step >= (int)plan_it->value.size()) {
+		return String();
+	}
+	return plan_it->value[step];
+}
+
+bool FabricMMOGZone::advance_entity_plan(int p_entity_id) {
+	HashMap<int, LocalVector<String>>::Iterator plan_it = _entity_plans.find(p_entity_id);
+	if (plan_it == _entity_plans.end()) {
+		return false;
+	}
+	HashMap<int, int>::Iterator step_it = _entity_plan_step.find(p_entity_id);
+	if (step_it == _entity_plan_step.end()) {
+		_entity_plan_step.insert(p_entity_id, 1);
+		return 1 < (int)plan_it->value.size();
+	}
+	step_it->value += 1;
+	return step_it->value < (int)plan_it->value.size();
 }
 
 void FabricMMOGZone::_on_cmd_instance_asset(uint32_t p_player_id,

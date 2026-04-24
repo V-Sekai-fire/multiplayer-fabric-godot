@@ -36,6 +36,9 @@
 #include "modules/multiplayer_fabric/fabric_zone.h"
 #include "modules/multiplayer_fabric_asset/fabric_mmog_asset.h"
 
+#include "tw_loader.hpp"
+#include "tw_planner.hpp"
+
 // FabricMMOGZone — MMOG-layer zone server.
 //
 // Specialization of FabricZone that adds the V-Sekai load target:
@@ -113,6 +116,19 @@ public:
 	// (slot, index_chunk_id[32], uro_uuid[16]) = 50 bytes per entry.
 	void send_script_registry(int p_peer_id);
 
+	// ── RECTGTN entity planning ──────────────────────────────────────────
+	// Assign a JSON-LD domain string to an entity and compute its initial plan.
+	// p_domain_json is the full domain (tasks + actions + state); the initial
+	// task list and state are embedded in the document (TwLoader::load_json).
+	void set_entity_domain(int p_entity_id, const String &p_domain_json);
+
+	// Return the action name at the entity's current plan step, or "" if the
+	// entity has no plan or the plan is exhausted.
+	String get_entity_current_action(int p_entity_id) const;
+
+	// Advance the plan cursor by one step.  Returns false when the plan is done.
+	bool advance_entity_plan(int p_entity_id);
+
 private:
 	// player_id → list of bone-entity slot indices (length = ENTITIES_PER_PLAYER).
 	// Populated by spawn_humanoid_entities_for_player; cleared by despawn.
@@ -122,6 +138,18 @@ private:
 	LocalVector<ScriptRegistryEntry> _script_registry;
 	// Monotonically increasing counter for asset-instance global_ids.
 	int _asset_instance_counter = 0;
+
+	// ── RECTGTN per-entity planning state ───────────────────────────────
+	// entity_id → JSON-LD domain string (set by set_entity_domain).
+	HashMap<int, String> _entity_domains;
+	// entity_id → plan as ordered list of action names (computed by _replan_entity).
+	HashMap<int, LocalVector<String>> _entity_plans;
+	// entity_id → index of the next action to execute in _entity_plans.
+	HashMap<int, int> _entity_plan_step;
+
+	// (Re)compute the plan for the given entity from its stored domain.
+	// Stores results in _entity_plans / _entity_plan_step.
+	void _replan_entity(int p_entity_id);
 
 protected:
 	static void _bind_methods();

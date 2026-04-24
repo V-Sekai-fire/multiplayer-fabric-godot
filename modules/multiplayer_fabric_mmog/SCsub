@@ -6,6 +6,9 @@ Import("env_modules")
 
 env_mmog = env_modules.Clone()
 
+# taskweft standalone headers — header-only, no extra sources needed.
+env_mmog.Prepend(CPPPATH=["#modules/multiplayer_fabric_mmog/thirdparty/taskweft/standalone"])
+
 module_obj = []
 env_mmog.add_source_files(module_obj, "*.cpp")
 
