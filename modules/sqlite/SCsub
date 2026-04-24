@@ -19,7 +19,7 @@ env.Append(
     ],
 )
 
-env.Append(CPPPATH=["#modules/sqlite/thirdparty"])
+env.Append(CPPPATH=["#modules/sqlite/thirdparty", "#modules/sqlite"])
 
 env["builtin_zstd"] = False
 
