@@ -34,18 +34,10 @@ def get_doc_classes():
         "ELFScriptLanguage",
         "CPPScript",
         "CPPScriptLanguage",
-        "RustScript",
-        "RustScriptLanguage",
-        "ZigScript",
-        "ZigScriptLanguage",
         "ResourceFormatLoaderCPP",
-        "ResourceFormatLoaderZig",
         "ResourceFormatLoaderELF",
-        "ResourceFormatLoaderRust",
         "ResourceFormatSaverCPP",
-        "ResourceFormatSaverZig",
         "ResourceFormatSaverELF",
-        "ResourceFormatSaverRust",
     ]
 
 
