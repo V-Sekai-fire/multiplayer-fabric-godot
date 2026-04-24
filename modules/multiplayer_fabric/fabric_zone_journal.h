@@ -31,8 +31,10 @@
 #pragma once
 
 #include "fabric_zone_types.h"
+
 #include "core/string/ustring.h"
-#include "thirdparty/sqlite/sqlite3.h"
+
+#include <thirdparty/sqlite/sqlite3.h>
 
 // Discrete-mutation journal backed by SQLite.
 //
