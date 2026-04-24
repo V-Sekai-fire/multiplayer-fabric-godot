@@ -19,7 +19,7 @@ env.Append(
     ],
 )
 
-env.Append(CPPPATH=["#thirdparty"])
+env.Append(CPPPATH=["#modules/sqlite/thirdparty"])
 
 env["builtin_zstd"] = False
 
@@ -35,7 +35,7 @@ module_sources = [
 for source_file in module_sources:
     env_thirdparty.add_source_files(env_thirdparty.modules_sources, source_file)
 
-env_thirdparty.add_source_files(env_thirdparty.modules_sources, "#thirdparty/sqlite/sqlite3.c")
-env_thirdparty.add_source_files(env_thirdparty.modules_sources, "#thirdparty/spmemvfs/spmemvfs.c")
+env_thirdparty.add_source_files(env_thirdparty.modules_sources, "#modules/sqlite/thirdparty/sqlite/sqlite3.c")
+env_thirdparty.add_source_files(env_thirdparty.modules_sources, "#modules/sqlite/thirdparty/spmemvfs/spmemvfs.c")
 
 env.modules_sources += env_thirdparty.modules_sources
