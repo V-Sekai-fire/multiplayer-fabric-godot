@@ -806,16 +806,31 @@ String FabricMMOGAsset::default_cache_dir() {
 	return OS::get_singleton()->get_cache_path().path_join("casync/chunks");
 }
 
+// Read bytes from either an HTTP(S) URL or a local filesystem path.
+static Error read_bytes(const String &p_url_or_path, Vector<uint8_t> &r_bytes, String &r_error) {
+	if (p_url_or_path.begins_with("http://") || p_url_or_path.begins_with("https://")) {
+		return FabricMMOGAsset::http_get_blocking(p_url_or_path, r_bytes, r_error);
+	}
+	Ref<FileAccess> f = FileAccess::open(p_url_or_path, FileAccess::READ);
+	if (f.is_null()) {
+		r_error = vformat("cannot open '%s'", p_url_or_path);
+		return ERR_FILE_NOT_FOUND;
+	}
+	r_bytes.resize(int(f->get_length()));
+	f->get_buffer(r_bytes.ptrw(), r_bytes.size());
+	return OK;
+}
+
 String FabricMMOGAsset::fetch_asset(const String &p_store_url,
 		const String &p_index_url,
 		const String &p_output_dir,
 		const String &p_cache_dir) {
 	String error;
 
-	// 1. GET the caibx/caidx index file.
+	// 1. GET (or read locally) the caibx/caidx index file.
 	Vector<uint8_t> caibx_bytes;
-	if (http_get_blocking(p_index_url, caibx_bytes, error) != OK) {
-		ERR_PRINT(vformat("fetch_asset: index GET failed: %s", error));
+	if (read_bytes(p_index_url, caibx_bytes, error) != OK) {
+		ERR_PRINT(vformat("fetch_asset: index read failed: %s", error));
 		return String();
 	}
 
@@ -858,9 +873,14 @@ String FabricMMOGAsset::fetch_asset(const String &p_store_url,
 		}
 
 		if (compressed.is_empty()) {
-			const String chunk_url = build_chunk_url(p_store_url, chunks[i].id);
-			if (http_get_blocking(chunk_url, compressed, error) != OK) {
-				ERR_PRINT(vformat("fetch_asset: chunk %s GET failed: %s", hex, error));
+			// Local store: {store}/{prefix}/{hex}.cacnk  — same layout as casync.
+			// Remote store: build full HTTP URL via build_chunk_url.
+			const String chunk_src =
+					(p_store_url.begins_with("http://") || p_store_url.begins_with("https://"))
+					? build_chunk_url(p_store_url, chunks[i].id)
+					: p_store_url.path_join(prefix).path_join(hex + ".cacnk");
+			if (read_bytes(chunk_src, compressed, error) != OK) {
+				ERR_PRINT(vformat("fetch_asset: chunk %s read failed: %s", hex, error));
 				return String();
 			}
 			if (!cache_path.is_empty()) {
