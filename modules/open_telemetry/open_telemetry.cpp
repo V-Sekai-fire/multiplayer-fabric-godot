@@ -223,9 +223,12 @@ String OpenTelemetry::generate_uuid_v7() {
 		uuid_ptr[i] = random_bytes[i - 6];
 	}
 
+	static const char hex_chars[] = "0123456789abcdef";
 	String hex;
-	for (int i = 0; i < uuid_bytes.size(); i++) {
-		hex += String::num_int64(uuid_bytes[i], 16, false).pad_zeros(2);
+	for (int i = 0; i < 16; i++) {
+		uint8_t b = uuid_bytes[i];
+		hex += hex_chars[b >> 4];
+		hex += hex_chars[b & 0x0F];
 	}
 	return hex.substr(0, 8) + "-" + hex.substr(8, 4) + "-" + hex.substr(12, 4) + "-" + hex.substr(16, 4) + "-" + hex.substr(20, 12);
 }

@@ -125,7 +125,7 @@ bool OTelSpan::is_valid_hex_string(const String &p_str, int p_expected_length) {
 
 	for (int i = 0; i < p_str.length(); i++) {
 		char32_t c = p_str[i];
-		bool is_hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+		bool is_hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
 		if (!is_hex) {
 			return false;
 		}
