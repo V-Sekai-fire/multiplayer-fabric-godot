@@ -54,22 +54,25 @@ func _process(delta: float) -> void:
 
 func _handle_survey_input(delta: float) -> void:
 	# Twist — Q/E snap
-	if Input.is_action_just_pressed("ui_page_up"):   # Q
+	if Input.is_action_just_pressed("cam_rotate_left"):
 		_target_twist = fmod(_target_twist - SNAP_STEP + 1.0, 1.0)
-	if Input.is_action_just_pressed("ui_page_down"):  # E
+	if Input.is_action_just_pressed("cam_rotate_right"):
 		_target_twist = fmod(_target_twist + SNAP_STEP, 1.0)
 
 	# Zoom — scroll wheel
-	var scroll := Input.get_axis("ui_up", "ui_down")   # mapped to scroll in project settings
-	if scroll != 0.0:
-		_zoom = clampf(_zoom - scroll * 5.0, ZOOM_MIN, ZOOM_MAX)
+	if Input.is_action_just_pressed("cam_zoom_in"):
+		_zoom = clampf(_zoom - 5.0, ZOOM_MIN, ZOOM_MAX)
+		_arm.spring_length = _zoom
+		_camera.size = _zoom
+	if Input.is_action_just_pressed("cam_zoom_out"):
+		_zoom = clampf(_zoom + 5.0, ZOOM_MIN, ZOOM_MAX)
 		_arm.spring_length = _zoom
 		_camera.size = _zoom
 
 	# Pan — WASD, speed proportional to zoom
 	var move := Vector2(
-		Input.get_axis("ui_left",  "ui_right"),
-		Input.get_axis("ui_accept", "ui_cancel")  # placeholder: remap to WASD in project
+		Input.get_axis("cam_pan_left", "cam_pan_right"),
+		Input.get_axis("cam_pan_fwd",  "cam_pan_back")
 	)
 	if move.length_squared() > 0.0:
 		var speed := _zoom * PAN_SPEED_SCALE * delta
@@ -93,14 +96,14 @@ func _handle_follow(delta: float) -> void:
 
 func _input(event: InputEvent) -> void:
 	# Tab — toggle projection
-	if event.is_action_pressed("ui_focus_next"):
+	if event.is_action_pressed("cam_toggle_projection"):
 		if _camera.projection == Camera3D.PROJECTION_ORTHOGONAL:
 			_camera.projection = Camera3D.PROJECTION_PERSPECTIVE
 		else:
 			_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 
 	# F — enter Follow mode on nearest entity
-	if event.is_action_pressed("ui_filedialog_show_hidden"):   # remap to F
+	if event.is_action_pressed("cam_follow"):
 		_enter_follow()
 
 	# Escape — exit Follow mode
