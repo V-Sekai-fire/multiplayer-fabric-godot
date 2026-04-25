@@ -42,7 +42,7 @@ func _ready() -> void:
 	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	_camera.size = _zoom
 	_camera.current = true
-	_apply_swing_twist()   # initialise quaternion from [0,1] values
+	_apply_swing_twist(0.0)
 
 func _process(delta: float) -> void:
 	match _mode:
@@ -50,7 +50,7 @@ func _process(delta: float) -> void:
 			_handle_survey_input(delta)
 		Mode.FOLLOW:
 			_handle_follow(delta)
-	_apply_swing_twist()   # rebuild quaternion every frame (twist may be lerping)
+	_apply_swing_twist(delta)
 	_export_state_to_js()
 
 func _handle_survey_input(delta: float) -> void:
@@ -81,10 +81,10 @@ func _handle_survey_input(delta: float) -> void:
 		var rgt :=  _pivot.global_transform.basis.x * move.x
 		position += (fwd + rgt) * speed
 
-func _apply_swing_twist() -> void:
+func _apply_swing_twist(delta: float) -> void:
 	# Lerp current twist toward snapped target (shortest path in [0,1] space).
 	var diff := fmod(_target_twist - _twist + 1.5, 1.0) - 0.5
-	_twist = fmod(_twist + diff * clampf(LERP_SPEED * get_process_delta_time(), 0.0, 1.0) + 1.0, 1.0)
+	_twist = fmod(_twist + diff * clampf(LERP_SPEED * delta, 0.0, 1.0) + 1.0, 1.0)
 
 	# Build orientation via swing-twist decomposition.
 	# Both components expressed in [0, 1] of a full turn.
