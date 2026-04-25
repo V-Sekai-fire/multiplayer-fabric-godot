@@ -78,7 +78,7 @@ func _test_swing_elevation_preserved() -> void:
 	# horizontal plane must equal SWING_ELEVATION * TAU.
 	var expected_elev := SWING_ELEVATION * TAU  # in radians
 	for t_int in [0, 1, 2, 3]:
-		var t := t_int * 0.25
+		var t: float = t_int * 0.25
 		var q   := _make_q(t)
 		var fwd := q * Vector3(0, 0, -1)
 		# Elevation = asin(-fwd.y) for a downward look.
@@ -92,7 +92,7 @@ func _test_quaternion_equivalent_to_euler() -> void:
 	#   arm.rotation.x   = -SWING_ELEVATION * TAU
 	# Combined basis = Basis(y, twist*TAU) * Basis(x, -swing*TAU)
 	for t_int in [0, 1, 2, 3]:
-		var twist := t_int * 0.25
+		var twist: float = t_int * 0.25
 		var q_new := _make_q(twist)
 
 		# Reconstruct old Euler approach as a basis product.
