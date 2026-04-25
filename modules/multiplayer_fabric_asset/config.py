@@ -1,5 +1,11 @@
 def can_build(env, platform):
-    return env.get("module_multiplayer_fabric_enabled", False)
+    import os
+
+    return (
+        env.get("module_sqlite_enabled", False)
+        and env.get("module_http3_enabled", False)
+        and os.path.isfile("scene/main/fabric_zone_peer_callbacks.h")
+    )
 
 
 def configure(env):
