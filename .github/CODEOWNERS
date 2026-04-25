@@ -178,6 +178,7 @@
 ## XR
 /modules/camera/                              @godotengine/xr
 /modules/mobile_vr/                           @godotengine/xr
+/modules/openvr/                              @fire
 /modules/mobile_vr/doc_classes/               @godotengine/xr @godotengine/documentation
 /modules/openxr/                              @godotengine/xr
 /modules/openxr/doc_classes/                  @godotengine/xr @godotengine/documentation

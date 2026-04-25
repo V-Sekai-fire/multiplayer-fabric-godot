@@ -1,0 +1,57 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="OpenVR demo"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.3")
+config/icon="res://icon.png"
+
+[autoload]
+
+OpenVRInterface="*res://addons/godot-openvr/openvr_autoloader.gd"
+
+[display]
+
+window/size/width=800
+window/size/height=500
+window/vsync/use_vsync=false
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godot-openvr/plugin.cfg")
+
+[layer_names]
+
+3d_physics/layer_1="Environment"
+3d_physics/layer_2="Objects"
+3d_physics/layer_10="Picked up"
+3d_physics/layer_11="Pointer"
+3d_physics/layer_0="Player"
+
+[native_extensions]
+
+paths=["res://addons/godot-openvr/godot_openvr.gdextension"]
+
+[physics]
+
+common/physics_fps=90
+
+[rendering]
+
+vulkan/rendering/back_end=1
+xr/enabled=true
+quality/filters/msaa=1
+environment/default_environment="res://default_env.tres"
+
+[xr]
+
+shaders/enabled=true
