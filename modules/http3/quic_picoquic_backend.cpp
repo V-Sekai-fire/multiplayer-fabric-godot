@@ -586,7 +586,7 @@ int _wt_app_callback(picoquic_cnx_t *p_cnx, uint8_t *p_bytes, size_t p_length,
 		switch (p_event) {
 			case picohttp_callback_connecting:
 				// {QUIC_HANDSHAKING, connecting} → WT_CONNECTING
-				if (cur == SS::SESSION_QUIC_HANDSHAKING || cur == SS::SESSION_H3_SETTINGS) {
+				if (cur == SS::SESSION_QUIC_HANDSHAKING) {
 					next = SS::SESSION_WT_CONNECTING;
 				}
 				break;
