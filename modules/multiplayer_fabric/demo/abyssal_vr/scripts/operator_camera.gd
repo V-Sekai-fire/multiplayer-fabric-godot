@@ -38,19 +38,19 @@ var _follow_target: Node3D = null
 @onready var _entities: Node3D  = get_node_or_null(entities_root) if entities_root != NodePath() else null
 
 func _ready() -> void:
-	_arm.rotation.x = -SWING_ELEVATION * TAU   # fixed swing — set once
 	_arm.spring_length = _zoom
 	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	_camera.size = _zoom
 	_camera.current = true
+	_apply_swing_twist()   # initialise quaternion from [0,1] values
 
 func _process(delta: float) -> void:
 	match _mode:
 		Mode.SURVEY:
 			_handle_survey_input(delta)
-			_apply_twist(delta)
 		Mode.FOLLOW:
 			_handle_follow(delta)
+	_apply_swing_twist()   # rebuild quaternion every frame (twist may be lerping)
 	_export_state_to_js()
 
 func _handle_survey_input(delta: float) -> void:
@@ -81,12 +81,24 @@ func _handle_survey_input(delta: float) -> void:
 		var rgt :=  _pivot.global_transform.basis.x * move.x
 		position += (fwd + rgt) * speed
 
-func _apply_twist(delta: float) -> void:
-	# Lerp current twist toward snapped target, then write to pivot Y-rotation.
-	# Wrap via shortest path in [0, 1] space.
+func _apply_swing_twist() -> void:
+	# Lerp current twist toward snapped target (shortest path in [0,1] space).
 	var diff := fmod(_target_twist - _twist + 1.5, 1.0) - 0.5
-	_twist = fmod(_twist + diff * clampf(LERP_SPEED * delta, 0.0, 1.0) + 1.0, 1.0)
-	_pivot.rotation.y = _twist * TAU
+	_twist = fmod(_twist + diff * clampf(LERP_SPEED * get_process_delta_time(), 0.0, 1.0) + 1.0, 1.0)
+
+	# Build orientation via swing-twist decomposition.
+	# Both components expressed in [0, 1] of a full turn.
+	#
+	#   twist_q  : yaw around world Y  — _twist         in [0, 1]
+	#   swing_q  : pitch around local X — SWING_ELEVATION in [0, 1]
+	#
+	# Multiplication order: twist_q * swing_q
+	#   = apply swing first in local frame, then rotate that frame by twist.
+	# This matches TransformUtil.swing_twist: twist axis is world Y;
+	# swing is the perpendicular component in the twisted X-Z plane.
+	var twist_q := Quaternion(Vector3.UP, _twist * TAU)
+	var swing_q := Quaternion(Vector3.RIGHT, -SWING_ELEVATION * TAU)
+	_pivot.quaternion = twist_q * swing_q
 
 func _handle_follow(delta: float) -> void:
 	if _follow_target == null or not is_instance_valid(_follow_target):
