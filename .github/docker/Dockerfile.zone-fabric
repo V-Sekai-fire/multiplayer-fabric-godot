@@ -8,7 +8,7 @@
 #   zone_console/           — zone_console Elixir source tree
 
 ARG ELIXIR_IMAGE=elixir:1.17.3-otp-27
-ARG FEDORA_IMAGE=fedora:41
+ARG ALMA_IMAGE=almalinux:9
 
 # ── Build zone_console escript ────────────────────────────────────────────────
 FROM ${ELIXIR_IMAGE} AS zone-console-build
@@ -21,11 +21,12 @@ RUN MIX_ENV=prod mix deps.get --only prod && \
     MIX_ENV=prod mix escript.build
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
-FROM ${FEDORA_IMAGE}
+FROM ${ALMA_IMAGE}
 
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
-# .NET runtime required by Godot mono to load hostfxr at startup
+# .NET runtime required by Godot mono to load hostfxr at startup.
+# dotnet-runtime-8.0 is in AlmaLinux 9 AppStream; no extra repo needed.
 RUN dnf install -y \
     mesa-libGL mesa-libGLU alsa-lib pulseaudio-libs \
     libstdc++ libgcc ca-certificates \
