@@ -9,3 +9,6 @@ package «http3» where
 @[default_target]
 lean_lib «WebTransport» where
   srcDir := "."
+
+lean_lib «ZoneAssembly» where
+  srcDir := "."
