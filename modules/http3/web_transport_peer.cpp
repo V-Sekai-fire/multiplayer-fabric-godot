@@ -114,10 +114,12 @@ void WebTransportPeer::_bind_quic(const Ref<QUICClient> &p_quic, Mode p_mode) {
 }
 
 int WebTransportPeer::get_available_packet_count() const {
+	MutexLock lock(incoming_mutex);
 	return incoming.size();
 }
 
 Error WebTransportPeer::get_packet(const uint8_t **r_buffer, int &r_buffer_size) {
+	MutexLock lock(incoming_mutex);
 	if (incoming.is_empty()) {
 		return ERR_UNAVAILABLE;
 	}
@@ -146,6 +148,7 @@ void WebTransportPeer::_push_wt_incoming_datagram(const uint8_t *p_bytes, size_t
 	pkt.mode = TRANSFER_MODE_UNRELIABLE;
 	pkt.channel = 0;
 	pkt.from = 1;
+	MutexLock lock(incoming_mutex);
 	incoming.push_back(pkt);
 }
 
@@ -158,6 +161,7 @@ void WebTransportPeer::_push_wt_incoming_stream(const uint8_t *p_bytes, size_t p
 	pkt.mode = TRANSFER_MODE_RELIABLE;
 	pkt.channel = 0;
 	pkt.from = 1;
+	MutexLock lock(incoming_mutex);
 	incoming.push_back(pkt);
 }
 
@@ -251,6 +255,7 @@ void WebTransportPeer::_ingest_datagrams() {
 	if (quic.is_null()) {
 		return;
 	}
+	List<IncomingPacket> batch;
 	while (true) {
 		PackedByteArray d = quic->receive_datagram();
 		if (d.is_empty()) {
@@ -262,7 +267,13 @@ void WebTransportPeer::_ingest_datagrams() {
 		pkt.mode = TRANSFER_MODE_UNRELIABLE;
 		pkt.channel = 0;
 		pkt.from = 1;
-		incoming.push_back(pkt);
+		batch.push_back(pkt);
+	}
+	if (!batch.is_empty()) {
+		MutexLock lock(incoming_mutex);
+		for (const IncomingPacket &pkt : batch) {
+			incoming.push_back(pkt);
+		}
 	}
 }
 
@@ -290,6 +301,7 @@ void WebTransportPeer::_ingest_peer_streams() {
 			pkt.mode = TRANSFER_MODE_RELIABLE;
 			pkt.channel = 0;
 			pkt.from = 1;
+			MutexLock stream_lock(incoming_mutex);
 			incoming.push_back(pkt);
 		}
 		if (quic->is_stream_peer_closed(sid)) {
@@ -338,7 +350,10 @@ void WebTransportPeer::close() {
 	}
 	mode = MODE_NONE;
 	server_session_active = false;
-	incoming.clear();
+	{
+		MutexLock lock(incoming_mutex);
+		incoming.clear();
+	}
 	pending_peer_streams.clear();
 	current_packet_bytes.clear();
 }

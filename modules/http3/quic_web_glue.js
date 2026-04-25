@@ -50,23 +50,22 @@ const GodotWebTransport = {
 					sess.closed = true;
 				}
 			});
-			// Start reading datagrams.
-			wt.datagrams.readable
-				.getReader()
-				.read()
-				.then(function readDatagram(result) {
-					if (result.done) {
-						return;
-					}
-					const sess = GodotWebTransport._sessions[id];
-					if (sess) {
-						sess.datagrams_in.push(new Uint8Array(result.value));
-					}
-					wt.datagrams.readable
-						.getReader()
-						.read()
-						.then(readDatagram);
-				});
+			// Start reading datagrams. A ReadableStream reader is an exclusive
+			// lock — calling getReader() again while a lock is held throws
+			// TypeError("ReadableStream is locked"). Capture the reader once
+			// and reuse it across the recursive read chain.
+			const datagramReader = wt.datagrams.readable.getReader();
+			function readDatagram(result) {
+				if (result.done) {
+					return;
+				}
+				const sess = GodotWebTransport._sessions[id];
+				if (sess) {
+					sess.datagrams_in.push(new Uint8Array(result.value));
+				}
+				datagramReader.read().then(readDatagram);
+			}
+			datagramReader.read().then(readDatagram);
 			return id;
 		} catch (e) {
 			// eslint-disable-next-line no-console

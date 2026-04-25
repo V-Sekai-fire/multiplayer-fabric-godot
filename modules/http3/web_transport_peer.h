@@ -33,6 +33,7 @@
 #include "quic_client.h"
 
 #include "core/crypto/crypto.h"
+#include "core/os/mutex.h"
 #include "core/templates/list.h"
 #include "core/templates/vector.h"
 #include "scene/main/multiplayer_peer.h"
@@ -63,7 +64,6 @@ public:
 	enum SessionState {
 		SESSION_DISCONNECTED,
 		SESSION_QUIC_HANDSHAKING,
-		SESSION_H3_SETTINGS,
 		SESSION_WT_CONNECTING, // Extended CONNECT sent, waiting for 200
 		SESSION_OPEN, // connect_accepted — datagrams + streams allowed
 		SESSION_CLOSED,
@@ -169,6 +169,9 @@ private:
 	List<int64_t> pending_peer_streams;
 
 	// Parsed packets ready for get_packet().
+	// Mutex guards concurrent push (picoquic network thread) vs. pop (game thread).
+	// Web backend accesses incoming only from the game thread so contention is zero there.
+	mutable Mutex incoming_mutex;
 	List<IncomingPacket> incoming;
 
 	// Set on get_packet, read back for get_packet_mode / _channel / _peer.
