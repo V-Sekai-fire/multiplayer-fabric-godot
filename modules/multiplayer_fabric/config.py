@@ -6,9 +6,6 @@ def can_build(env, platform):
         and env.get("module_http3_enabled", False)
         and os.path.isfile("scene/main/fabric_zone_peer_callbacks.h")
     )
-        and env.get("module_http3_enabled", False)
-        and os.path.isfile("scene/main/fabric_zone_peer_callbacks.h")
-    )
 
 
 def configure(env):
