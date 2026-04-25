@@ -36,10 +36,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout engine
         uses: actions/checkout@v4
         with:
           submodules: false
+
+      - name: Checkout abyssal project
+        uses: actions/checkout@v4
+        with:
+          repository: V-Sekai-fire/multiplayer-fabric-abyssal
+          path: multiplayer-fabric-abyssal
 
       - name: Download Godot binary
         uses: actions/download-artifact@v4
@@ -67,14 +73,13 @@ jobs:
         id: go
         run: |
           godot --headless \
-            --path modules/multiplayer_fabric/demo/abyssal_vr \
+            --path multiplayer-fabric-abyssal \
             --script scripts/headless_log_observer.gd \
             -- \
             --host=${{ inputs.zone-host }} \
             --port=${{ inputs.zone-port }} \
             --dump-json=/tmp/go_entities.json \
             --frames=600
-        working-directory: modules/multiplayer_fabric/demo/abyssal_vr
         timeout-minutes: 2
 
       - name: Assert entities received
