@@ -7,12 +7,6 @@ def can_build(env, platform):
         and os.path.isfile("scene/main/fabric_zone_peer_callbacks.h")
     )
 
-    return (
-        env.get("module_sqlite_enabled", False)
-        and env.get("module_http3_enabled", False)
-        and os.path.isfile("scene/main/fabric_zone_peer_callbacks.h")
-    )
-
 
 def configure(env):
     pass
