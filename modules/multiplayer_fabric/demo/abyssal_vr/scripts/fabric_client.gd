@@ -31,7 +31,7 @@ const MARKER_OKHSL_L_BASE   := 0.62
 const MARKER_OKHSL_L_SWING  := 0.10
 
 @export var zone_host: String = "127.0.0.1"
-@export var zone_port: int = 17500
+@export var zone_port: int = 7443
 @export var entities_root: NodePath
 @export var xr_origin: NodePath = NodePath("../XROrigin3D/XRCamera3D")
 # player_id derives from the listen port offset so each of the three smoke
@@ -303,6 +303,26 @@ func spawn_stroke_knot(pos: Vector3, stroke_id: int, color: Color) -> void:
 	var rgba: int = (int(color.r * 255) << 24) | (int(color.g * 255) << 16) \
 	              | (int(color.b * 255) << 8)  |  int(color.a * 255)
 	pkt.encode_u32(52, rgba)        # payload[2]
+	_peer.set_transfer_channel(2)
+	_peer.set_transfer_mode(MultiplayerPeer.TRANSFER_MODE_UNRELIABLE)
+	_peer.put_packet(pkt)
+
+
+# Generic CH_PLAYER write. cmd goes in low byte of payload[0]; extra fills
+# payload[1..13]. cmd=0: position heartbeat; cmd=3: stroke knot.
+func send_player_input(cmd: int, pos: Vector3, extra: PackedInt32Array = PackedInt32Array()) -> void:
+	if not _peer or _peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
+		return
+	var pkt := PackedByteArray()
+	pkt.resize(100)
+	pkt.fill(0)
+	pkt.encode_u32(0, player_id)
+	pkt.encode_double(4,  pos.x)
+	pkt.encode_double(12, pos.y)
+	pkt.encode_double(20, pos.z)
+	pkt[44] = cmd & 0xFF
+	for i in range(mini(extra.size(), 13)):
+		pkt.encode_u32(48 + i * 4, extra[i])
 	_peer.set_transfer_channel(2)
 	_peer.set_transfer_mode(MultiplayerPeer.TRANSFER_MODE_UNRELIABLE)
 	_peer.put_packet(pkt)

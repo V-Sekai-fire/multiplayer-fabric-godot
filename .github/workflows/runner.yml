@@ -68,3 +68,11 @@ jobs:
     with:
       push-image: true
     secrets: inherit
+
+  headless-tests:
+    name: 🧪 Headless tests
+    needs: [linux-build, docker-images]
+    if: needs.docker-images.result == 'success'
+    uses: ./.github/workflows/headless_tests.yml
+    with:
+      godot-artifact: linux-editor-double-sanitizers

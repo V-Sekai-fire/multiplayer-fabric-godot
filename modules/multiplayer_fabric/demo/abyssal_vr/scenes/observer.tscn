@@ -1,8 +1,9 @@
-[gd_scene load_steps=8 format=3 uid="uid://observer_headless"]
+[gd_scene load_steps=9 format=3 uid="uid://observer_headless"]
 
 [ext_resource type="Script" path="res://scripts/fabric_client.gd" id="1_client"]
 [ext_resource type="Script" path="res://scripts/zone_curtain.gd" id="2_curtain"]
 [ext_resource type="Script" path="res://scripts/operator_camera.gd" id="3_operator"]
+[ext_resource type="Script" path="res://scripts/fabric_player_xr.gd" id="4_player_xr"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
 sky_horizon_color = Color(0.15, 0.20, 0.30, 1)
@@ -48,7 +49,7 @@ material_override = SubResource("ObserverMarkerMat")
 [node name="FabricClient" type="Node" parent="."]
 script = ExtResource("1_client")
 zone_host = "127.0.0.1"
-zone_port = 17500
+zone_port = 7443
 entities_root = NodePath("../Entities")
 
 [node name="StatusHUD" type="Label3D" parent="OperatorRig/CameraPivot/SpringArm3D/Camera3D"]
@@ -88,3 +89,16 @@ current = true
 projection = 1
 size = 40.0
 far = 200.0
+
+[node name="XROrigin3D" type="XROrigin3D" parent="."]
+script = ExtResource("4_player_xr")
+
+[node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D"]
+
+[node name="LeftHand" type="XRController3D" parent="XROrigin3D"]
+tracker = "left_hand"
+pose = "grip"
+
+[node name="RightHand" type="XRController3D" parent="XROrigin3D"]
+tracker = "right_hand"
+pose = "grip"
