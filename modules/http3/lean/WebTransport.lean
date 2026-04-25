@@ -130,7 +130,7 @@ theorem queue_size_non_negative (q : List Packet) : 0 ≤ q.length :=
 ## ReadableStream reader lock
 
 `ReadableStream.getReader()` acquires an exclusive lock.  A second call while
-the lock is held raises `TypeError("ReadableStream is locked")` — modelled
+the lock is held raises `TypeError("ReadableStream is locked")` — modeled
 here as returning `none`.
 
 **Buggy pattern** (old code):
