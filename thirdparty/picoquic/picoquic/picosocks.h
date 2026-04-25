@@ -55,6 +55,10 @@
 #ifndef socklen_t
 #define socklen_t int
 #endif
+#ifndef cmsghdr
+/* llvm-mingw does not alias cmsghdr → WSACMSGHDR the way MSVC SDK does */
+typedef WSACMSGHDR cmsghdr;
+#endif
 /* clang-format on */
 #else /* Linux, FreeBSD */
 

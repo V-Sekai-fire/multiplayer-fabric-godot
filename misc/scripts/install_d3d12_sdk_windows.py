@@ -8,11 +8,26 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../"))
 
 from misc.utility.color import Ansi, color_print
+
+
+def urlretrieve_retry(url, dest, retries=5, backoff=10):
+    for attempt in range(1, retries + 1):
+        try:
+            urllib.request.urlretrieve(url, dest)
+            return
+        except urllib.error.HTTPError as e:
+            if attempt == retries or e.code not in (429, 500, 502, 503, 504):
+                raise
+            print(f"  HTTP {e.code} on attempt {attempt}/{retries}, retrying in {backoff}s ...")
+            time.sleep(backoff)
+
 
 parser = argparse.ArgumentParser(description="Install D3D12 dependencies for Windows platforms.")
 parser.add_argument(
@@ -70,7 +85,7 @@ for arch in [
     if os.path.isfile(mesa_archive):
         os.remove(mesa_archive)
     print(f"Downloading Mesa NIR {mesa_filename} ...")
-    urllib.request.urlretrieve(
+    urlretrieve_retry(
         f"https://github.com/godotengine/godot-nir-static/releases/download/{mesa_version}/{mesa_filename}",
         mesa_archive,
     )
@@ -98,7 +113,7 @@ color_print(f"{Ansi.BOLD}[2/3] WinPixEventRuntime")
 if os.path.isfile(pix_archive):
     os.remove(pix_archive)
 print(f"Downloading WinPixEventRuntime {pix_version} ...")
-urllib.request.urlretrieve(f"https://www.nuget.org/api/v2/package/WinPixEventRuntime/{pix_version}", pix_archive)
+urlretrieve_retry(f"https://www.nuget.org/api/v2/package/WinPixEventRuntime/{pix_version}", pix_archive)
 if os.path.exists(pix_folder):
     print(f"Removing existing local WinPixEventRuntime installation in {pix_folder} ...")
     shutil.rmtree(pix_folder)
@@ -131,7 +146,7 @@ color_print(f"{Ansi.BOLD}[3/3] DirectX 12 Agility SDK")
 if os.path.isfile(agility_sdk_archive):
     os.remove(agility_sdk_archive)
 print(f"Downloading DirectX 12 Agility SDK {agility_sdk_version} ...")
-urllib.request.urlretrieve(
+urlretrieve_retry(
     f"https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/{agility_sdk_version}", agility_sdk_archive
 )
 if os.path.exists(agility_sdk_folder):
