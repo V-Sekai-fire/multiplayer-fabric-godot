@@ -1,0 +1,13 @@
+; Engine configuration file.
+config_version=5
+
+[application]
+
+config/name="WebTransport Client Demo"
+run/main_scene="res://wt_client_web.tscn"
+config/features=PackedStringArray("4.4")
+
+[display]
+
+window/size/viewport_width=320
+window/size/viewport_height=180

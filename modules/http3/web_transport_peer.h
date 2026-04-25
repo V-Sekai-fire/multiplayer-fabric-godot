@@ -110,6 +110,9 @@ public:
 
 	// Send a WT datagram through the session.
 	static Error (*send_wt_datagram_func)(void *ctx, const uint8_t *bytes, size_t len);
+	// Called each poll() to drain incoming datagrams from the transport into
+	// the C++ incoming queue via _push_wt_incoming_datagram().
+	static void (*poll_incoming_func)(void *ctx, WebTransportPeer *peer);
 	// Send reliable data on a new WT bidi stream (open + send + FIN).
 	static Error (*send_wt_stream_func)(void *ctx, const uint8_t *bytes, size_t len);
 

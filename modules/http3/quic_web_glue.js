@@ -5,6 +5,12 @@
  * built-in WebTransport API handles the QUIC + HTTP/3 + WT session stack.
  * This JS library is registered via env.AddJSLibraries in SCsub and
  * exposes C-callable functions that the web backend invokes.
+ *
+ * All functions carry __proxy: 'sync' because Godot's game logic runs in a
+ * pthread worker. Browser APIs (WebTransport, Promises, HEAPU8) and the
+ * $GodotWebTransport session map are only accessible on the main thread.
+ * __proxy: 'sync' makes Emscripten proxy each call to the main thread and
+ * block the worker until the return value is available.
  */
 
 const GodotWebTransport = {
@@ -18,7 +24,7 @@ const GodotWebTransport = {
 	 * Open a WebTransport session to the given URL.
 	 * Returns a session ID (> 0) on success, 0 on failure.
 	 */
-	godot_WTServerSession__proxy: 'sync',
+	godot_wt_connect__proxy: 'sync',
 	godot_wt_connect__sig: 'iii',
 	godot_wt_connect: function (p_url_ptr, p_url_len) {
 		const url = UTF8ToString(p_url_ptr, p_url_len);
@@ -72,6 +78,7 @@ const GodotWebTransport = {
 	/**
 	 * Check if the session is connected (ready promise resolved).
 	 */
+	godot_wt_is_connected__proxy: 'sync',
 	godot_wt_is_connected__sig: 'ii',
 	godot_wt_is_connected: function (p_id) {
 		const sess = GodotWebTransport._sessions[p_id];
@@ -81,6 +88,7 @@ const GodotWebTransport = {
 	/**
 	 * Check if the session is closed.
 	 */
+	godot_wt_is_closed__proxy: 'sync',
 	godot_wt_is_closed__sig: 'ii',
 	godot_wt_is_closed: function (p_id) {
 		const sess = GodotWebTransport._sessions[p_id];
@@ -90,6 +98,7 @@ const GodotWebTransport = {
 	/**
 	 * Send an unreliable datagram.
 	 */
+	godot_wt_send_datagram__proxy: 'sync',
 	godot_wt_send_datagram__sig: 'viii',
 	godot_wt_send_datagram: function (p_id, p_data_ptr, p_data_len) {
 		const sess = GodotWebTransport._sessions[p_id];
@@ -106,6 +115,7 @@ const GodotWebTransport = {
 	 * Receive a pending datagram. Returns the length written to the buffer,
 	 * or 0 if no datagram is available.
 	 */
+	godot_wt_recv_datagram__proxy: 'sync',
 	godot_wt_recv_datagram__sig: 'iiii',
 	godot_wt_recv_datagram: function (p_id, p_buf_ptr, p_buf_max) {
 		const sess = GodotWebTransport._sessions[p_id];
@@ -121,6 +131,7 @@ const GodotWebTransport = {
 	/**
 	 * Close the session.
 	 */
+	godot_wt_close__proxy: 'sync',
 	godot_wt_close__sig: 'vi',
 	godot_wt_close: function (p_id) {
 		const sess = GodotWebTransport._sessions[p_id];

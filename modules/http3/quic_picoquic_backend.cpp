@@ -1410,7 +1410,8 @@ void unregister_quic_picoquic_backend() {
 	WebTransportPeer::server_send_stream_func = nullptr;
 }
 
-#else // !GODOT_QUIC_NATIVE_BACKEND
+#elif !defined(GODOT_QUIC_WEB_BACKEND)
+// Neither native nor web backend: provide no-op stubs.
 
 void register_quic_picoquic_backend() {}
 void unregister_quic_picoquic_backend() {}

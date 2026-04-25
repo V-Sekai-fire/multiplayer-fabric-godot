@@ -111,6 +111,18 @@ Error _send_web_datagram(void *p_ctx, const uint8_t *p_bytes, size_t p_len) {
 	return OK;
 }
 
+void _web_poll_incoming(void *p_ctx, WebTransportPeer *p_peer) {
+	WebSessionCtx *ctx = static_cast<WebSessionCtx *>(p_ctx);
+	if (!ctx || !p_peer || ctx->session_state != WebTransportPeer::SESSION_OPEN) {
+		return;
+	}
+	static uint8_t buf[65536];
+	int len;
+	while ((len = godot_wt_recv_datagram(ctx->js_id, buf, (int)sizeof(buf))) > 0) {
+		p_peer->_push_wt_incoming_datagram(buf, (size_t)len);
+	}
+}
+
 Error _send_web_stream(void *p_ctx, const uint8_t *p_bytes, size_t p_len) {
 	// TODO: open a bidi stream via JS and send data.
 	// Browser WebTransport streams need async JS — deferred to a follow-up.
@@ -131,6 +143,7 @@ void register_quic_picoquic_backend() {
 	WebTransportPeer::set_session_state_func = &_set_web_session_state;
 	WebTransportPeer::send_wt_datagram_func = &_send_web_datagram;
 	WebTransportPeer::send_wt_stream_func = &_send_web_stream;
+	WebTransportPeer::poll_incoming_func = &_web_poll_incoming;
 	// QUICClient/HTTP3Client backend pointers stay null on web — those
 	// classes aren't usable from the browser (no raw QUIC).
 }
@@ -142,6 +155,7 @@ void unregister_quic_picoquic_backend() {
 	WebTransportPeer::set_session_state_func = nullptr;
 	WebTransportPeer::send_wt_datagram_func = nullptr;
 	WebTransportPeer::send_wt_stream_func = nullptr;
+	WebTransportPeer::poll_incoming_func = nullptr;
 }
 
 #endif // GODOT_QUIC_WEB_BACKEND

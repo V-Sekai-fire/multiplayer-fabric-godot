@@ -125,7 +125,10 @@ if picoquic_present and picotls_present and env["platform"] != "web":
 elif env["platform"] == "web":
     # Web target: browser supplies WebTransport + HTTP/3 via fetch()/WebTransport globals.
     # No picoquic/picotls compiled — the JS library provides the transport.
-    env_quic.AddJSLibraries([env_quic.File("quic_web_glue.js")])
+    # Use env (not env_quic) so JS_LIBS reaches platform/web/SCsub's sys_env.
+    # Use "#" prefix so the File is resolved from the project root, avoiding
+    # SCons directory confusion when add_js_libraries calls env.File() again.
+    env.Append(JS_LIBS=[File("#modules/http3/quic_web_glue.js")])
     env_quic.Append(CPPDEFINES=["GODOT_QUIC_WEB_BACKEND"])
 
 # Godot module sources

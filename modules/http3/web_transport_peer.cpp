@@ -40,6 +40,7 @@ int (*WebTransportPeer::session_state_func)(void *) = nullptr;
 void (*WebTransportPeer::set_session_state_func)(void *, int) = nullptr;
 Error (*WebTransportPeer::send_wt_datagram_func)(void *, const uint8_t *, size_t) = nullptr;
 Error (*WebTransportPeer::send_wt_stream_func)(void *, const uint8_t *, size_t) = nullptr;
+void (*WebTransportPeer::poll_incoming_func)(void *, WebTransportPeer *) = nullptr;
 Error (*WebTransportPeer::start_echo_server_func)(int) = nullptr;
 void (*WebTransportPeer::stop_echo_server_func)() = nullptr;
 Error (*WebTransportPeer::server_listen_func)(WebTransportPeer *, int, const String &, const uint8_t *, size_t, const char *) = nullptr;
@@ -301,6 +302,18 @@ void WebTransportPeer::_ingest_peer_streams() {
 void WebTransportPeer::poll() {
 	if (mode == MODE_SERVER) {
 		// Server: picoquic runs on its own thread; nothing to drive here.
+		return;
+	}
+	if (session_ctx) {
+		// Web session backend (quic is null on web): tick the state machine
+		// so godot_wt_is_connected/godot_wt_is_closed are checked each frame.
+		if (session_state_func) {
+			session_state_func(session_ctx);
+		}
+		// Drain incoming datagrams from JS into the C++ incoming queue.
+		if (poll_incoming_func) {
+			poll_incoming_func(session_ctx, this);
+		}
 		return;
 	}
 	if (quic.is_null()) {
