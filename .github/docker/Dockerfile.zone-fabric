@@ -1,10 +1,11 @@
 # syntax=docker/dockerfile:1
-# zone-fabric: Godot headless editor + zone_console management tool.
+# zone-fabric: Godot headless + GodotSharp assemblies + zone_console.
 # One container per zone process.
 #
 # Build context layout:
-#   godot-bin/    — pre-built Godot Linux editor binary from CI
-#   zone_console/ — zone_console Elixir/Rust source tree
+#   godot-bin/              — pre-built Godot Linux mono editor binary from CI
+#   godot-bin/GodotSharp/   — GodotSharp assemblies (built in CI after glue gen)
+#   zone_console/           — zone_console Elixir source tree
 
 ARG ELIXIR_IMAGE=elixir:1.17.3-otp-27
 
@@ -27,27 +28,37 @@ RUN MIX_ENV=prod mix escript.build
 FROM ubuntu:22.04
 
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+ENV DOTNET_ROOT=/usr/lib/dotnet
+ENV PATH="${DOTNET_ROOT}:${PATH}"
 
+# System libs + .NET 8 SDK (required by Godot mono for hostfxr)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 libglu1-mesa libasound2 libpulse0 \
-    libstdc++6 libgcc-s1 ca-certificates && \
+    libstdc++6 libgcc-s1 ca-certificates \
+    dotnet-sdk-8.0 && \
+    ln -sf /usr/lib/dotnet/dotnet /usr/local/bin/dotnet && \
     rm -rf /var/lib/apt/lists/* && \
     useradd -r -s /bin/bash -m -d /home/vsekai vsekai
 
-# Godot binary (pre-built in CI)
+# Godot binary (pre-built linux mono editor from CI)
 COPY godot-bin/godot.linuxbsd.editor.x86_64.mono /usr/local/bin/godot
 RUN chmod +x /usr/local/bin/godot
+
+# GodotSharp assemblies — must sit next to the binary at GodotSharp/
+# Generated in CI via:
+#   godot --headless --generate-mono-glue modules/mono/glue
+#   python3 modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin
+COPY godot-bin/GodotSharp /usr/local/bin/GodotSharp
 
 # zone_console management tool
 COPY --from=zone-console-build /build/zone_console /usr/local/bin/zone_console
 RUN chmod +x /usr/local/bin/zone_console
 
 # WebTransport port (one zone per container; map to host as needed)
-EXPOSE 54370/udp
+EXPOSE 7443/udp
 
 USER vsekai
 WORKDIR /home/vsekai
 
-# Default: run Godot headless. Override CMD or mount a project volume.
 ENTRYPOINT ["/usr/local/bin/godot", "--headless"]
 CMD []
