@@ -1,0 +1,130 @@
+# operator_camera.gd
+# Interactive operator camera following 20260425-operator-camera-2-5d.md.
+#
+# Rotation is expressed as twist/swing in [0, 1] per axis — same decomposition
+# as TransformUtil.swing_twist in the humanoid project.
+#
+#   Twist (yaw around world Y): snaps to {0.0, 0.25, 0.5, 0.75} in Survey mode.
+#   Swing (elevation pitch):     fixed at SWING_ELEVATION (55° down), never changes.
+#
+# Survey mode  — Q/E snap twist, scroll zoom, WASD pan.
+# Follow mode  — F on entity; CameraRig lerps to target, twist locked.
+# Tab          — toggle PROJECTION_ORTHOGONAL / PROJECTION_PERSPECTIVE.
+
+extends Node3D
+
+const SWING_ELEVATION := 0.153   # 55 / 360 — fixed pitch, never written at runtime
+const SNAP_STEP       := 0.25    # one cardinal step in [0, 1]
+const ZOOM_MIN        := 10.0
+const ZOOM_MAX        := 60.0
+const PAN_SPEED_SCALE := 0.5     # world-units per zoom-unit per second
+const LERP_SPEED      := 8.0     # twist lerp rate (rad/s feel)
+const FOLLOW_LERP     := 4.0     # entity follow lerp rate
+
+enum Mode { SURVEY, FOLLOW }
+
+@export var entities_root: NodePath
+@export var zone_count: int = 3
+
+var _mode: Mode = Mode.SURVEY
+var _twist: float = 0.0          # current twist, [0, 1]
+var _target_twist: float = 0.0   # snap target
+var _zoom: float = 40.0
+var _follow_target: Node3D = null
+
+@onready var _pivot:  Node3D    = $CameraPivot
+@onready var _arm:    SpringArm3D = $CameraPivot/SpringArm3D
+@onready var _camera: Camera3D  = $CameraPivot/SpringArm3D/Camera3D
+@onready var _entities: Node3D  = get_node_or_null(entities_root) if entities_root != NodePath() else null
+
+func _ready() -> void:
+	_arm.rotation.x = -SWING_ELEVATION * TAU   # fixed swing — set once
+	_arm.spring_length = _zoom
+	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	_camera.size = _zoom
+	_camera.current = true
+
+func _process(delta: float) -> void:
+	match _mode:
+		Mode.SURVEY:
+			_handle_survey_input(delta)
+			_apply_twist(delta)
+		Mode.FOLLOW:
+			_handle_follow(delta)
+
+func _handle_survey_input(delta: float) -> void:
+	# Twist — Q/E snap
+	if Input.is_action_just_pressed("ui_page_up"):   # Q
+		_target_twist = fmod(_target_twist - SNAP_STEP + 1.0, 1.0)
+	if Input.is_action_just_pressed("ui_page_down"):  # E
+		_target_twist = fmod(_target_twist + SNAP_STEP, 1.0)
+
+	# Zoom — scroll wheel
+	var scroll := Input.get_axis("ui_up", "ui_down")   # mapped to scroll in project settings
+	if scroll != 0.0:
+		_zoom = clampf(_zoom - scroll * 5.0, ZOOM_MIN, ZOOM_MAX)
+		_arm.spring_length = _zoom
+		_camera.size = _zoom
+
+	# Pan — WASD, speed proportional to zoom
+	var move := Vector2(
+		Input.get_axis("ui_left",  "ui_right"),
+		Input.get_axis("ui_accept", "ui_cancel")  # placeholder: remap to WASD in project
+	)
+	if move.length_squared() > 0.0:
+		var speed := _zoom * PAN_SPEED_SCALE * delta
+		var fwd := -_pivot.global_transform.basis.z * move.y
+		var rgt :=  _pivot.global_transform.basis.x * move.x
+		position += (fwd + rgt) * speed
+
+func _apply_twist(delta: float) -> void:
+	# Lerp current twist toward snapped target, then write to pivot Y-rotation.
+	# Wrap via shortest path in [0, 1] space.
+	var diff := fmod(_target_twist - _twist + 1.5, 1.0) - 0.5
+	_twist = fmod(_twist + diff * clampf(LERP_SPEED * delta, 0.0, 1.0) + 1.0, 1.0)
+	_pivot.rotation.y = _twist * TAU
+
+func _handle_follow(delta: float) -> void:
+	if _follow_target == null or not is_instance_valid(_follow_target):
+		_exit_follow()
+		return
+	position = position.lerp(_follow_target.global_position, clampf(FOLLOW_LERP * delta, 0.0, 1.0))
+	# Twist is frozen — _apply_twist not called.
+
+func _input(event: InputEvent) -> void:
+	# Tab — toggle projection
+	if event.is_action_pressed("ui_focus_next"):
+		if _camera.projection == Camera3D.PROJECTION_ORTHOGONAL:
+			_camera.projection = Camera3D.PROJECTION_PERSPECTIVE
+		else:
+			_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+
+	# F — enter Follow mode on nearest entity
+	if event.is_action_pressed("ui_filedialog_show_hidden"):   # remap to F
+		_enter_follow()
+
+	# Escape — exit Follow mode
+	if event.is_action_pressed("ui_cancel") and _mode == Mode.FOLLOW:
+		_exit_follow()
+
+func _enter_follow() -> void:
+	if _entities == null:
+		return
+	var nearest: Node3D = null
+	var best_sq := INF
+	for child in _entities.get_children():
+		var n := child as Node3D
+		if n == null:
+			continue
+		var d := position.distance_squared_to(n.global_position)
+		if d < best_sq:
+			best_sq = d
+			nearest = n
+	if nearest == null:
+		return
+	_follow_target = nearest
+	_mode = Mode.FOLLOW
+
+func _exit_follow() -> void:
+	_follow_target = null
+	_mode = Mode.SURVEY

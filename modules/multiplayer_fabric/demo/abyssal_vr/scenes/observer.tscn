@@ -1,8 +1,8 @@
-[gd_scene load_steps=9 format=3 uid="uid://observer_headless"]
+[gd_scene load_steps=8 format=3 uid="uid://observer_headless"]
 
 [ext_resource type="Script" path="res://scripts/fabric_client.gd" id="1_client"]
 [ext_resource type="Script" path="res://scripts/zone_curtain.gd" id="2_curtain"]
-[ext_resource type="Script" path="res://scripts/spectator_camera.gd" id="3_spectator"]
+[ext_resource type="Script" path="res://scripts/operator_camera.gd" id="3_operator"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
 sky_horizon_color = Color(0.15, 0.20, 0.30, 1)
@@ -51,7 +51,7 @@ zone_host = "127.0.0.1"
 zone_port = 17500
 entities_root = NodePath("../Entities")
 
-[node name="StatusHUD" type="Label3D" parent="SpectatorRig/SpringArm3D/Camera3D"]
+[node name="StatusHUD" type="Label3D" parent="OperatorRig/CameraPivot/SpringArm3D/Camera3D"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.6, -2.4)
 billboard = 1
 no_depth_test = true
@@ -71,18 +71,18 @@ transform = Transform3D(0.866, -0.354, 0.354, 0, 0.707, 0.707, -0.5, -0.612, 0.6
 light_energy = 1.2
 shadow_enabled = true
 
-[node name="SpectatorRig" type="Node3D" parent="."]
-script = ExtResource("3_spectator")
+[node name="OperatorRig" type="Node3D" parent="."]
+script = ExtResource("3_operator")
 entities_root = NodePath("../Entities")
 zone_count = 3
-min_distance = 30.0
-max_distance = 80.0
 
-[node name="SpringArm3D" type="SpringArm3D" parent="SpectatorRig"]
-spring_length = 45.0
+[node name="CameraPivot" type="Node3D" parent="OperatorRig"]
+
+[node name="SpringArm3D" type="SpringArm3D" parent="OperatorRig/CameraPivot"]
+spring_length = 40.0
 collision_mask = 0
 
-[node name="Camera3D" type="Camera3D" parent="SpectatorRig/SpringArm3D"]
+[node name="Camera3D" type="Camera3D" parent="OperatorRig/CameraPivot/SpringArm3D"]
 transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
 current = true
 projection = 1
