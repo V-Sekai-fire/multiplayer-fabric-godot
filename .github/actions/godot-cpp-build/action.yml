@@ -8,6 +8,7 @@ inputs:
     type: string
   scons-flags:
     description: Additional SCons flags.
+    default: scu_build=yes
     type: string
   scons-cache:
     description: The SCons cache path.
@@ -37,4 +38,4 @@ runs:
       shell: sh
       env:
         SCONS_CACHE: ${{ inputs.scons-cache }}
-      run: scons --directory=./godot-cpp/test "gdextension_dir=${{ github.workspace }}" ${{ inputs.scons-flags }} scu_build=yes
+      run: scons --directory=./godot-cpp/test "gdextension_dir=${{ github.workspace }}" ${{ inputs.scons-flags }}
