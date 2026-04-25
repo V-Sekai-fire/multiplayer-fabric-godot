@@ -1123,7 +1123,7 @@ static int _server_path_callback(picoquic_cnx_t *p_cnx, uint8_t *p_bytes, size_t
 	// Proved in lean/http3/ServerCallbackSctxNonnull.lean (fixed_sctx).
 	WTServerSessionCtx *sctx = static_cast<WTServerSessionCtx *>(
 			p_path_app_ctx ? p_path_app_ctx
-							: (p_stream_ctx ? p_stream_ctx->path_callback_ctx : nullptr));
+						   : (p_stream_ctx ? p_stream_ctx->path_callback_ctx : nullptr));
 
 	switch (p_event) {
 		case picohttp_callback_connect: {
