@@ -8,6 +8,7 @@ inputs:
     type: string
   scons-flags:
     description: Additional SCons flags.
+    default: scu_build=yes
     type: string
   scons-cache:
     description: The SCons cache path.
