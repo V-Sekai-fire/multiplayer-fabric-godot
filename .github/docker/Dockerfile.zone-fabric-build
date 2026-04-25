@@ -1,10 +1,18 @@
 # syntax=docker/dockerfile:1
-# zone-fabric-build: Builds Godot from source inside the container.
-# Uses Fedora base images (preferred over Ubuntu/Debian).
+# zone-fabric-build: Builds Godot from source using a local checkout.
+# Uses BuildKit --build-context for source dirs and --mount=type=cache for scons.
 #
-# Build context layout:
-#   godot-src/       — Godot source tree (multiplayer-fabric-godot checkout)
-#   zone_console/    — zone_console Elixir/Mix source tree
+# Build with:
+#   docker buildx build \
+#     --build-context godot-src=/path/to/multiplayer-fabric-godot \
+#     --build-context zone-console-src=/path/to/multiplayer-fabric-zone-console \
+#     -f /path/to/Dockerfile.zone-fabric-build \
+#     --cache-from type=local,src=/tmp/zone-fabric-cache \
+#     --cache-to   type=local,dest=/tmp/zone-fabric-cache,mode=max \
+#     -t zone-fabric:local .
+#
+# Scons cache is reused via BuildKit cache mount; subsequent builds skip
+# already-compiled translation units.
 
 ARG ELIXIR_IMAGE=elixir:1.17.3-otp-27
 ARG FEDORA_IMAGE=fedora:41
@@ -15,37 +23,44 @@ FROM ${ELIXIR_IMAGE} AS zone-console-build
 RUN mix local.hex --force && mix local.rebar --force
 
 WORKDIR /build
-COPY zone_console/ .
+COPY --from=zone-console-src . .
 RUN MIX_ENV=prod mix deps.get --only prod && \
     MIX_ENV=prod mix escript.build
 
 # ── Build Godot from source ───────────────────────────────────────────────────
 FROM ${FEDORA_IMAGE} AS godot-build
 
-# Build toolchain + .NET SDK
 RUN dnf install -y \
     gcc gcc-c++ make \
-    python3 python3-pip scons \
+    python3 python3-pip \
     pkgconfig \
     libX11-devel libXcursor-devel libXinerama-devel libXrandr-devel \
     libXi-devel mesa-libGL-devel mesa-libGLU-devel \
     alsa-lib-devel pulseaudio-libs-devel \
     dotnet-sdk-8.0 \
-    git ca-certificates && \
-    dnf clean all
+    ca-certificates && \
+    dnf clean all && \
+    pip3 install scons
 
 WORKDIR /godot-src
-COPY godot-src/ .
+# Copy source from named build context. Use .dockerignore-godot (see below)
+# to exclude .git, compiled objects, and old bin/ — keeps the layer small.
+COPY --from=godot-src . .
 
-RUN scons platform=linuxbsd target=editor \
+# Build with persistent scons cache mounted from the BuildKit cache store.
+RUN --mount=type=cache,target=/root/.cache/scons-godot \
+    scons platform=linuxbsd target=editor \
         module_mono_enabled=yes \
         accesskit=no \
-        -j$(nproc) 2>&1
+        cache_path=/root/.cache/scons-godot \
+        -j$(nproc)
 
+# Generate C# glue and build GodotSharp assemblies.
 RUN bin/godot.linuxbsd.editor.x86_64.mono --headless \
         --generate-mono-glue ./modules/mono/glue && \
     python3 ./modules/mono/build_scripts/build_assemblies.py \
-        --godot-output-dir=./bin --godot-platform=linuxbsd
+        --godot-output-dir=./bin \
+        --godot-platform=linuxbsd
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
 FROM ${FEDORA_IMAGE}
@@ -64,15 +79,12 @@ COPY --from=godot-build \
     /usr/local/bin/godot
 RUN chmod +x /usr/local/bin/godot
 
-# GodotSharp must sit adjacent to the binary so Godot finds it at startup.
-COPY --from=godot-build \
-    /godot-src/bin/GodotSharp \
-    /usr/local/bin/GodotSharp
+# GodotSharp must sit next to the binary so Godot finds hostfxr at startup.
+COPY --from=godot-build /godot-src/bin/GodotSharp /usr/local/bin/GodotSharp
 
 COPY --from=zone-console-build /build/zone_console /usr/local/bin/zone_console
 RUN chmod +x /usr/local/bin/zone_console
 
-# WebTransport QUIC port
 EXPOSE 7443/udp
 
 USER vsekai
