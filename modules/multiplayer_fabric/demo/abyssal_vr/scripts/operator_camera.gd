@@ -51,6 +51,7 @@ func _process(delta: float) -> void:
 			_apply_twist(delta)
 		Mode.FOLLOW:
 			_handle_follow(delta)
+	_export_state_to_js()
 
 func _handle_survey_input(delta: float) -> void:
 	# Twist — Q/E snap
@@ -131,3 +132,15 @@ func _enter_follow() -> void:
 func _exit_follow() -> void:
 	_follow_target = null
 	_mode = Mode.SURVEY
+
+func _export_state_to_js() -> void:
+	if not OS.has_feature("web"):
+		return
+	JavaScriptBridge.eval(
+		"window.__camera_state = {mode:'%s',twist:%f,zoom:%f,projection:'%s'};" % [
+			"survey" if _mode == Mode.SURVEY else "follow",
+			_twist,
+			_zoom,
+			"orthographic" if _camera.projection == Camera3D.PROJECTION_ORTHOGONAL else "perspective"
+		]
+	)
