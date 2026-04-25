@@ -1,0 +1,82 @@
+# syntax=docker/dockerfile:1
+# zone-fabric-build: Builds Godot from source inside the container.
+# Uses Fedora base images (preferred over Ubuntu/Debian).
+#
+# Build context layout:
+#   godot-src/       — Godot source tree (multiplayer-fabric-godot checkout)
+#   zone_console/    — zone_console Elixir/Mix source tree
+
+ARG ELIXIR_IMAGE=elixir:1.17.3-otp-27
+ARG FEDORA_IMAGE=fedora:41
+
+# ── Build zone_console escript ────────────────────────────────────────────────
+FROM ${ELIXIR_IMAGE} AS zone-console-build
+
+RUN mix local.hex --force && mix local.rebar --force
+
+WORKDIR /build
+COPY zone_console/ .
+RUN MIX_ENV=prod mix deps.get --only prod && \
+    MIX_ENV=prod mix escript.build
+
+# ── Build Godot from source ───────────────────────────────────────────────────
+FROM ${FEDORA_IMAGE} AS godot-build
+
+# Build toolchain + .NET SDK
+RUN dnf install -y \
+    gcc gcc-c++ make \
+    python3 python3-pip scons \
+    pkgconfig \
+    libX11-devel libXcursor-devel libXinerama-devel libXrandr-devel \
+    libXi-devel mesa-libGL-devel mesa-libGLU-devel \
+    alsa-lib-devel pulseaudio-libs-devel \
+    dotnet-sdk-8.0 \
+    git ca-certificates && \
+    dnf clean all
+
+WORKDIR /godot-src
+COPY godot-src/ .
+
+RUN scons platform=linuxbsd target=editor \
+        module_mono_enabled=yes \
+        accesskit=no \
+        -j$(nproc) 2>&1
+
+RUN bin/godot.linuxbsd.editor.x86_64.mono --headless \
+        --generate-mono-glue ./modules/mono/glue && \
+    python3 ./modules/mono/build_scripts/build_assemblies.py \
+        --godot-output-dir=./bin --godot-platform=linuxbsd
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
+FROM ${FEDORA_IMAGE}
+
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+
+RUN dnf install -y \
+    mesa-libGL mesa-libGLU alsa-lib pulseaudio-libs \
+    libstdc++ libgcc ca-certificates \
+    dotnet-runtime-8.0 && \
+    dnf clean all && \
+    useradd -r -s /bin/bash -m -d /home/vsekai vsekai
+
+COPY --from=godot-build \
+    /godot-src/bin/godot.linuxbsd.editor.x86_64.mono \
+    /usr/local/bin/godot
+RUN chmod +x /usr/local/bin/godot
+
+# GodotSharp must sit adjacent to the binary so Godot finds it at startup.
+COPY --from=godot-build \
+    /godot-src/bin/GodotSharp \
+    /usr/local/bin/GodotSharp
+
+COPY --from=zone-console-build /build/zone_console /usr/local/bin/zone_console
+RUN chmod +x /usr/local/bin/zone_console
+
+# WebTransport QUIC port
+EXPOSE 7443/udp
+
+USER vsekai
+WORKDIR /home/vsekai
+
+ENTRYPOINT ["/usr/local/bin/godot", "--headless"]
+CMD []

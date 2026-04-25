@@ -8,36 +8,29 @@
 #   zone_console/           — zone_console Elixir source tree
 
 ARG ELIXIR_IMAGE=elixir:1.17.3-otp-27
+ARG FEDORA_IMAGE=fedora:41
 
 # ── Build zone_console escript ────────────────────────────────────────────────
 FROM ${ELIXIR_IMAGE} AS zone-console-build
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-    sh -s -- -y --default-toolchain stable --profile minimal
-ENV PATH="/root/.cargo/bin:${PATH}"
 RUN mix local.hex --force && mix local.rebar --force
 
 WORKDIR /build
-COPY zone_console/mix.exs zone_console/mix.lock ./
-COPY zone_console/vendor ./vendor
-RUN MIX_ENV=prod mix deps.get --only prod
-COPY zone_console/lib ./lib
-RUN MIX_ENV=prod mix escript.build
+COPY zone_console/ .
+RUN MIX_ENV=prod mix deps.get --only prod && \
+    MIX_ENV=prod mix escript.build
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
-FROM ubuntu:22.04
+FROM ${FEDORA_IMAGE}
 
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
-ENV DOTNET_ROOT=/usr/lib/dotnet
-ENV PATH="${DOTNET_ROOT}:${PATH}"
 
-# System libs + .NET 8 SDK (required by Godot mono for hostfxr)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 libglu1-mesa libasound2 libpulse0 \
-    libstdc++6 libgcc-s1 ca-certificates \
-    dotnet-sdk-8.0 && \
-    ln -sf /usr/lib/dotnet/dotnet /usr/local/bin/dotnet && \
-    rm -rf /var/lib/apt/lists/* && \
+# .NET runtime required by Godot mono to load hostfxr at startup
+RUN dnf install -y \
+    mesa-libGL mesa-libGLU alsa-lib pulseaudio-libs \
+    libstdc++ libgcc ca-certificates \
+    dotnet-runtime-8.0 && \
+    dnf clean all && \
     useradd -r -s /bin/bash -m -d /home/vsekai vsekai
 
 # Godot binary (pre-built linux mono editor from CI)
