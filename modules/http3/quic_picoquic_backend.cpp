@@ -1117,8 +1117,13 @@ static WTServerCtx *_wt_server = nullptr;
 static int _server_path_callback(picoquic_cnx_t *p_cnx, uint8_t *p_bytes, size_t p_length,
 		picohttp_call_back_event_t p_event, struct st_h3zero_stream_ctx_t *p_stream_ctx,
 		void *p_path_app_ctx) {
+	// Prefer p_path_app_ctx (set by h3zero_declare_stream_prefix) over
+	// p_stream_ctx->path_callback_ctx: p_stream_ctx may be null when
+	// picohttp_callback_post_datagram fires via the stream-prefix route.
+	// Proved in lean/http3/ServerCallbackSctxNonnull.lean (fixed_sctx).
 	WTServerSessionCtx *sctx = static_cast<WTServerSessionCtx *>(
-			p_stream_ctx ? p_stream_ctx->path_callback_ctx : nullptr);
+			p_path_app_ctx ? p_path_app_ctx
+							: (p_stream_ctx ? p_stream_ctx->path_callback_ctx : nullptr));
 
 	switch (p_event) {
 		case picohttp_callback_connect: {

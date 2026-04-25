@@ -80,8 +80,14 @@ func _process(_delta: float) -> bool:
 	_handle_http()
 
 	# Echo all incoming packets back.
+	var count = peer.get_available_packet_count()
+	if count > 0:
+		print(JSON.stringify({"event": "recv", "count": count}))
 	while peer.get_available_packet_count() > 0:
 		var pkt = peer.get_packet()
+		var mode = peer.get_packet_mode()
+		print(JSON.stringify({"event": "echo", "len": pkt.size(), "mode": mode}))
+		peer.transfer_mode = mode
 		peer.put_packet(pkt)
 
 	return false
