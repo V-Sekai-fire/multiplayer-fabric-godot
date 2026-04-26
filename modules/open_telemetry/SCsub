@@ -6,8 +6,14 @@ Import("env_modules")
 
 env_otel = env_modules.Clone()
 
-# Add SQLite include path
-env_otel.Prepend(CPPPATH=["#modules/open_telemetry/thirdparty/sqlite"])
+# Pull in SQLite module headers so otel_exporter_sqlite.cpp can see godot_sqlite.h
+# and its transitive dependency spmemvfs.h.  Nothing from SQLite leaks into the
+# public otel_exporter_sqlite.h — only the .cpp includes godot_sqlite.h.
+env_otel.Prepend(CPPPATH=[
+    "#modules/sqlite",
+    "#modules/sqlite/src",
+    "#modules/sqlite/thirdparty",
+])
 
 module_obj = []
 

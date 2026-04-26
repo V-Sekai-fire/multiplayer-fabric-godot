@@ -8,6 +8,10 @@ CompileFlags:
   Add:
     # Some thirdparty includes seem to require a high -ferror-limit to pass checks.
     - -ferror-limit=100
+    # SQLite module paths — needed by otel_exporter_sqlite.cpp and its tests.
+    - -Imodules/sqlite
+    - -Imodules/sqlite/src
+    - -Imodules/sqlite/thirdparty
 
 Diagnostics:
   Includes:

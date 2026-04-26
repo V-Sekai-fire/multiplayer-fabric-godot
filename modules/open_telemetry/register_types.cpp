@@ -41,6 +41,7 @@
 // New structure classes
 #include "otel_document.h"
 #include "otel_exporter_file.h"
+#include "otel_exporter_sqlite.h"
 #include "otel_reflector.h"
 #include "otel_state.h"
 #include "structures/otel_log.h"
@@ -151,6 +152,7 @@ void initialize_open_telemetry_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(OTelDocument);
 	GDREGISTER_CLASS(OTelState);
 	GDREGISTER_CLASS(OTelExporterFile);
+	GDREGISTER_CLASS(OTelExporterSQLite);
 	GDREGISTER_CLASS(OTelReflector);
 }
 
