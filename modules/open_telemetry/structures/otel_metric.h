@@ -54,7 +54,6 @@ public:
 	};
 
 private:
-	String name;
 	String description;
 	String unit;
 	MetricType type = METRIC_TYPE_GAUGE;
@@ -69,10 +68,7 @@ protected:
 public:
 	OTelMetric();
 
-	// Metric metadata
-	String get_name() const;
-	void set_name(const String &p_name);
-
+	// Metric metadata — get_name()/set_name() inherited from Resource
 	String get_description() const;
 	void set_description(const String &p_description);
 
