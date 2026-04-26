@@ -1105,11 +1105,15 @@ struct WTServerCtx {
 	picoquic_network_thread_ctx_t *thread_ctx = nullptr;
 	picoquic_packet_loop_param_t loop_param{};
 	picohttp_server_parameters_t server_param{};
-	picohttp_server_path_item_t path_table[1]{};
+	// 4 paths: "/" + "/ch1" "/ch2" "/ch3" for HOL-free channel multiplexing.
+	// Mirrors the picoquic demo path_item_list[] pattern.
+	static constexpr int NUM_PATHS = 4;
+	picohttp_server_path_item_t path_table[NUM_PATHS]{};
 	WebTransportPeer *peer = nullptr;
 	WTServerSessionCtx *active_session = nullptr;
 	WorkQueue wq;
 	CharString path_cs;
+	CharString ch_cs[3]; // storage for "/ch1" "/ch2" "/ch3"
 };
 
 static WTServerCtx *_wt_server = nullptr;
@@ -1213,14 +1217,25 @@ static Error _wt_server_listen(WebTransportPeer *p_peer, int p_port, const Strin
 	_wt_server = new WTServerCtx();
 	_wt_server->peer = p_peer;
 
+	// Base path (game clients).
 	_wt_server->path_cs = p_path.utf8();
 	_wt_server->path_table[0].path = _wt_server->path_cs.get_data();
 	_wt_server->path_table[0].path_length = strlen(_wt_server->path_table[0].path);
 	_wt_server->path_table[0].path_callback = _server_path_callback;
 	_wt_server->path_table[0].path_app_ctx = nullptr;
 
+	// Channel paths ("/ch1" "/ch2" "/ch3") for HOL-free inter-zone links.
+	static const char *const channel_paths[3] = { "/ch1", "/ch2", "/ch3" };
+	for (int i = 0; i < 3; i++) {
+		_wt_server->ch_cs[i] = channel_paths[i];
+		_wt_server->path_table[1 + i].path = _wt_server->ch_cs[i].get_data();
+		_wt_server->path_table[1 + i].path_length = strlen(channel_paths[i]);
+		_wt_server->path_table[1 + i].path_callback = _server_path_callback;
+		_wt_server->path_table[1 + i].path_app_ctx = nullptr;
+	}
+
 	_wt_server->server_param.path_table = _wt_server->path_table;
-	_wt_server->server_param.path_table_nb = 1;
+	_wt_server->server_param.path_table_nb = WTServerCtx::NUM_PATHS;
 
 	_wt_server->quic = picoquic_create(8, nullptr, nullptr, nullptr,
 			"h3", h3zero_callback, &_wt_server->server_param,
