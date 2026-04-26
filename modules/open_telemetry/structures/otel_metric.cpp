@@ -33,9 +33,7 @@
 #include "core/object/class_db.h"
 
 void OTelMetric::_bind_methods() {
-	// Metadata
-	ClassDB::bind_method(D_METHOD("get_name"), &OTelMetric::get_name);
-	ClassDB::bind_method(D_METHOD("set_name", "name"), &OTelMetric::set_name);
+	// Metadata — get_name/set_name inherited from Resource, not re-registered here.
 	ClassDB::bind_method(D_METHOD("get_description"), &OTelMetric::get_description);
 	ClassDB::bind_method(D_METHOD("set_description", "description"), &OTelMetric::set_description);
 	ClassDB::bind_method(D_METHOD("get_unit"), &OTelMetric::get_unit);
@@ -53,7 +51,7 @@ void OTelMetric::_bind_methods() {
 	// Serialization
 	ClassDB::bind_method(D_METHOD("to_otlp_dict"), &OTelMetric::to_otlp_dict);
 
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "name"), "set_name", "get_name");
+	// "name" property is inherited from Resource — no need to re-add.
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "description"), "set_description", "get_description");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "unit"), "set_unit", "get_unit");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "type"), "set_metric_type", "get_metric_type");
@@ -72,15 +70,6 @@ void OTelMetric::_bind_methods() {
 }
 
 OTelMetric::OTelMetric() {
-}
-
-// Metadata
-String OTelMetric::get_name() const {
-	return name;
-}
-
-void OTelMetric::set_name(const String &p_name) {
-	name = p_name;
 }
 
 String OTelMetric::get_description() const {
@@ -132,7 +121,7 @@ void OTelMetric::add_data_point(const Dictionary &p_data_point) {
 Dictionary OTelMetric::to_otlp_dict() const {
 	Dictionary metric_dict;
 
-	metric_dict["name"] = name;
+	metric_dict["name"] = get_name();
 
 	if (!description.is_empty()) {
 		metric_dict["description"] = description;
