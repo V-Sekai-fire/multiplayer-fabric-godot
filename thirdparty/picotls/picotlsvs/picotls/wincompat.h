@@ -15,7 +15,7 @@
 #  undef __CRT_INLINE
 #  define __CRT_INLINE extern inline __attribute__((__gnu_inline__))
 #endif
-#include <Winsock2.h>
+#include <winsock2.h>
 #include <ws2tcpip.h>
 #include <malloc.h>
 
