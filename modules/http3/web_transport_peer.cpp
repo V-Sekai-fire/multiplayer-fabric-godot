@@ -1,0 +1,421 @@
+/**************************************************************************/
+/*  web_transport_peer.cpp                                                */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
+
+#include "web_transport_peer.h"
+
+#include "core/object/class_db.h"
+
+// Default: no WT-session backend registered. The picoquic module installs
+// real implementations in initialize_quic_module.
+void *(*WebTransportPeer::create_session_backend_func)(WebTransportPeer *, const char *, int, const char *) = nullptr;
+void (*WebTransportPeer::destroy_session_backend_func)(void *) = nullptr;
+int (*WebTransportPeer::session_state_func)(void *) = nullptr;
+void (*WebTransportPeer::set_session_state_func)(void *, int) = nullptr;
+Error (*WebTransportPeer::send_wt_datagram_func)(void *, const uint8_t *, size_t) = nullptr;
+Error (*WebTransportPeer::send_wt_stream_func)(void *, const uint8_t *, size_t) = nullptr;
+void (*WebTransportPeer::poll_incoming_func)(void *, WebTransportPeer *) = nullptr;
+Error (*WebTransportPeer::start_echo_server_func)(int) = nullptr;
+void (*WebTransportPeer::stop_echo_server_func)() = nullptr;
+Error (*WebTransportPeer::server_listen_func)(WebTransportPeer *, int, const String &, const uint8_t *, size_t, const char *) = nullptr;
+void (*WebTransportPeer::server_close_func)() = nullptr;
+Error (*WebTransportPeer::server_send_datagram_func)(const uint8_t *, size_t) = nullptr;
+Error (*WebTransportPeer::server_send_stream_func)(const uint8_t *, size_t) = nullptr;
+
+WebTransportPeer::WebTransportPeer() {
+	unique_id = generate_unique_id();
+}
+
+WebTransportPeer::~WebTransportPeer() {
+	close();
+}
+
+Error WebTransportPeer::create_client(const String &p_host, int p_port, const String &p_path) {
+	close();
+	if (create_session_backend_func != nullptr) {
+		// Spec-correct path: picowt_prepare_client_cnx + picowt_connect.
+		// The backend owns its own picoquic_quic_t + picoquic_cnx_t +
+		// h3zero_callback_ctx_t; we don't share the QUICClient path here.
+		session_ctx = create_session_backend_func(
+				this, p_host.utf8().get_data(), p_port, p_path.utf8().get_data());
+		if (!session_ctx) {
+			return ERR_CANT_CONNECT;
+		}
+		mode = MODE_CLIENT;
+		target_peer = 1;
+		return OK;
+	}
+	// Fallback: raw QUIC with a bespoke ALPN for in-process loopback tests.
+	quic.instantiate();
+	quic->set_alpn("webtransport");
+	Error err = quic->connect_to_host(p_host, p_port);
+	if (err != OK) {
+		quic.unref();
+		return err;
+	}
+	mode = MODE_CLIENT;
+	target_peer = 1;
+	return OK;
+}
+
+Error WebTransportPeer::create_server(int p_port, const String &p_path,
+		Ref<X509Certificate> p_cert, Ref<CryptoKey> p_key) {
+	ERR_FAIL_COND_V_MSG(!server_listen_func, ERR_UNAVAILABLE,
+			"WebTransportPeer: no server backend registered (picoquic not compiled in?)");
+	ERR_FAIL_COND_V_MSG(p_cert.is_null(), ERR_INVALID_PARAMETER, "WebTransportPeer: cert is null");
+	ERR_FAIL_COND_V_MSG(p_key.is_null(), ERR_INVALID_PARAMETER, "WebTransportPeer: key is null");
+
+	PackedByteArray der = p_cert->get_der();
+	ERR_FAIL_COND_V_MSG(der.is_empty(), ERR_CANT_CREATE, "WebTransportPeer: cert has no DER (not loaded?)");
+
+	String key_pem = p_key->save_to_string(false);
+	ERR_FAIL_COND_V_MSG(key_pem.is_empty(), ERR_CANT_CREATE, "WebTransportPeer: failed to serialize key");
+
+	mode = MODE_SERVER;
+	unique_id = 1;
+	Error err = server_listen_func(this, p_port, p_path,
+			der.ptr(), (size_t)der.size(), key_pem.utf8().get_data());
+	if (err != OK) {
+		mode = MODE_NONE;
+	}
+	return err;
+}
+
+void WebTransportPeer::_bind_quic(const Ref<QUICClient> &p_quic, Mode p_mode) {
+	quic = p_quic;
+	mode = p_mode;
+	target_peer = 1;
+}
+
+int WebTransportPeer::get_available_packet_count() const {
+	MutexLock lock(incoming_mutex);
+	return incoming.size();
+}
+
+Error WebTransportPeer::get_packet(const uint8_t **r_buffer, int &r_buffer_size) {
+	MutexLock lock(incoming_mutex);
+	if (incoming.is_empty()) {
+		return ERR_UNAVAILABLE;
+	}
+	IncomingPacket pkt = incoming.front()->get();
+	incoming.pop_front();
+
+	current_packet_bytes.resize(pkt.bytes.size());
+	if (pkt.bytes.size() > 0) {
+		memcpy(current_packet_bytes.ptrw(), pkt.bytes.ptr(), pkt.bytes.size());
+	}
+	current_mode = pkt.mode;
+	current_channel = pkt.channel;
+	current_peer = pkt.from;
+
+	*r_buffer = current_packet_bytes.ptr();
+	r_buffer_size = current_packet_bytes.size();
+	return OK;
+}
+
+void WebTransportPeer::_push_wt_incoming_datagram(const uint8_t *p_bytes, size_t p_len) {
+	IncomingPacket pkt;
+	if (p_len > 0 && p_bytes) {
+		pkt.bytes.resize(p_len);
+		memcpy(pkt.bytes.ptrw(), p_bytes, p_len);
+	}
+	pkt.mode = TRANSFER_MODE_UNRELIABLE;
+	pkt.channel = 0;
+	pkt.from = 1;
+	MutexLock lock(incoming_mutex);
+	incoming.push_back(pkt);
+}
+
+void WebTransportPeer::_push_wt_incoming_stream(const uint8_t *p_bytes, size_t p_len) {
+	IncomingPacket pkt;
+	if (p_len > 0 && p_bytes) {
+		pkt.bytes.resize(p_len);
+		memcpy(pkt.bytes.ptrw(), p_bytes, p_len);
+	}
+	pkt.mode = TRANSFER_MODE_RELIABLE;
+	pkt.channel = 0;
+	pkt.from = 1;
+	MutexLock lock(incoming_mutex);
+	incoming.push_back(pkt);
+}
+
+Error WebTransportPeer::put_packet(const uint8_t *p_buffer, int p_buffer_size) {
+	// Server mode: route through server send funcs.
+	if (mode == MODE_SERVER) {
+		if (!server_session_active) {
+			return ERR_UNCONFIGURED;
+		}
+		TransferMode m = get_transfer_mode();
+		if (m == TRANSFER_MODE_RELIABLE) {
+			ERR_FAIL_COND_V(!server_send_stream_func, ERR_UNCONFIGURED);
+			return server_send_stream_func(
+					reinterpret_cast<const uint8_t *>(p_buffer), p_buffer_size);
+		}
+		ERR_FAIL_COND_V(!server_send_datagram_func, ERR_UNCONFIGURED);
+		return server_send_datagram_func(
+				reinterpret_cast<const uint8_t *>(p_buffer), p_buffer_size);
+	}
+	// Session-backend path: route through WT-session-aware APIs.
+	if (session_ctx) {
+		if (get_session_state() != SESSION_OPEN) {
+			return ERR_UNCONFIGURED; // Session not yet established.
+		}
+		TransferMode m = get_transfer_mode();
+		if (m == TRANSFER_MODE_RELIABLE) {
+			if (send_wt_stream_func == nullptr) {
+				return ERR_UNCONFIGURED;
+			}
+			return send_wt_stream_func(session_ctx,
+					reinterpret_cast<const uint8_t *>(p_buffer), p_buffer_size);
+		}
+		if (send_wt_datagram_func == nullptr) {
+			return ERR_UNCONFIGURED;
+		}
+		return send_wt_datagram_func(session_ctx, reinterpret_cast<const uint8_t *>(p_buffer), p_buffer_size);
+	}
+	// Fallback raw-QUIC path.
+	if (quic.is_null() || quic->get_status() != QUICClient::STATUS_CONNECTED) {
+		return ERR_UNCONFIGURED;
+	}
+	PackedByteArray bytes;
+	if (p_buffer_size > 0) {
+		bytes.resize(p_buffer_size);
+		memcpy(bytes.ptrw(), p_buffer, p_buffer_size);
+	}
+	TransferMode m = get_transfer_mode();
+	if (m == TRANSFER_MODE_RELIABLE) {
+		// Each reliable packet gets a fresh bidi stream, FIN'd after the
+		// payload so the peer can detect the boundary cleanly.
+		int64_t sid = quic->open_stream(true);
+		if (sid == QUICClient::INVALID_STREAM_ID) {
+			return ERR_CANT_CREATE;
+		}
+		Error se = quic->stream_send(sid, bytes);
+		if (se != OK) {
+			return se;
+		}
+		return quic->stream_close(sid);
+	}
+	// Both UNRELIABLE and UNRELIABLE_ORDERED map to datagrams for now;
+	// adding per-packet sequence numbers for UNRELIABLE_ORDERED is a
+	// follow-up that needs a reorder buffer on the receive side.
+	return quic->send_datagram(bytes);
+}
+
+int WebTransportPeer::get_max_packet_size() const {
+	// QUIC datagram frame size practical ceiling. Streams are effectively
+	// unlimited, but Godot's multiplayer stack treats a peer's max the
+	// same for both channels, so report the tighter datagram bound.
+	return 1200;
+}
+
+void WebTransportPeer::set_target_peer(int p_peer) {
+	target_peer = p_peer;
+}
+
+int WebTransportPeer::get_packet_peer() const {
+	return current_peer;
+}
+
+MultiplayerPeer::TransferMode WebTransportPeer::get_packet_mode() const {
+	return current_mode;
+}
+
+int WebTransportPeer::get_packet_channel() const {
+	return current_channel;
+}
+
+void WebTransportPeer::_ingest_datagrams() {
+	if (quic.is_null()) {
+		return;
+	}
+	List<IncomingPacket> batch;
+	while (true) {
+		PackedByteArray d = quic->receive_datagram();
+		if (d.is_empty()) {
+			break;
+		}
+		IncomingPacket pkt;
+		pkt.bytes.resize(d.size());
+		memcpy(pkt.bytes.ptrw(), d.ptr(), d.size());
+		pkt.mode = TRANSFER_MODE_UNRELIABLE;
+		pkt.channel = 0;
+		pkt.from = 1;
+		batch.push_back(pkt);
+	}
+	if (!batch.is_empty()) {
+		MutexLock lock(incoming_mutex);
+		for (const IncomingPacket &pkt : batch) {
+			incoming.push_back(pkt);
+		}
+	}
+}
+
+void WebTransportPeer::_ingest_peer_streams() {
+	// Check streams we've already seen, then discover new ones by probing
+	// a small range of peer-initiated bidi ids. This is a scaffold — real
+	// impl needs QUICClient to expose a "new streams this tick" list.
+	if (quic.is_null()) {
+		return;
+	}
+	// Drain data from known peer streams; when the peer FINs, finalize
+	// the packet and remove from pending.
+	List<int64_t>::Element *it = pending_peer_streams.front();
+	while (it) {
+		int64_t sid = it->get();
+		List<int64_t>::Element *next = it->next();
+		PackedByteArray chunk = quic->stream_read(sid);
+		// Build up the packet in the current_packet cache keyed by sid —
+		// for this scaffold, one stream = one packet, so we require FIN
+		// before surfacing to the app.
+		if (chunk.size() > 0) {
+			IncomingPacket pkt;
+			pkt.bytes.resize(chunk.size());
+			memcpy(pkt.bytes.ptrw(), chunk.ptr(), chunk.size());
+			pkt.mode = TRANSFER_MODE_RELIABLE;
+			pkt.channel = 0;
+			pkt.from = 1;
+			MutexLock stream_lock(incoming_mutex);
+			incoming.push_back(pkt);
+		}
+		if (quic->is_stream_peer_closed(sid)) {
+			pending_peer_streams.erase(it);
+		}
+		it = next;
+	}
+}
+
+void WebTransportPeer::poll() {
+	if (mode == MODE_SERVER) {
+		// Server: picoquic runs on its own thread; nothing to drive here.
+		return;
+	}
+	if (session_ctx) {
+		// Web session backend (quic is null on web): tick the state machine
+		// so godot_wt_is_connected/godot_wt_is_closed are checked each frame.
+		if (session_state_func) {
+			session_state_func(session_ctx);
+		}
+		// Drain incoming datagrams from JS into the C++ incoming queue.
+		if (poll_incoming_func) {
+			poll_incoming_func(session_ctx, this);
+		}
+		return;
+	}
+	if (quic.is_null()) {
+		return;
+	}
+	quic->poll();
+	_ingest_datagrams();
+	_ingest_peer_streams();
+}
+
+void WebTransportPeer::close() {
+	if (mode == MODE_SERVER && server_close_func) {
+		server_close_func();
+	}
+	if (session_ctx && destroy_session_backend_func) {
+		destroy_session_backend_func(session_ctx);
+		session_ctx = nullptr;
+	}
+	if (quic.is_valid()) {
+		quic->close();
+		quic.unref();
+	}
+	mode = MODE_NONE;
+	server_session_active = false;
+	{
+		MutexLock lock(incoming_mutex);
+		incoming.clear();
+	}
+	pending_peer_streams.clear();
+	current_packet_bytes.clear();
+}
+
+void WebTransportPeer::disconnect_peer(int p_peer, bool p_force) {
+	(void)p_peer;
+	(void)p_force;
+	close();
+}
+
+bool WebTransportPeer::is_server() const {
+	return mode == MODE_SERVER;
+}
+
+int WebTransportPeer::get_unique_id() const {
+	return unique_id;
+}
+
+WebTransportPeer::SessionState WebTransportPeer::get_session_state() const {
+	if (session_ctx && session_state_func) {
+		return static_cast<SessionState>(session_state_func(session_ctx));
+	}
+	return SESSION_DISCONNECTED;
+}
+
+MultiplayerPeer::ConnectionStatus WebTransportPeer::get_connection_status() const {
+	if (mode == MODE_SERVER) {
+		return server_session_active ? CONNECTION_CONNECTED : CONNECTION_CONNECTING;
+	}
+	if (session_ctx) {
+		SessionState ss = get_session_state();
+		switch (ss) {
+			case SESSION_OPEN:
+				return CONNECTION_CONNECTED;
+			case SESSION_DISCONNECTED:
+			case SESSION_CLOSED:
+				return CONNECTION_DISCONNECTED;
+			default:
+				return CONNECTION_CONNECTING;
+		}
+	}
+	if (quic.is_null()) {
+		return CONNECTION_DISCONNECTED;
+	}
+	switch (quic->get_status()) {
+		case QUICClient::STATUS_DISCONNECTED:
+		case QUICClient::STATUS_CONNECTION_ERROR:
+			return CONNECTION_DISCONNECTED;
+		case QUICClient::STATUS_CONNECTED:
+			return CONNECTION_CONNECTED;
+		default:
+			return CONNECTION_CONNECTING;
+	}
+}
+
+void WebTransportPeer::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("create_client", "host", "port", "path"), &WebTransportPeer::create_client, DEFVAL("/"));
+	ClassDB::bind_method(D_METHOD("create_server", "port", "path", "cert", "key"), &WebTransportPeer::create_server);
+	ClassDB::bind_method(D_METHOD("get_quic"), &WebTransportPeer::get_quic);
+	// close / poll / disconnect_peer / get_* are bound by MultiplayerPeer base.
+
+	BIND_ENUM_CONSTANT(MODE_NONE);
+	BIND_ENUM_CONSTANT(MODE_CLIENT);
+	BIND_ENUM_CONSTANT(MODE_SERVER);
+}

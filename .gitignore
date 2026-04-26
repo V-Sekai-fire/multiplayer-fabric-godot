@@ -259,6 +259,7 @@ x64/
 x86/
 
 [Ww][Ii][Nn]32/
+!modules/sandbox/thirdparty/libriscv/lib/libriscv/win32/
 [Aa][Rr][Mm]/
 [Aa][Rr][Mm]64/
 bld/

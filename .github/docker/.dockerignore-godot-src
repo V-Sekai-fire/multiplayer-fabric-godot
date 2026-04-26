@@ -1,0 +1,22 @@
+# .dockerignore for the godot-src build context in Dockerfile.zone-fabric-build
+# Exclude everything that isn't needed to compile Godot on Linux.
+
+.git
+.github
+bin
+*.o
+*.a
+*.os
+*.pyc
+*.pyo
+__pycache__
+.sconsign.dblite
+.scons_cache
+.cache
+platform/android
+platform/ios
+platform/macos
+platform/web
+platform/windows
+modules/mono/glue/GodotSharp
+modules/mono/editor/Godot.NET.Sdk

@@ -1,0 +1,97 @@
+name: 🧪 Headless tests
+
+on:
+  workflow_call:
+    inputs:
+      godot-artifact:
+        description: "Linux build artifact name containing the Godot editor binary"
+        type: string
+        default: linux-editor-double-sanitizers
+      zone-host:
+        description: "Zone server hostname for the GO test"
+        type: string
+        default: "127.0.0.1"
+      zone-port:
+        description: "Zone server UDP port"
+        type: string
+        default: "7443"
+  workflow_dispatch:
+    inputs:
+      godot-artifact:
+        description: "Linux build artifact name"
+        type: string
+        default: linux-editor-double-sanitizers
+      zone-host:
+        description: "Zone server hostname"
+        type: string
+        default: "127.0.0.1"
+      zone-port:
+        description: "Zone server UDP port"
+        type: string
+        default: "7443"
+
+jobs:
+  go-test:
+    name: GO — Godot headless observer
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout engine
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Checkout abyssal project
+        uses: actions/checkout@v4
+        with:
+          repository: V-Sekai-fire/multiplayer-fabric-abyssal
+          path: multiplayer-fabric-abyssal
+
+      - name: Download Godot binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.godot-artifact }}
+          path: godot-bin
+
+      - name: Prepare Godot binary
+        run: |
+          chmod +x godot-bin/godot.*
+          BIN=$(ls godot-bin/godot.* | head -1)
+          ln -s "$PWD/$BIN" "$PWD/godot-bin/godot"
+          echo "$PWD/godot-bin" >> "$GITHUB_PATH"
+
+      - name: Start zone server
+        run: |
+          docker pull ghcr.io/${{ github.repository_owner }}/zone-fabric:latest
+          docker run -d --name zone-server \
+            -p 7443:7443/udp \
+            ghcr.io/${{ github.repository_owner }}/zone-fabric:latest
+          # Wait for zone server to start accepting connections
+          sleep 5
+
+      - name: Run GO headless test
+        id: go
+        run: |
+          godot --headless \
+            --path multiplayer-fabric-abyssal \
+            --script scripts/headless_log_observer.gd \
+            -- \
+            --host=${{ inputs.zone-host }} \
+            --port=${{ inputs.zone-port }} \
+            --dump-json=/tmp/go_entities.json \
+            --frames=600
+        timeout-minutes: 2
+
+      - name: Assert entities received
+        run: |
+          python3 -c "
+          import json, sys
+          entities = json.load(open('/tmp/go_entities.json'))
+          count = len(entities)
+          print(f'GO PASS: {count} entities received')
+          sys.exit(0 if count > 0 else 1)
+          "
+
+      - name: Stop zone server
+        if: always()
+        run: docker rm -f zone-server || true

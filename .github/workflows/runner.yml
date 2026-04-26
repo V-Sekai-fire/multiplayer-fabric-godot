@@ -56,11 +56,12 @@ jobs:
     uses: ./.github/workflows/web_builds.yml
 
   # Third stage: Docker images — only after the Linux Godot binary is ready.
+  # always() ensures sibling job failures (android, ios, etc.) do not skip this.
   docker-images:
     name: 🐳 Docker images
     needs: linux-build
-    # Only push images from tracked long-lived branches, not from PRs.
     if: >
+      always() &&
       (needs.linux-build.result == 'success') &&
       (github.ref == 'refs/heads/main' ||
        startsWith(github.ref, 'refs/heads/vsk-multiplayer-fabric'))
@@ -68,3 +69,13 @@ jobs:
     with:
       push-image: true
     secrets: inherit
+
+  headless-tests:
+    name: 🧪 Headless tests
+    needs: [linux-build, docker-images]
+    if: >
+      always() &&
+      needs.docker-images.result == 'success'
+    uses: ./.github/workflows/headless_tests.yml
+    with:
+      godot-artifact: linux-editor-double-sanitizers

@@ -1,53 +1,58 @@
 # syntax=docker/dockerfile:1
-# zone-fabric: Godot headless editor + zone_console management tool.
+# zone-fabric: Godot headless + GodotSharp assemblies + zone_console.
 # One container per zone process.
 #
 # Build context layout:
-#   godot-bin/    — pre-built Godot Linux editor binary from CI
-#   zone_console/ — zone_console Elixir/Rust source tree
+#   godot-bin/              — pre-built Godot Linux mono editor binary from CI
+#   godot-bin/GodotSharp/   — GodotSharp assemblies (built in CI after glue gen)
+#   zone_console/           — zone_console Elixir source tree
 
 ARG ELIXIR_IMAGE=elixir:1.17.3-otp-27
+ARG ALMA_IMAGE=almalinux:9
 
 # ── Build zone_console escript ────────────────────────────────────────────────
 FROM ${ELIXIR_IMAGE} AS zone-console-build
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-    sh -s -- -y --default-toolchain stable --profile minimal
-ENV PATH="/root/.cargo/bin:${PATH}"
 RUN mix local.hex --force && mix local.rebar --force
 
 WORKDIR /build
-COPY zone_console/mix.exs zone_console/mix.lock ./
-COPY zone_console/vendor ./vendor
-RUN MIX_ENV=prod mix deps.get --only prod
-COPY zone_console/lib ./lib
-RUN MIX_ENV=prod mix escript.build
+COPY zone_console/ .
+RUN MIX_ENV=prod mix deps.get --only prod && \
+    MIX_ENV=prod mix escript.build
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
-FROM ubuntu:22.04
+FROM ${ALMA_IMAGE}
 
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 libglu1-mesa libasound2 libpulse0 \
-    libstdc++6 libgcc-s1 ca-certificates && \
-    rm -rf /var/lib/apt/lists/* && \
+# .NET runtime required by Godot mono to load hostfxr at startup.
+# dotnet-runtime-8.0 is in AlmaLinux 9 AppStream; no extra repo needed.
+RUN dnf install -y \
+    mesa-libGL mesa-libGLU alsa-lib pulseaudio-libs \
+    libstdc++ libgcc ca-certificates \
+    dotnet-runtime-8.0 && \
+    dnf clean all && \
     useradd -r -s /bin/bash -m -d /home/vsekai vsekai
 
-# Godot binary (pre-built in CI)
+# Godot binary (pre-built linux mono editor from CI)
 COPY godot-bin/godot.linuxbsd.editor.x86_64.mono /usr/local/bin/godot
 RUN chmod +x /usr/local/bin/godot
+
+# GodotSharp assemblies — must sit next to the binary at GodotSharp/
+# Generated in CI via:
+#   godot --headless --generate-mono-glue modules/mono/glue
+#   python3 modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin
+COPY godot-bin/GodotSharp /usr/local/bin/GodotSharp
 
 # zone_console management tool
 COPY --from=zone-console-build /build/zone_console /usr/local/bin/zone_console
 RUN chmod +x /usr/local/bin/zone_console
 
 # WebTransport port (one zone per container; map to host as needed)
-EXPOSE 54370/udp
+EXPOSE 7443/udp
 
 USER vsekai
 WORKDIR /home/vsekai
 
-# Default: run Godot headless. Override CMD or mount a project volume.
 ENTRYPOINT ["/usr/local/bin/godot", "--headless"]
 CMD []

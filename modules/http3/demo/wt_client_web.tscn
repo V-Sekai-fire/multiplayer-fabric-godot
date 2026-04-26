@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://wt_client_web"]
+
+[ext_resource type="Script" path="res://wt_client_web.gd" id="1_wt_client"]
+
+[node name="WTClient" type="Node"]
+script = ExtResource("1_wt_client")

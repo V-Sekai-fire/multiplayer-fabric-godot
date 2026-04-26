@@ -1,0 +1,108 @@
+name: Build on push
+
+# TODO: Add mingw to matrix
+
+# Controls when the action will run. Triggers the workflow on push or pull request
+# events, but only for the master branch we'll create .zip files
+on: [push, pull_request]
+
+jobs:
+  build:
+    name: Building for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+          - os: windows-latest
+            platform: windows
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+
+    - name: Install dependencies (Ubuntu)
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -qqq build-essential pkg-config
+      if: matrix.platform == 'linux'
+
+    - name: Set up Python (for SCons)
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: Install scons
+      run: |
+        python -m pip install scons~=4.0
+
+    - name: Run the build for godot-cpp
+      run: |
+        scons -C godot-cpp platform=${{ matrix.platform }} -j2 target=template_release generate_bindings=yes bits=64
+
+    - name: Run the build for godot_openvr
+      run: |
+        scons platform=${{ matrix.platform }} -j2 target=release bits=64
+
+    # There's no option to preserve the path structure on the upload action, so we just
+    # treat each asset as its respective bin/ subfolder and put it in the right place in
+    # the next job. The names are important, they become the platform names.
+    # https://github.com/actions/upload-artifact/issues/174
+    - name: Upload Windows build results
+      uses: actions/upload-artifact@v4
+      with:
+        name: x11
+        path: demo/addons/godot-openvr/bin/x11/
+      if: matrix.platform == 'linux'
+
+    - name: Upload Linux build results
+      uses: actions/upload-artifact@v4
+      with:
+        name: win64
+        path: demo/addons/godot-openvr/bin/win64/
+      if: matrix.platform == 'windows'
+
+  # This job collects the build output and assembles the final asset (artifact)
+  asset:
+    name: Assemble release bundle
+    runs-on: ubuntu-22.04
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Giving an explicit path prevents an automatic cd into the checkout.
+          path: godot_openvr
+      - name: Create destination and populate addon resources
+        run: |
+          mkdir -p godot_openvr_plugin/addons
+          cp -r godot_openvr/demo/addons/godot-openvr godot_openvr_plugin/addons/
+      - name: Download per-platform binaries into addon
+        uses: actions/download-artifact@v4
+        with:
+          path: godot_openvr_plugin/addons/godot-openvr/bin/
+      - name: Get tag name
+        run: |
+          cd godot_openvr
+          echo "GITHUB_SHA_SHORT=$(echo ${GITHUB_REF##*/})" >> $GITHUB_ENV
+      - name: Clean up extracted files
+        run: |
+          rm -rf godot_openvr
+          mv godot_openvr_plugin godot_openvr_${{ env.GITHUB_SHA_SHORT }}
+      - name: Zip asset
+        run: |
+          zip -qq -r godot-openvr.zip .
+      - name: Create and upload asset
+        uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          artifacts: "godot-openvr.zip"
+          omitNameDuringUpdate: true
+          omitBodyDuringUpdate: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+        if: startsWith(github.ref, 'refs/tags')

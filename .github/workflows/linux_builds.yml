@@ -199,7 +199,7 @@ jobs:
         if: matrix.godot-cpp
         with:
           bin: ${{ matrix.bin }}
-          scons-flags: target=template_debug dev_build=yes verbose=yes
+          scons-flags: target=template_debug dev_build=yes verbose=yes scu_build=yes
           godot-cpp-branch: ${{ env.GODOT_CPP_BRANCH }}
 
       - name: Save Godot build cache
