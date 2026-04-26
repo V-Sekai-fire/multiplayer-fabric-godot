@@ -181,23 +181,37 @@ String OpenTelemetry::set_headers(Dictionary p_headers) {
 }
 
 String OpenTelemetry::generate_trace_id() {
-	Ref<Crypto> crypto = Crypto::create();
-	PackedByteArray random_bytes = crypto->generate_random_bytes(16);
+	// Use UUID v7 as the entropy source (timestamp-ordered, unambiguous byte length).
+	// Remove the four dashes to produce the 32-hex-char OTel trace_id.
+	String uuid = generate_uuid_v7();
 	String hex;
-	for (int i = 0; i < random_bytes.size(); i++) {
-		hex += String::num_int64(random_bytes[i], 16, false).pad_zeros(2);
+	for (int i = 0; i < uuid.length(); i++) {
+		char32_t c = uuid[i];
+		if (c != '-') {
+			hex += c;
+		}
 	}
-	return hex;
+	// Safety: truncate/pad to exactly 32 chars.
+	while (hex.length() < 32) {
+		hex += "0";
+	}
+	return hex.substr(0, 32);
 }
 
 String OpenTelemetry::generate_span_id() {
-	Ref<Crypto> crypto = Crypto::create();
-	PackedByteArray random_bytes = crypto->generate_random_bytes(8);
+	// First 64 bits (16 hex chars) of a UUID v7.
+	String uuid = generate_uuid_v7();
 	String hex;
-	for (int i = 0; i < random_bytes.size(); i++) {
-		hex += String::num_int64(random_bytes[i], 16, false).pad_zeros(2);
+	for (int i = 0; i < uuid.length(); i++) {
+		char32_t c = uuid[i];
+		if (c != '-') {
+			hex += c;
+		}
 	}
-	return hex;
+	while (hex.length() < 16) {
+		hex += "0";
+	}
+	return hex.substr(0, 16);
 }
 
 String OpenTelemetry::generate_uuid_v7() {
