@@ -343,7 +343,7 @@ void picoquic_socks_cmsg_parse(
     size_t * udp_coalesced_size)
 {
     /* Assume that msg has been filled by a call to recvmsg */
-    struct cmsghdr* cmsg;
+    WSACMSGHDR* cmsg;
     WSAMSG* msg = (WSAMSG*)vmsg;
 
     /* Get the control information */
@@ -497,7 +497,7 @@ void picoquic_socks_cmsg_parse(
 }
 
 #ifdef _WINDOWS
-static void* cmsg_format_header_return_data_ptr(WSAMSG* msg, struct cmsghdr** last_cmsg, int * control_length,
+static void* cmsg_format_header_return_data_ptr(WSAMSG* msg, WSACMSGHDR** last_cmsg, int * control_length,
     INT cmsg_level, INT cmsg_type, size_t cmsg_data_len)
 {
     void* cmsg_data_ptr = NULL;
@@ -553,7 +553,7 @@ void picoquic_socks_cmsg_format(
 {
     WSAMSG* msg = (WSAMSG*)vmsg;
     int control_length = 0;
-    struct cmsghdr* last_cmsg = NULL;
+    WSACMSGHDR* last_cmsg = NULL;
     int is_null = 0;
     /* Format the control message */
     if (addr_from != NULL && addr_from->sa_family != 0) {
